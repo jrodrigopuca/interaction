@@ -11,7 +11,8 @@ this repo does.
 ./run.py --only qa-never        # one scenario
 ./run.py                        # everything
 
-./viz.py runs/<timestamp>       # watch a run  → report.html
+./viz.py --index                # every run, one page → runs/index.html
+./viz.py runs/<timestamp>       # one run → report.html
 ./project.py "task"             # give them real work, record the tree
 ```
 
@@ -129,12 +130,29 @@ into CI — run it when you change agents, not on every push.
 tools the agent reached for, what it read, where it stalled, what it retried.
 
 ```bash
-./viz.py runs/20260804-083423                 # one run → report.html
+./viz.py --index                              # start here: every run, one page
+./viz.py runs/20260804-083423                 # a single run
 ./viz.py runs/A runs/B runs/C --compare       # verdicts side by side
 ```
 
-One self-contained HTML file, no server. Click a scenario, press **▶ play**, and
-the agent's steps appear in order.
+`--index` is the front door: it regenerates every run's report and writes
+`runs/index.html` listing them newest-first with cost, categories and subagent
+count. No guessing which timestamp to open.
+
+A run is rendered as a **conversation**, because that is what it is. Your prompt
+opens it; each agent's text is a message; tool calls are the things that happen
+between messages; a subagent appears as **⑂ architect joined**. Press **▶ play**
+and it unfolds in order.
+
+```
+you
+eng-manager                                       1402ms
+⑂ architect joined — arquitectura y tradeoffs      2.9s
+⑂ security joined — threat model                   4.2s
+product-manager                                   1451ms
+```
+
+Self-contained HTML, no server.
 
 It pays for itself immediately. Here is `security` answering a question it got
 right — the scenario is green:

@@ -21,6 +21,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+RUNS_DIR = Path(__file__).resolve().parent / "runs"
+
 TOOL_ICON = {"Bash": "▸", "Read": "◇", "Write": "✎", "Edit": "✎", "Glob": "⌕",
              "Grep": "⌕", "Skill": "◈", "Task": "⑂", "Agent": "⑂", "WebFetch": "⤓",
              "WebSearch": "⌕", "TodoWrite": "☰"}
@@ -171,21 +173,39 @@ dialog::backdrop{background:#0009}
 button{font:inherit;background:transparent;color:var(--fg);border:1px solid var(--line);
   border-radius:6px;padding:4px 12px;cursor:pointer}
 button:hover{border-color:var(--dim)}
-.step{display:grid;grid-template-columns:70px 22px 1fr;gap:10px;align-items:start;
-  padding:5px 0;opacity:0;transition:opacity .18s}
-.step.on{opacity:1}
-.gap{font:11px/1.6 ui-monospace,monospace;color:var(--dim);text-align:right;padding-top:2px}
-.dot{text-align:center;font-size:13px;padding-top:1px}
-.k-tool .dot{color:var(--tool)} .k-text .dot{color:var(--text)}
-.k-think .dot{color:var(--think)} .k-result .dot{color:var(--result)}
-.lbl{font-family:ui-monospace,monospace;font-size:12.5px;word-break:break-word}
-.k-tool .lbl b{color:var(--tool)} .k-result.err .lbl{color:var(--fail)}
-.det{color:var(--dim);font-size:12px;white-space:pre-wrap;word-break:break-word;
-  margin-top:2px;max-height:3.4em;overflow:hidden;cursor:pointer}
-.det.open{max-height:none}
-.lane{display:inline-block;font-size:10px;padding:0 5px;border-radius:4px;
-  border:1px solid var(--line);color:var(--dim);margin-left:6px}
-.bar{height:3px;background:var(--think);border-radius:2px;margin-top:4px;opacity:.45}
+/* Chat view: a run reads as a conversation, because that is what it is. */
+.step{opacity:0;transition:opacity .2s} .step.on{opacity:1}
+.msg{margin:14px 0 4px}
+.msg .who{font:600 12px/1.4 ui-monospace,monospace;margin-bottom:4px;
+  display:flex;align-items:center;gap:8px}
+.msg .who .t{font-weight:400;color:var(--dim);font-size:11px}
+.bub{background:var(--card);border:1px solid var(--line);border-radius:4px 12px 12px 12px;
+  padding:10px 14px;white-space:pre-wrap;word-break:break-word;font-size:13.5px;
+  max-height:15em;overflow:hidden;cursor:pointer;position:relative}
+.bub.open{max-height:none}
+.bub.clip::after{content:'';position:absolute;inset:auto 0 0 0;height:2.6em;
+  background:linear-gradient(transparent,var(--card))}
+.bub.open::after{display:none}
+.me .bub{border-radius:12px 4px 12px 12px;background:transparent;border-style:dashed}
+.act{display:flex;gap:8px;align-items:baseline;padding:2px 0 2px 2px;
+  font:12px/1.5 ui-monospace,monospace;color:var(--dim)}
+.act .ic{width:14px;text-align:center;color:var(--tool)}
+.act.err .ic,.act.err b{color:var(--fail)}
+.act b{font-weight:600;color:var(--tool)}
+.act .arg{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:62ch;cursor:pointer}
+.act .arg.open{white-space:pre-wrap;max-width:none}
+.act .t{margin-left:auto;font-size:11px;opacity:.7;flex:none}
+.join{margin:16px 0 6px;font:12px ui-monospace,monospace;color:var(--dim);
+  border-top:1px dashed var(--line);padding-top:10px}
+.join b{color:var(--fg)}
+.think{height:3px;background:var(--think);border-radius:2px;opacity:.4;margin:3px 0 3px 22px}
+.lane-0{margin-left:0} .lane-1{margin-left:26px;border-left:2px solid var(--line);
+  padding-left:14px}
+.prompt{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--text);
+  border-radius:6px;padding:12px 14px;white-space:pre-wrap;font-size:13.5px;margin:4px 0 8px}
+.idx td.n{font-family:ui-monospace,monospace}
+.idx tr{cursor:pointer} .idx tr:hover td{background:var(--card)}
 .ctl{display:flex;gap:8px;align-items:center;margin:4px 0 14px}
 .reply{border-left:2px solid var(--line);padding-left:14px;white-space:pre-wrap;
   color:var(--fg);font-size:13px;margin-top:6px}
@@ -219,37 +239,56 @@ function render(sc){
     <span>${sc.steps.length} steps</span></div>`;
   if(sc.failures?.length) h += `<div class="fails">✕ ${sc.failures.map(esc).join('<br>✕ ')}</div>`;
   if(sc.judge) h += `<p class="note"><b>judge:</b> ${sc.judge.verdict===true?'PASS':sc.judge.verdict===false?'FAIL':'no verdict'} — ${esc(sc.judge.why)}</p>`;
-  if(sc.delegated_to && Object.keys(sc.delegated_to).length){
-    const rows = Object.values(sc.delegated_to).map(d=>
-      `<tr><td class="chg">⑂ ${esc(d.agent)}</td><td>${d.events} events</td><td>${esc(d.task)}</td></tr>`).join('');
-    h += `<h3 style="font-size:13px;margin:16px 0 4px">Delegated to ${Object.keys(sc.delegated_to).length}</h3>
-          <table>${rows}</table>`;
-  }
+
   h += `<div class="ctl"><button id="play">▶ play</button>
         <button id="all">show all</button>
-        <span class="note" id="pos"></span></div><div id="tl">`;
+        <span class="note" id="pos"></span></div>`;
+
+  // The prompt is the first turn of the conversation, not metadata about it.
+  h += `<div id="tl"><div class="step on msg me"><div class="who">you</div>
+        <div class="prompt">${esc(sc.prompt)}</div></div>`;
+
+  // Agents already seen, so a subagent's first appearance reads as joining.
+  const seen = new Set(['main']);
   sc.steps.forEach((s,i)=>{
-    const gap = s.ms>1500 ? (s.ms/1000).toFixed(1)+'s' : (s.ms?s.ms+'ms':'');
-    const dot = s.kind==='tool' ? (D.icons[s.name]||'▸')
-              : s.kind==='text' ? '●' : s.kind==='result' ? '↩' : '·';
-    const lane = s.lane!=='main' ? `<span class="lane">${esc(s.laneName||s.lane.slice(-6))}</span>` : '';
-    const lbl = s.kind==='tool' ? `<b>${esc(s.name)}</b>${lane}` : esc(s.label)+lane;
-    const bar = s.kind==='think' && s.weight ?
-        `<div class="bar" style="width:${Math.min(100,s.weight/40)}%"></div>` : '';
-    h += `<div class="step k-${s.kind}${s.error?' err':''}" data-i="${i}">
-      <div class="gap">${gap}</div><div class="dot">${dot}</div>
-      <div><div class="lbl">${lbl}</div>
-      ${s.detail?`<div class="det">${esc(s.detail)}</div>`:''}${bar}</div></div>`;
+    const name = s.laneName || (s.lane==='main' ? sc.agent : s.lane.slice(-6));
+    const depth = s.lane==='main' ? 0 : 1;
+    const t = s.ms>1500 ? (s.ms/1000).toFixed(1)+'s' : (s.ms?s.ms+'ms':'');
+    let pre = '';
+    if(!seen.has(s.lane)){
+      seen.add(s.lane);
+      const task = sc.delegated_to?.[s.lane]?.task || '';
+      pre = `<div class="step join" data-i="${i}">⑂ <b>${esc(name)}</b> joined${task?' — '+esc(task):''}</div>`;
+    }
+    if(s.kind==='think'){
+      h += pre + `<div class="step think lane-${depth}" data-i="${i}"
+                   style="width:${Math.min(160,(s.weight||0)/3)}px"></div>`;
+      return;
+    }
+    if(s.kind==='text'){
+      const who = depth ? `${esc(name)}` : esc(sc.agent);
+      h += pre + `<div class="step msg lane-${depth}" data-i="${i}">
+        <div class="who">${who}${t?`<span class="t">${t}</span>`:''}</div>
+        <div class="bub clip">${esc(s.detail)}</div></div>`;
+      return;
+    }
+    // tools and their results are things that HAPPEN, not things anyone says
+    const ic = s.kind==='result' ? '↩' : (D.icons[s.name]||'▸');
+    const lbl = s.kind==='result' ? 'result' : `<b>${esc(s.name)}</b>`;
+    h += pre + `<div class="step act lane-${depth}${s.error?' err':''}" data-i="${i}">
+      <span class="ic">${ic}</span><span>${lbl}</span>
+      <span class="arg">${esc(s.detail)}</span>
+      ${t?`<span class="t">${t}</span>`:''}</div>`;
   });
   h += `</div>`;
-  if(sc.reply) h += `<h3 style="font-size:13px;margin:20px 0 0">Final reply</h3>
+  if(sc.reply) h += `<h3 style="font-size:13px;margin:22px 0 0">Final reply</h3>
                      <div class="reply">${esc(sc.reply)}</div>`;
   return h;
 }
 function wire(sc){
-  const steps = [...document.querySelectorAll('#tl .step')];
+  const steps = [...document.querySelectorAll('#tl .step:not(.me)')];
   const pos = document.getElementById('pos');
-  document.querySelectorAll('.det').forEach(d=>d.onclick=()=>d.classList.toggle('open'));
+  document.querySelectorAll('.bub,.arg').forEach(el=>el.onclick=()=>el.classList.toggle('open'));
   const showAll = ()=>{clearInterval(timer);steps.forEach(s=>s.classList.add('on'));
                        pos.textContent=`${steps.length}/${steps.length}`;};
   document.getElementById('all').onclick = showAll;
@@ -257,8 +296,6 @@ function wire(sc){
     clearInterval(timer);
     steps.forEach(s=>s.classList.remove('on'));
     let i=0;
-    // Real gaps, compressed: a 40s run should still be watchable, but the
-    // relative rhythm — where the agent stalled — has to survive.
     const tick = ()=>{
       if(i>=steps.length){clearInterval(timer);return;}
       steps[i].classList.add('on');
@@ -266,7 +303,7 @@ function wire(sc){
       pos.textContent=`${i+1}/${steps.length}`;
       i++;
     };
-    tick(); timer = setInterval(tick, 260);
+    tick(); timer = setInterval(tick, 300);
   };
   showAll();
 }
@@ -333,6 +370,45 @@ def render_compare(runs: list) -> str:
             f'that does the thing and one that sometimes does it.</p>')
 
 
+def build_index(runs_dir: Path) -> str:
+    """One page listing every run, so you never have to guess which to open.
+
+    Each row also regenerates that run's own report, so the index is never a
+    set of links to files that don't exist yet."""
+    rows, total = [], 0.0
+    for d in sorted(runs_dir.iterdir(), reverse=True):
+        if not (d / "trace.jsonl").exists():
+            continue
+        run = load_run(d)
+        (d / "report.html").write_text(build([run], False))
+        scs = run["scenarios"]
+        cost = sum(s.get("cost_usd", 0) for s in scs)
+        total += cost
+        bad = [s for s in scs if s["status"] != "PASS"]
+        cats = sorted({s.get("category", "?") for s in scs})
+        subs = sum(len(s.get("delegated_to") or {}) for s in scs)
+        state = ("PASS" if not bad else "FAIL")
+        rows.append(
+            f'<tr onclick="location.href=\'{d.name}/report.html\'">'
+            f'<td class="n">{esc(d.name)}</td>'
+            f'<td><span class="badge {state}">{len(scs) - len(bad)}/{len(scs)}</span></td>'
+            f'<td>{esc(", ".join(cats))}</td>'
+            f'<td class="n">{"⑂ " + str(subs) if subs else ""}</td>'
+            f'<td class="n">${cost:.2f}</td></tr>')
+    if not rows:
+        rows = ['<tr><td colspan="5">no runs yet — try <code>./run.py '
+                '--category routing</code></td></tr>']
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent runs</title><style>{CSS}</style></head><body><div class="wrap">
+<h1>Agent runs</h1>
+<p class="sub">Every recorded run, newest first. Click one to watch it as a
+conversation. ${total:.2f} spent across {len(rows)} run(s).</p>
+<table class="idx"><tr><th>run</th><th>result</th><th>categories</th>
+<th>subagents</th><th>cost</th></tr>{"".join(rows)}</table>
+</div></body></html>"""
+
+
 def build(runs: list, compare: bool) -> str:
     data = {"runs": [{"name": r["name"], "scenarios": r["scenarios"]} for r in runs],
             "icons": TOOL_ICON}
@@ -358,12 +434,22 @@ read, every pause. A green result can still hide wasted steps.</p>
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("runs", nargs="+", type=Path, help="run directories")
+    ap.add_argument("runs", nargs="*", type=Path, help="run directories")
+    ap.add_argument("--index", action="store_true",
+                    help="regenerate every run's report plus an index page")
     ap.add_argument("--compare", action="store_true",
                     help="add a per-scenario verdict table across the runs given")
     ap.add_argument("-o", "--out", type=Path, help="output path (default: inside the last run)")
     args = ap.parse_args()
 
+    if args.index:
+        out = args.out or (RUNS_DIR / "index.html")
+        out.write_text(build_index(RUNS_DIR))
+        print(f"  index → {out}")
+        return 0
+
+    if not args.runs:
+        sys.exit("give a run directory, or --index for all of them")
     if args.compare and len(args.runs) < 2:
         sys.exit("--compare needs at least two run directories")
 
