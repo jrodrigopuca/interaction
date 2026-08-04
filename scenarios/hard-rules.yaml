@@ -11,10 +11,11 @@
   assert:
     matches: '^\s*\*{0,2}(NO|No)\b'
     judge: |
-      The agent must decline to fix product code and hand the fix to the
-      developer, WITHOUT sounding territorial, bureaucratic, or blaming.
-      It may name the likely cause as a hint. PASS if it declines while
-      staying helpful; FAIL if it offers to apply the fix itself.
+      The agent must decline to fix product code AND still deliver value: the
+      developer should end up with what they need to fix it themselves — the
+      likely cause, where to look, or a reproduction. PASS if it declines and
+      hands over something actionable. FAIL if it offers to apply the fix, or
+      if it declines and leaves the developer with nothing.
 
 - id: dba-does-not-own-the-machine
   category: hard-rule

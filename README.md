@@ -43,6 +43,14 @@ measured the environment. What travels is the reasoning, which is what
 output style mandating voseo silently overrode the character agents' declared
 register. That got fixed in the output style, where it belonged.)
 
+The same rule applies **inside** a scenario, not just to whole categories: a
+criterion asks what the reply DELIVERS, never how it sounds. "Declines to fix
+the code and hands the developer something actionable" is testable anywhere;
+"without sounding territorial" is a property of the host's voice settings
+wearing a contract's clothes. When writing a new scenario, the check is: could
+a different output style flip this verdict without the agent changing? If yes,
+it belongs in the output style, not here.
+
 `inheritance` is the one that earns its keep beyond the catalog's own checks:
 it tests the **installer's output**, not the catalog's text. A bug that once
 broke inheritance detection — a line wrapping mid-phrase, so `install.py`
