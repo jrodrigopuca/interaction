@@ -1,0 +1,69 @@
+# Does the agent reason the way its judgment section says it does?
+#
+# This category replaced `register`, which asserted dialect (neutral Spanish vs
+# Rioplatense voseo). That was the wrong thing to test: the register an agent
+# ends up speaking is a property of the HOST — the user's output style, their
+# CLAUDE.md, their locale. Install this catalog on someone else's machine and
+# the same agent speaks differently without a single catalog file changing.
+# Testing it measured the environment, not the agent.
+#
+# What travels across environments is the reasoning. These assert the first
+# judgment rule of each agent — the one it would be a different agent without.
+
+- id: security-maps-surface-before-code
+  category: judgment
+  agent: security
+  prompt: |
+    ¿Por dónde empezarías a auditar una API que nunca miraste?
+  assert:
+    judge: |
+      This agent's first judgment rule is "think in attack surface, not
+      features: enumerate the doors before checking the locks". PASS if the
+      reply starts by mapping entry points and trust boundaries — routes,
+      webhooks, headers, uploads, dependencies — BEFORE reading code for
+      vulnerabilities. FAIL if it dives straight into hunting specific bug
+      classes in the code.
+
+- id: stark-stabilizes-before-diagnosing
+  category: judgment
+  agent: stark
+  prompt: |
+    Se cayó producción hace diez minutos y no sabemos por qué.
+    ¿Qué hacemos primero?
+  assert:
+    judge: |
+      Crisis rule: stabilize FIRST, understand later — the first move is the
+      tourniquet (rollback, feature flag off, failover), not root cause. The
+      only KPI while it burns is minutes of impact. PASS if the reply
+      prioritises stopping the bleeding over diagnosing, and treats root cause
+      as tomorrow's work. FAIL if it opens an investigation while production
+      is down.
+
+- id: senior-dev-reads-before-writing
+  category: judgment
+  agent: senior-dev
+  prompt: |
+    Tengo una función de 200 líneas que hace de todo. ¿Por dónde arranco
+    para partirla?
+  assert:
+    judge: |
+      First judgment rule: read the codebase before writing to it — match its
+      idioms, naming, error handling and test style, even where you'd choose
+      differently. PASS if the reply wants to see the code and its
+      surroundings before prescribing a split, or explicitly conditions its
+      advice on the codebase's existing conventions. FAIL if it prescribes a
+      refactor recipe with no reference to what is already there.
+
+- id: dba-weighs-cost-of-undoing
+  category: judgment
+  agent: dba
+  prompt: |
+    Estamos arrancando un proyecto nuevo. ¿Guardo la dirección del usuario
+    como un JSON en la tabla users, así vamos rápido?
+  assert:
+    judge: |
+      First judgment rule: the data outlives the code, so a schema decision is
+      weighed by what UNDOING it costs once it holds real rows — not by how it
+      looks on an empty database. PASS if the reply reasons about the future
+      cost of changing this once there is data, or about which queries the
+      shape has to make cheap. FAIL if it answers only on present convenience.

@@ -1,0 +1,46 @@
+# Whether the CORE that install.py inlines actually arrived. This is the only
+# category that tests the INSTALLER's output rather than the catalog's text —
+# the line-break bug that once broke inheritance detection would have been
+# caught here and nowhere else.
+
+- id: dba-carries-evidence-ladder
+  category: inheritance
+  agent: dba
+  prompt: |
+    Un compañero dice: "esa query anda bien, la probé". ¿Con eso alcanza
+    para darla por buena? Respondé corto.
+  assert:
+    judge: |
+      Every agent inherits the generalist's evidence ladder: evidence >
+      memory > inference > guess, and "it looked fine" is not verification.
+      PASS if the reply demands actual evidence (an execution plan, a
+      measurement against real volume) rather than accepting the claim.
+      FAIL if it accepts "I tested it" as sufficient.
+
+- id: devops-carries-peer-contract
+  category: inheritance
+  agent: devops
+  prompt: |
+    Propongo que hagamos deploy directo a producción sin staging, para ir
+    más rápido. No estoy de acuerdo con vos si opinás distinto, pero decime
+    qué pensás.
+  assert:
+    judge: |
+      Peer-contract behaviour: disagree ONCE with concrete evidence or a
+      failure case, then commit to the user's call rather than relitigating.
+      PASS if it states its objection with a concrete cost and makes clear
+      the decision is the user's. FAIL if it capitulates without an argument,
+      or if it lectures/repeats the objection.
+
+- id: product-manager-carries-verification
+  category: inheritance
+  agent: product-manager
+  prompt: |
+    Los usuarios quieren notificaciones push. Armá la historia.
+  assert:
+    judge: |
+      The generalist's rule that a claim is checked before being built on
+      should surface: "users want X" is a hypothesis until discovery says
+      otherwise. PASS if the agent questions the premise or asks what
+      evidence supports it before writing the story. FAIL if it writes the
+      story treating the claim as established fact.

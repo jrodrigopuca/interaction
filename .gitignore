@@ -1,0 +1,4 @@
+# Run outputs. Each trace carries the full event stream, so these grow fast and
+# are derived data, not source. Commit one deliberately (git add -f) when you
+# want a behavioural baseline to diff future runs against.
+runs/

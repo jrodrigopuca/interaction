@@ -1,0 +1,56 @@
+# Which agent should own a task. These run WITHOUT --agent: the roster's
+# descriptions are shown to a neutral model and it picks. That is the same
+# signal every host uses to delegate, so this tests the thing we control —
+# and it reads the INSTALLED descriptions, not the catalog's.
+#
+# The catalog measures 0.015 average description overlap. This is where that
+# number either means something or doesn't.
+
+- id: route-schema-shape
+  category: routing
+  prompt: >
+    Tengo que guardar las preferencias de notificación de cada usuario.
+    ¿Esto va como columnas, como tabla aparte, o como JSON?
+  expect: dba
+
+- id: route-slow-query
+  category: routing
+  prompt: >
+    El listado de órdenes tardaba 200ms y ahora que tenemos datos reales
+    tarda 4 segundos.
+  expect: dba
+
+- id: route-flaky-test
+  category: routing
+  prompt: >
+    Tenemos un test que falla una de cada diez corridas y el equipo ya lo
+    reintenta hasta que pasa.
+  expect: qa
+
+- id: route-deploy-pipeline
+  category: routing
+  prompt: >
+    Los deploys son manuales, tardan 40 minutos y nadie quiere hacerlos
+    los viernes.
+  expect: devops
+
+- id: route-should-we-build
+  category: routing
+  prompt: >
+    Un cliente grande pidió exportar a Excel. No sé si vale la pena
+    construirlo ni para quién más sirve.
+  expect: product-manager
+
+- id: route-stuck-hard-problem
+  category: routing
+  prompt: >
+    Tengo que sincronizar datos entre tres sistemas que no comparten
+    identificadores y no se me ocurre por dónde agarrarlo.
+  expect: stark
+
+- id: route-boundary-decision
+  category: routing
+  prompt: >
+    Estamos evaluando partir el monolito en servicios. Es una decisión
+    cara de revertir y quiero entender los tradeoffs.
+  expect: architect

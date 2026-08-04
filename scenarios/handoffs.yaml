@@ -1,0 +1,68 @@
+# Whether an agent knows where work goes when it stops being its own. These
+# mirror the edges GRAPH.md draws from the files — this asserts the agent
+# actually acts on them.
+
+- id: dba-routes-deploy-to-devops
+  category: handoff
+  agent: dba
+  # The first version of this asked only "¿cómo lo encaramos?" and then asserted
+  # the word "devops". The agent answered the contract perfectly — refused the
+  # rename, prescribed expand/contract, handed the rollout back — without ever
+  # typing that word, so a correct reply failed. Asking a HOW question and
+  # grading a WHO answer measures vocabulary, not behaviour. The prompt now asks
+  # both halves, which is also what its three sibling scenarios do.
+  prompt: |
+    Hay que renombrar la columna `user_email` a `email` en una tabla con
+    12 millones de filas, y el release sale el viernes. ¿Cómo lo encaramos,
+    y quién se encarga de sacarlo a producción?
+  assert:
+    contains: ["devops"]
+    judge: |
+      The agent must (a) refuse the in-place rename and prescribe
+      expand/contract as separately deployable steps, and (b) state that the
+      DEPLOY strategy is devops's to execute within the constraint it sets.
+      PASS if both are present. FAIL if it treats the rollout as its own job
+      or accepts the rename as a single step.
+
+- id: senior-dev-routes-schema-to-dba
+  category: handoff
+  agent: senior-dev
+  prompt: |
+    Voy a agregar preferencias de notificación por usuario. Estaba pensando
+    guardarlas como un JSON en una columna de la tabla users. ¿Te parece?
+  assert:
+    contains: ["dba"]
+    judge: |
+      The agent may have an opinion, but the shape of persisted data is the
+      dba's call and it must say so. PASS if it routes the schema decision
+      to dba while remaining a useful peer about the application side.
+      FAIL if it decides the data model alone.
+
+- id: security-routes-functional-bug-to-qa
+  category: handoff
+  agent: security
+  prompt: |
+    Auditando el carrito encontré que si hacés doble click en "pagar" se
+    cobra dos veces. No hay implicancia de seguridad, es un bug funcional.
+    ¿Qué hacés con ese hallazgo?
+  assert:
+    contains: ["qa"]
+    judge: |
+      A finding that turns out to be functional rather than security-relevant
+      routes to qa — it is still a bug, just not this agent's. PASS if it
+      routes to qa without dropping the finding. FAIL if it keeps it or
+      discards it.
+
+- id: ux-ui-routes-native-to-apple-dev
+  category: handoff
+  agent: ux-ui
+  prompt: |
+    Diseñé la pantalla de ajustes. Ahora hay que implementarla en la app
+    nativa de iOS. ¿A quién se la paso y qué le entrego?
+  assert:
+    contains: ["apple-dev"]
+    judge: |
+      Native iOS implementation goes to apple-dev, not to the web peer.
+      PASS if it names apple-dev and describes what accompanies the handoff
+      (states, tokens, behaviour). FAIL if it routes to senior-dev or keeps
+      the implementation.
