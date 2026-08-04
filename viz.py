@@ -370,12 +370,26 @@ def render_compare(runs: list) -> str:
             f'that does the thing and one that sometimes does it.</p>')
 
 
+def current_scenario_ids(root: Path) -> set:
+    """Scenario ids defined right now, so historical runs can be labelled."""
+    try:
+        import yaml
+    except ImportError:
+        return set()
+    out = set()
+    for f in sorted((root / "scenarios").glob("*.yaml")):
+        for s in yaml.safe_load(f.read_text()) or []:
+            out.add(s["id"])
+    return out
+
+
 def build_index(runs_dir: Path) -> str:
     """One page listing every run, so you never have to guess which to open.
 
     Each row also regenerates that run's own report, so the index is never a
     set of links to files that don't exist yet."""
-    rows, total = [], 0.0
+    current = current_scenario_ids(runs_dir.parent)
+    rows, total, historical = [], 0.0, 0
     for d in sorted(runs_dir.iterdir(), reverse=True):
         if not (d / "trace.jsonl").exists():
             continue
@@ -388,11 +402,22 @@ def build_index(runs_dir: Path) -> str:
         cats = sorted({s.get("category", "?") for s in scs})
         subs = sum(len(s.get("delegated_to") or {}) for s in scs)
         state = ("PASS" if not bad else "FAIL")
+        # A run judged against scenarios that no longer exist is history, not a
+        # baseline: comparing a future run to it reads a verdict from criteria
+        # nobody kept. Say so rather than deleting the evidence.
+        stale = current and [s for s in scs
+                             if s["id"] not in current
+                             and not s["id"].startswith("project-")]
+        if stale:
+            historical += 1
         rows.append(
             f'<tr onclick="location.href=\'{d.name}/report.html\'">'
             f'<td class="n">{esc(d.name)}</td>'
             f'<td><span class="badge {state}">{len(scs) - len(bad)}/{len(scs)}</span></td>'
-            f'<td>{esc(", ".join(cats))}</td>'
+            f'<td>{esc(", ".join(cats))}'
+            + (f'<br><span class="note">historical — {len(stale)} scenario(s) '
+               f'no longer defined</span>' if stale else '') +
+            f'</td>'
             f'<td class="n">{"⑂ " + str(subs) if subs else ""}</td>'
             f'<td class="n">${cost:.2f}</td></tr>')
     if not rows:
@@ -403,7 +428,8 @@ def build_index(runs_dir: Path) -> str:
 <title>agent runs</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>Agent runs</h1>
 <p class="sub">Every recorded run, newest first. Click one to watch it as a
-conversation. ${total:.2f} spent across {len(rows)} run(s).</p>
+conversation. ${total:.2f} spent across {len(rows)} run(s)
+{f"· {historical} historical (scenarios since changed — kept as evidence, not as a baseline)" if historical else ""}.</p>
 <table class="idx"><tr><th>run</th><th>result</th><th>categories</th>
 <th>subagents</th><th>cost</th></tr>{"".join(rows)}</table>
 </div></body></html>"""
