@@ -108,7 +108,8 @@ class Reply:
     error: str = ""
 
 
-def ask(prompt: str, agent: str = "", model: str = "") -> Reply:
+def ask(prompt: str, agent: str = "", model: str = "",
+        forward_subagents: bool = False) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -119,6 +120,11 @@ def ask(prompt: str, agent: str = "", model: str = "") -> Reply:
         cmd += ["--agent", agent]
     if model:
         cmd += ["--model", model]
+    if forward_subagents:
+        # Makes a spawned subagent's messages appear in the stream with
+        # parent_tool_use_id set, instead of being collapsed into one tool
+        # result. Without it there is no delegation tree to see.
+        cmd.append("--forward-subagent-text")
     cmd.append(prompt)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)

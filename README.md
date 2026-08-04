@@ -10,7 +10,14 @@ this repo does.
 ./run.py --category routing     # one category
 ./run.py --only qa-never        # one scenario
 ./run.py                        # everything
+
+./viz.py runs/<timestamp>       # watch a run  → report.html
+./project.py "task"             # give them real work, record the tree
 ```
+
+Three tools, three questions: `run.py` asks *did it honour its contract*,
+`viz.py` asks *what did it actually do*, `project.py` asks *how do they work
+together*.
 
 ## What it asserts
 
@@ -116,6 +123,91 @@ So: separate calls, run in parallel (`--jobs`). A full suite is 22 scenarios /
 ~37 calls. Use `--category` and `--only` while iterating, and don't wire this
 into CI — run it when you change agents, not on every push.
 
+## Watching the work
+
+`run.py` tells you whether a contract held. It cannot show you the WORK — which
+tools the agent reached for, what it read, where it stalled, what it retried.
+
+```bash
+./viz.py runs/20260804-083423                 # one run → report.html
+./viz.py runs/A runs/B runs/C --compare       # verdicts side by side
+```
+
+One self-contained HTML file, no server. Click a scenario, press **▶ play**, and
+the agent's steps appear in order.
+
+It pays for itself immediately. Here is `security` answering a question it got
+right — the scenario is green:
+
+```
+tool    Read    ~/.claude/agents/security/skills/threat-modeling/…
+result          File does not exist
+tool    Bash    fd -t d threat-modeling ~/.claude
+result          /Users/juan/.claude/skills/threat-modeling/
+tool    Read    ~/.claude/skills/threat-modeling/SKILL.md
+```
+
+The agent tried a catalog-relative path, failed, and spent two extra calls
+hunting for the skill. The assertion passed because the *content* was right.
+Nothing but the trace shows the waste.
+
+`--compare` answers a different question: **was that pass real, or a sample?**
+
+```
+stark-speaks-neutral  ← unstable    PASS   FAIL   PASS
+```
+
+That scenario passed, then failed on a re-run of the identical prompt. One run
+is an anecdote. A scenario that flips was never passing — it was sampling.
+
+## Watching them work together
+
+`run.py` tests one agent at a time. `project.py` hands a real, multi-specialty
+task to an orchestrator and records the whole tree.
+
+```bash
+./project.py "Necesitamos checkout con pagos"              # does it delegate on its own?
+./project.py "Diseñá el plan de checkout" --delegate       # can it, when asked?
+./viz.py runs/<timestamp>                                  # watch it
+```
+
+Those are two different questions, and running them separately is the point.
+The answers, measured:
+
+| | Result |
+|---|---|
+| **Does it delegate unprompted?** | **No.** It names the specialists in prose and stops there. |
+| **Can it, when asked?** | **Yes.** Seven subagents in parallel, sensibly split. |
+
+Both are correct. The catalog's agents are advisory by design — `validate.py`
+forbids them from assuming they can invoke another agent, because not every host
+can. When the host *can*, the delegation works; it just isn't assumed.
+
+A real tree from `eng-manager`, 68 steps across 8 lanes:
+
+```
+main                47 steps
+  ⑂ product-manager    scope and backlog
+  ⑂ architect          architecture and payment tradeoffs
+  ⑂ security           threat model
+  ⑂ dba                order and payment data model
+  ⑂ ux-ui              checkout flow
+  ⑂ qa                 test strategy and broken paths
+  ⑂ devops             deploy, observability, webhooks
+```
+
+`viz.py` needs no changes for this: `parent_tool_use_id` was always the lane, so
+a flat trace and a delegation tree are the same rendering with different data.
+
+**It costs about 4× a single-agent run** ($3.06 vs $0.69 in the run above) —
+each subagent opens its own session and pays its own cache creation.
+
+One warning from building it: the spawn tool is named `Agent` in current CLI
+versions and `Task` in older ones. Detecting only one of them reported "no
+delegation" on a run that had spawned seven subagents. The detector now accepts
+both — and it is a reminder that the instrument fails more often than the thing
+being measured.
+
 ## Reading a failure
 
 Every run writes to `runs/<timestamp>/`:
@@ -137,16 +229,11 @@ interaction can be reconstructed and visualised later.
 
 Phase 1 of three:
 
-1. **Harness** — contracts asserted, traces emitted. *(this)*
-2. **Visualiser** — read the traces, render who did what, when, and what it
-   cost: lanes per agent, playback, handoff arrows.
-3. **Project mode** — give `eng-manager` a real task and let it delegate
-   through the `Task` tool, recording the whole tree. The measurement above
-   confirms that architecture works: three subagents produced three distinct
-   `parent_tool_use_id` values. It is the wrong shape for cheap contract tests
-   and the right one for watching agents work.
+1. **Harness** — contracts asserted, traces emitted. ✅
+2. **Visualiser** — `viz.py`, single run and cross-run comparison. ✅
+3. **Project mode** — `project.py`, real tasks with the full delegation tree. ✅
 
-   Worth knowing before that phase: today the catalog's handoffs are
-   **advisory**. Agents name who owns a problem rather than invoking them — by
-   design, since not every host can spawn an agent. So a delegation tree stays
-   flat unless a scenario explicitly asks for orchestration.
+What none of the three does, deliberately: judge whether the work was any
+*good*. These assert contracts and show the shape of the work. "Is this a good
+plan?" is not a thing a harness can answer, and promising otherwise would be
+the kind of claim the catalog itself tells agents not to make.
