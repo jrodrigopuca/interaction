@@ -44,3 +44,21 @@
       otherwise. PASS if the agent questions the premise or asks what
       evidence supports it before writing the story. FAIL if it writes the
       story treating the claim as established fact.
+
+# Added after a project run caught ux-ui saying "no pude leer los skills de mi
+# catálogo — voy con criterio propio" and answering WITHOUT them. The installed
+# agent's skills table listed catalog-relative paths that resolve to nothing
+# once the agent is a flat file; install.py now dereferences them to names.
+# Like the rest of this category, it tests the installer's output.
+- id: agent-can-reach-own-skills
+  category: inheritance
+  agent: ux-ui
+  prompt: |
+    ¿Cuáles son tus skills propias y podés acceder a ellas en esta máquina?
+    Verificá antes de responder.
+  assert:
+    judge: |
+      The agent must name its own skills AND confirm it can actually reach them
+      after checking — not merely list them from its prompt. PASS if it verifies
+      access (or names where they live, having looked). FAIL if it reports it
+      cannot read them, or says it will work from its own judgment instead.
