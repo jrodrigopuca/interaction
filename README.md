@@ -234,6 +234,31 @@ delegation" on a run that had spawned seven subagents. The detector now accepts
 both — and it is a reminder that the instrument fails more often than the thing
 being measured.
 
+## Why the deterministic assertions are so few
+
+Every `contains` here is a cheap **necessary** condition — the target's name has
+to appear — and every one of them is paired with a judge that decides whether it
+appeared for the right reason. The substring never carries a verdict alone.
+
+There is almost no `not_contains`, and that is deliberate. A substring cannot
+tell *invited* from *explicitly ruled out*, and in this catalog the exclusions
+are the valuable part of an answer. Three real examples, all of which failed
+correct replies before the assertion was removed:
+
+```
+"visionary y gamification NO — esto no es un problema de retención"
+"no escribo el payload que exfiltrate los hashes; te doy el PoC mínimo"
+"esto no se arregla con un componente React: es motivación"
+```
+
+Each one is the behaviour the scenario wanted, and each one tripped a
+`not_contains` looking for the very word the agent used to reject it.
+
+The rule that came out of it: **a deterministic assertion may check that
+something is PRESENT; whether something belongs is a judgment.** Grepping for
+absence measures vocabulary, and vocabulary is not what any of these contracts
+are about.
+
 ## Reading a failure
 
 Every run writes to `runs/<timestamp>/`:

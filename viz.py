@@ -40,7 +40,7 @@ def parse_ts(value):
         return None
 
 
-def steps_from(events: list) -> list:
+def steps_from(events: list, spawns: set = frozenset()) -> list:
     """Flatten Claude's event stream into a readable sequence.
 
     Only `assistant` and `user` events carry timestamps; the `system` ones that
@@ -52,6 +52,17 @@ def steps_from(events: list) -> list:
     other value is a subagent it spawned. Today's harness traces are single-lane;
     the same rendering shows a delegation tree the moment one isn't."""
     steps, prev_ts = [], None
+
+    def push(step):
+        # Consecutive thinking in one lane is one pause, not twenty. Twenty bars
+        # in a row is a wall that buries the conversation running through it.
+        if (step["kind"] == "think" and steps and steps[-1]["kind"] == "think"
+                and steps[-1]["lane"] == step["lane"]):
+            steps[-1]["weight"] += step["weight"]
+            steps[-1]["detail"] = f'{steps[-1]["weight"]} tokens'
+            return
+        steps.append(step)
+
     for ev in events:
         kind = ev.get("type")
         lane = ev.get("parent_tool_use_id") or "main"
@@ -63,41 +74,50 @@ def steps_from(events: list) -> list:
         if kind == "system" and ev.get("subtype") == "thinking_tokens":
             delta = ev.get("estimated_tokens_delta") or 0
             if delta:
-                steps.append({"kind": "think", "lane": lane, "label": "thinking",
-                              "detail": f"{delta} tokens", "weight": delta, "ms": 0})
+                push({"kind": "think", "lane": lane, "label": "thinking",
+                      "detail": f"{delta} tokens", "weight": delta, "ms": 0})
             continue
 
         if kind == "assistant":
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
                     name = block.get("name", "tool")
+                    # Spawning is already shown as "⑂ X joined"; drawing the
+                    # tool call too says the same thing twice.
+                    if name in ("Task", "Agent"):
+                        continue
                     arg = block.get("input", {})
                     hint = (arg.get("command") or arg.get("file_path")
                             or arg.get("pattern") or arg.get("description")
                             or arg.get("skill") or "")
-                    steps.append({"kind": "tool", "lane": lane, "name": name,
+                    push({"kind": "tool", "lane": lane, "name": name,
                                   "label": f"{name}", "detail": str(hint),
-                                  "full": json.dumps(arg, ensure_ascii=False, indent=2),
-                                  "ms": gap})
+                          "full": json.dumps(arg, ensure_ascii=False, indent=2),
+                          "ms": gap})
                 elif block.get("type") == "text" and block.get("text", "").strip():
                     text = block["text"].strip()
-                    steps.append({"kind": "text", "lane": lane,
-                                  "label": text.split("\n")[0][:90],
-                                  "detail": text, "ms": gap})
+                    push({"kind": "text", "lane": lane,
+                          "label": text.split("\n")[0][:90],
+                          "detail": text, "ms": gap})
 
         elif kind == "user":
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_result":
+                    # A subagent's return IS the message it just posted in its
+                    # own lane. Rendering both makes every specialist speak
+                    # twice — once as itself, once as data handed to the parent.
+                    if block.get("tool_use_id") in spawns:
+                        continue
                     body = block.get("content")
                     if isinstance(body, list):
                         body = " ".join(b.get("text", "") for b in body
                                         if isinstance(b, dict))
                     body = str(body or "")
-                    steps.append({"kind": "result", "lane": lane,
-                                  "label": "result",
-                                  "detail": body[:4000],
-                                  "error": bool(block.get("is_error")),
-                                  "ms": gap})
+                    push({"kind": "result", "lane": lane,
+                          "label": "result",
+                          "detail": body[:4000],
+                          "error": bool(block.get("is_error")),
+                          "ms": gap})
     return steps
 
 
@@ -111,7 +131,7 @@ def load_run(path: Path) -> dict:
             continue
         rec = json.loads(line)
         events = rec.pop("events", [])
-        rec["steps"] = steps_from(events)
+        rec["steps"] = steps_from(events, set(rec.get("delegated_to") or {}))
         # A lane id means nothing on screen. project.py records which subagent
         # each spawn id belongs to, so relabel the lanes with agent names.
         names = {k: v.get("agent", "?") for k, v in (rec.get("delegated_to") or {}).items()}
@@ -187,6 +207,16 @@ button:hover{border-color:var(--dim)}
   background:linear-gradient(transparent,var(--card))}
 .bub.open::after{display:none}
 .me .bub{border-radius:12px 4px 12px 12px;background:transparent;border-style:dashed}
+/* One colour per speaker, stable across runs: in a group chat you track who
+   is talking by colour before you read the name. */
+.msg .who{color:var(--spk)}
+.bub{border-left:3px solid var(--spk)}
+.act .ic,.act b{color:var(--spk)}
+.join b{color:var(--spk)}
+.final .bub{border-color:var(--pass);max-height:none}
+.final .bub::after{display:none}
+.tag{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--pass);
+  border:1px solid currentColor;border-radius:99px;padding:0 6px}
 .act{display:flex;gap:8px;align-items:baseline;padding:2px 0 2px 2px;
   font:12px/1.5 ui-monospace,monospace;color:var(--dim)}
 .act .ic{width:14px;text-align:center;color:var(--tool)}
@@ -221,6 +251,15 @@ JS = """
 const D = DATA;
 const esc = s => (s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const dlg = document.getElementById('d');
+// One colour per speaker, assigned in the order they first appear. Hashing the
+// name was stable across runs but collided WITHIN one — two specialists sharing
+// a colour in the same conversation defeats the point of colouring at all.
+const HUES=[210,145,275,25,330,190,95,55,255,165,300,120];
+let SPK = new Map();
+const spk = n => {
+  if(!SPK.has(n)) SPK.set(n, HUES[SPK.size % HUES.length]);
+  return `--spk:hsl(${SPK.get(n)} 55% 45%)`;
+};
 let timer = null;
 
 function openScenario(runIdx, id){
@@ -231,6 +270,7 @@ function openScenario(runIdx, id){
   dlg.showModal();
 }
 function render(sc){
+  SPK = new Map();          // colours are per-conversation
   let h = `<div class="meta" style="margin-bottom:10px">
     <span class="badge ${sc.status}">${sc.status}</span>
     <span>agent <b>${esc(sc.agent)}</b></span>
@@ -250,6 +290,8 @@ function render(sc){
 
   // Agents already seen, so a subagent's first appearance reads as joining.
   const seen = new Set(['main']);
+  // The last text step IS the final reply — showing both duplicates it.
+  const lastText = [...sc.steps].reverse().find(s=>s.kind==='text');
   sc.steps.forEach((s,i)=>{
     const name = s.laneName || (s.lane==='main' ? sc.agent : s.lane.slice(-6));
     const depth = s.lane==='main' ? 0 : 1;
@@ -258,7 +300,7 @@ function render(sc){
     if(!seen.has(s.lane)){
       seen.add(s.lane);
       const task = sc.delegated_to?.[s.lane]?.task || '';
-      pre = `<div class="step join" data-i="${i}">⑂ <b>${esc(name)}</b> joined${task?' — '+esc(task):''}</div>`;
+      pre = `<div class="step join" data-i="${i}" style="${spk(name)}">⑂ <b>${esc(name)}</b> joined${task?' — '+esc(task):''}</div>`;
     }
     if(s.kind==='think'){
       h += pre + `<div class="step think lane-${depth}" data-i="${i}"
@@ -267,22 +309,26 @@ function render(sc){
     }
     if(s.kind==='text'){
       const who = depth ? `${esc(name)}` : esc(sc.agent);
-      h += pre + `<div class="step msg lane-${depth}" data-i="${i}">
-        <div class="who">${who}${t?`<span class="t">${t}</span>`:''}</div>
+      const fin = s===lastText ? ' final' : '';
+      h += pre + `<div class="step msg lane-${depth}${fin}" data-i="${i}" style="${spk(who)}">
+        <div class="who">${who}${fin?'<span class="tag">answer</span>':''}${t?`<span class="t">${t}</span>`:''}</div>
         <div class="bub clip">${esc(s.detail)}</div></div>`;
       return;
     }
     // tools and their results are things that HAPPEN, not things anyone says
     const ic = s.kind==='result' ? '↩' : (D.icons[s.name]||'▸');
     const lbl = s.kind==='result' ? 'result' : `<b>${esc(s.name)}</b>`;
-    h += pre + `<div class="step act lane-${depth}${s.error?' err':''}" data-i="${i}">
+    h += pre + `<div class="step act lane-${depth}${s.error?' err':''}" data-i="${i}" style="${spk(name==='main'?sc.agent:name)}">
       <span class="ic">${ic}</span><span>${lbl}</span>
       <span class="arg">${esc(s.detail)}</span>
       ${t?`<span class="t">${t}</span>`:''}</div>`;
   });
   h += `</div>`;
-  if(sc.reply) h += `<h3 style="font-size:13px;margin:22px 0 0">Final reply</h3>
-                     <div class="reply">${esc(sc.reply)}</div>`;
+  // Only when it is NOT already the last bubble — otherwise it is the same
+  // text printed twice, which reads as if the agent repeated itself.
+  if(sc.reply && sc.reply.trim() !== (lastText?.detail||'').trim())
+    h += `<h3 style="font-size:13px;margin:22px 0 0">Final reply</h3>
+          <div class="reply">${esc(sc.reply)}</div>`;
   return h;
 }
 function wire(sc){
@@ -428,8 +474,8 @@ def build_index(runs_dir: Path) -> str:
 <title>agent runs</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>Agent runs</h1>
 <p class="sub">Every recorded run, newest first. Click one to watch it as a
-conversation. ${total:.2f} spent across {len(rows)} run(s)
-{f"· {historical} historical (scenarios since changed — kept as evidence, not as a baseline)" if historical else ""}.</p>
+conversation. ${total:.2f} spent across {len(rows)} run(s){
+f" · {historical} historical (scenarios since changed — kept as evidence, not as a baseline)" if historical else ""}.</p>
 <table class="idx"><tr><th>run</th><th>result</th><th>categories</th>
 <th>subagents</th><th>cost</th></tr>{"".join(rows)}</table>
 </div></body></html>"""

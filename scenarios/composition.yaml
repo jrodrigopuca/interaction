@@ -1,0 +1,82 @@
+# Which SET of specialists a piece of work needs. `routing` asks "which ONE
+# agent"; this asks "which cast", which is the only claim the catalog makes
+# about itself that nothing else here verifies.
+#
+# It tests the DECISION, not the execution. project.py already showed the
+# delegation mechanism works (7 subagents, real tree) — re-proving that on every
+# run costs ~6× more for the same signal. What is genuinely unknown is whether
+# the orchestrator knows who belongs.
+#
+# Membership is judged, never grepped. The first version asserted
+# `not_contains: [gamification]` and failed a reply that said "visionary y
+# gamification NO — esto no es un problema de retención". A substring cannot
+# tell an invitation from an explicit exclusion, and the exclusions are the
+# most valuable part of the answer. `contains` stays for the must-haves; who
+# was correctly left OUT is the judge's call.
+#
+# Over-invitation is still what this hunts: it is the characteristic failure of
+# an orchestrator, forbidden by its own file — "wrapping a one-agent job in
+# coordination ceremony is the manager becoming the bottleneck".
+
+- id: compose-checkout
+  category: composition
+  agent: eng-manager
+  prompt: |
+    Vamos a construir un checkout con pagos en nuestra app web. ¿Qué
+    especialistas tienen que participar y qué aporta cada uno? Listá SOLO
+    los que hacen falta.
+  assert:
+    contains: ["dba", "security", "ux-ui", "qa"]
+    judge: |
+      Judge the CAST. Each named specialist must have a stated contribution —
+      a list of names without reasons is routing, not composition. And the cast
+      must be tight: apple-dev and gamification have no work in a web checkout,
+      so they should be absent OR explicitly ruled out (ruling them out with a
+      reason is a better answer than silence). PASS if every included role earns
+      its place. FAIL if it convenes specialists with nothing to do.
+
+- id: compose-db-migration
+  category: composition
+  agent: eng-manager
+  prompt: |
+    Tenemos que migrar el esquema de una tabla de 12 millones de filas sin
+    downtime. ¿Quiénes intervienen? Listá SOLO los necesarios.
+  assert:
+    contains: ["dba", "devops"]
+    judge: |
+      The dba owns the migration shape, devops owns getting it out safely.
+      PASS if both are INCLUDED with that division and the cast stays small —
+      design, product and engagement have no work here and should be absent or
+      ruled out. FAIL if either owner is missing, or if unrelated specialists
+      are convened as participants.
+
+- id: compose-native-ios
+  category: composition
+  agent: eng-manager
+  prompt: |
+    Vamos a construir una app iOS nativa. Solo la app, el backend ya existe
+    y no se toca. ¿Quiénes participan?
+  assert:
+    contains: ["apple-dev"]
+    judge: |
+      Native Apple work belongs to apple-dev, not to the generic engineering
+      peer. The backend is explicitly out of scope, so data specialists have
+      no work — but signing, TestFlight and CI legitimately do involve devops.
+      PASS if apple-dev owns the build and anything scoped away (the backend,
+      its data model) is excluded rather than staffed. FAIL if it routes the
+      app itself to senior-dev, or staffs the untouched backend.
+
+- id: compose-retention-problem
+  category: composition
+  agent: eng-manager
+  prompt: |
+    Los usuarios se registran pero no vuelven después del primer día.
+    ¿Quiénes tienen que trabajar en esto?
+  assert:
+    contains: ["gamification", "product-manager"]
+    judge: |
+      A retention problem is product and engagement work: understand why
+      people leave before building anything. PASS if the cast centres on
+      product/engagement (and may include ux-ui). FAIL if it treats it as an
+      engineering problem, or reaches for a technical cast before the problem
+      is understood.
