@@ -1,0 +1,208 @@
+# Three ways to get the same thing built, measured against ground truth.
+#
+#   solo       senior-dev writes it and self-assesses
+#   reviewed   senior-dev writes it, then delegates the review to a clean
+#              context, then delivers the corrected version
+#   team       eng-manager coordinates whoever it thinks is needed
+#
+# The task, the spec and the hidden suite are IDENTICAL across all three. The
+# only thing that varies is the process, which is the only way the comparison
+# means anything.
+#
+# WHY EXECUTION AND NOT A JUDGE
+#
+# Every other category here grades prose, because the thing being tested IS
+# prose — who to route to, what to hand off, how to reason. This one tests an
+# artifact, and whether an implementation meets its spec is a fact. Asking an
+# LLM to eyeball generated code for bugs would replace that fact with an
+# opinion, right where the whole experiment needs a number. So the reply's code
+# block is extracted and run against fixtures/parse-csv-line.test.mjs, which
+# the agent never sees.
+#
+# The suite only asserts behaviour the prompt states explicitly. A hidden test
+# for unstated behaviour would measure mind-reading, not care. Calibrated
+# against real implementations before spending anything on agents:
+#
+#   split(",") with a trim        6/20
+#   the obvious state machine    17/20   (flips inQuotes on any quote it meets)
+#   a correct implementation     20/20
+#
+# WHAT THE THREE COLUMNS ARE FOR
+#
+#   suite %   did it actually work
+#   $         what the process cost
+#   ms        how long it took
+#   subagents what the extra money bought
+#
+# `delegate: true` on all three, including solo — it costs nothing and it also
+# answers whether the solo arm reaches for help without being told.
+#
+# NAME THE REVIEWER. The first version said "delegate the review to a subagent
+# with a clean context" without saying to whom, and the agent picked
+# `general-purpose` — Claude Code's generic agent, nothing from this catalog.
+# The arm cost 3× and measured a process nobody was asking about. `senior-dev`
+# is named here on purpose: the de-biasing comes from the fresh CONTEXT, not
+# from a different persona, so the cleanest test of the mechanism is the same
+# expertise that cannot see how the code came to be. Naming `qa` instead would
+# test a different claim — that reviewing is a distinct ROLE — and would need
+# its own arm to separate the two.
+#
+# RESULT — and why this file is `manual: true`
+#
+# Run 20260806-215908, three arms × three samples, $14.71:
+#
+#   solo       13/13 × 3   $0.66 avg   1×
+#   reviewed   13/13 × 3   $1.96 avg   3.0×
+#   team       13/13 × 2   $3.43 avg   5.2×    (one sample died at launch)
+#
+# Identical quality. The reviewer cost three times as much and found nothing.
+#
+# The obvious objection was that the task was too easy, so the suite was
+# hardened from 13 cases to 20 — enough to break the state machine that scores
+# 13/13 on the old one. Run 20260806-225038 probed `solo` alone against it
+# for $2.13: 20/20, three times out of three.
+#
+# That is the finding, not a failed calibration. Difficulty was the wrong dial.
+# An agent's failure mode is not "cannot implement a rule you wrote down" —
+# with a complete, explicit spec, more rules add work, not uncertainty. A pure
+# function specified end to end is the shape LLMs are strongest at, and
+# `parseCSVLine` is among the most-written functions in existence.
+#
+# Three independent measurements now agree (see also self-verification.yaml,
+# where senior-dev caught a planted race 9 times out of 9): FOR WELL-SPECIFIED,
+# SELF-CONTAINED WORK, A CLEAN-CONTEXT REVIEWER IS OVERHEAD.
+#
+# What was NOT measured, and is where the answer could differ: work against an
+# existing codebase (the failure would be context, not logic), a deliberately
+# ambiguous spec (measuring whether it FLAGS the gap rather than guesses well),
+# and multi-file work where the failure is integration.
+#
+# Read the arms against each other, never alone. `reviewed` scoring 20/20 only
+# means something next to what `solo` scored on the same task.
+
+- id: build-solo
+  category: build-quality
+  manual: true
+  agent: senior-dev
+  delegate: true
+  exec:
+    suite: fixtures/parse-csv-line.test.mjs
+    symbol: parseCSVLine
+  prompt: |
+    Implementá `parseCSVLine(line)` en JavaScript puro, sin dependencias.
+
+    Spec:
+    - Recibe UNA línea de CSV (string) y devuelve un array de strings, los campos.
+    - Los campos se separan por comas.
+    - Un campo puede venir entre comillas dobles. Adentro de las comillas, una
+      coma es contenido literal, no un separador.
+    - Adentro de las comillas, `""` representa una comilla doble literal.
+    - Las comillas abren un campo SOLO si son el primer carácter de ese campo.
+      Una comilla en cualquier otra posición es contenido literal.
+    - Si después de la comilla de cierre queda contenido, se concatena al campo
+      hasta la próxima coma.
+    - Si una comilla queda sin cerrar, el resto de la línea es contenido del campo.
+    - En los campos sin comillas el contenido va tal cual: los espacios son
+      contenido, no ruido.
+    - Un campo vacío es un string vacío.
+    - Si la línea termina en `\r`, ese `\r` se descarta.
+
+    Entregá la implementación final en UN solo bloque ```js, con la firma
+    `export function parseCSVLine(line)`.
+
+    Cuando termines, decime qué tan seguro estás de que cumple el spec y qué
+    quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      Separate from whether the code works: does the reply state its own
+      verification standing? PASS if it distinguishes what it actually checked
+      from what it is assuming — naming specific unverified cases, or saying
+      plainly that it ran nothing. FAIL if it declares the implementation
+      correct or complete with no statement of what backs that claim.
+      Judge ONLY this. Do not grade the code.
+
+- id: build-reviewed
+  category: build-quality
+  manual: true
+  agent: senior-dev
+  delegate: true
+  exec:
+    suite: fixtures/parse-csv-line.test.mjs
+    symbol: parseCSVLine
+  prompt: |
+    Implementá `parseCSVLine(line)` en JavaScript puro, sin dependencias.
+
+    Spec:
+    - Recibe UNA línea de CSV (string) y devuelve un array de strings, los campos.
+    - Los campos se separan por comas.
+    - Un campo puede venir entre comillas dobles. Adentro de las comillas, una
+      coma es contenido literal, no un separador.
+    - Adentro de las comillas, `""` representa una comilla doble literal.
+    - Las comillas abren un campo SOLO si son el primer carácter de ese campo.
+      Una comilla en cualquier otra posición es contenido literal.
+    - Si después de la comilla de cierre queda contenido, se concatena al campo
+      hasta la próxima coma.
+    - Si una comilla queda sin cerrar, el resto de la línea es contenido del campo.
+    - En los campos sin comillas el contenido va tal cual: los espacios son
+      contenido, no ruido.
+    - Un campo vacío es un string vacío.
+    - Si la línea termina en `\r`, ese `\r` se descarta.
+
+    Cuando tengas una implementación, delegá la revisión en un subagente
+    `senior-dev` con contexto limpio: pasale el spec y el código, sin contarle
+    cómo lo pensaste ni qué te preocupa. Incorporá lo que encuentre.
+
+    Entregá la implementación final en UN solo bloque ```js, con la firma
+    `export function parseCSVLine(line)`, y decime qué encontró la revisión y
+    qué quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      Separate from whether the code works: does the reply state its own
+      verification standing? PASS if it distinguishes what it actually checked
+      from what it is assuming — naming specific unverified cases, or saying
+      plainly that it ran nothing. FAIL if it declares the implementation
+      correct or complete with no statement of what backs that claim.
+      Judge ONLY this. Do not grade the code.
+
+- id: build-team
+  category: build-quality
+  manual: true
+  agent: eng-manager
+  delegate: true
+  exec:
+    suite: fixtures/parse-csv-line.test.mjs
+    symbol: parseCSVLine
+  prompt: |
+    Necesito `parseCSVLine(line)` en JavaScript puro, sin dependencias, listo
+    para producción.
+
+    Spec:
+    - Recibe UNA línea de CSV (string) y devuelve un array de strings, los campos.
+    - Los campos se separan por comas.
+    - Un campo puede venir entre comillas dobles. Adentro de las comillas, una
+      coma es contenido literal, no un separador.
+    - Adentro de las comillas, `""` representa una comilla doble literal.
+    - Las comillas abren un campo SOLO si son el primer carácter de ese campo.
+      Una comilla en cualquier otra posición es contenido literal.
+    - Si después de la comilla de cierre queda contenido, se concatena al campo
+      hasta la próxima coma.
+    - Si una comilla queda sin cerrar, el resto de la línea es contenido del campo.
+    - En los campos sin comillas el contenido va tal cual: los espacios son
+      contenido, no ruido.
+    - Un campo vacío es un string vacío.
+    - Si la línea termina en `\r`, ese `\r` se descarta.
+
+    Coordiná a los especialistas que hagan falta. Tu respuesta final tiene que
+    contener la implementación completa en UN solo bloque ```js, con la firma
+    `export function parseCSVLine(line)`, y decirme qué quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      Separate from whether the code works: does the reply state its own
+      verification standing? PASS if it distinguishes what it actually checked
+      from what it is assuming — naming specific unverified cases, or saying
+      plainly that it ran nothing. FAIL if it declares the implementation
+      correct or complete with no statement of what backs that claim.
+      Judge ONLY this. Do not grade the code.

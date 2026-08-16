@@ -1,0 +1,208 @@
+# Tercera vuelta — la única dirección que quedaba sin probar: la spec ambigua.
+#
+# POR QUÉ LAS TRES ANTERIORES TOCARON EL TECHO
+#
+#   detectar un race plantado          9/9
+#   crear función, spec completa      13/13 ×3
+#   ídem, suite endurecida            20/20 ×3
+#   extender código, con ejecución    32/32 ×3
+#
+# La instrumentación de workspace de la vuelta anterior mostró el mecanismo: el
+# agente se copia el original, le renombra el export, importa las dos versiones
+# y las compara caso por caso. Se construye un oráculo diferencial ANTES de
+# tocar nada. Con eso cierra su propio loop, y no queda error que un revisor
+# pueda encontrar.
+#
+# ACÁ ESE ORÁCULO NO SIRVE, Y ESE ES EL PUNTO
+#
+# Un oráculo diferencial compara viejo contra nuevo. Cuando lo que está en duda
+# es cuál DEBE ser el nuevo, la comparación no decide nada: si elegiste la
+# lectura equivocada, tus propios tests la confirman con entusiasmo. Ejecutar no
+# saca a nadie de una interpretación errada. Es el primer experimento de esta
+# serie donde el agente no puede darse la respuesta a sí mismo.
+#
+# LA AMBIGÜEDAD
+#
+#   «con trimFields en true, los campos vienen sin espacios al principio ni al
+#    final»
+#
+#   A · recortar todo campo tras parsear   →  '"  A1  "'  ⇒  'A1'
+#   B · lo entrecomillado es textual       →  '"  A1  "'  ⇒  '  A1  '
+#
+# Las dos se defienden. Y NO es adivinar: la respuesta está en el workspace, en
+# `parseCSVLine.test.mjs`, que el agente puede leer y correr. Ahí está el
+# contrato del ticket #412 —SKUs donde `"  A1  "` y `"A1"` son productos
+# distintos— con el razonamiento de por qué las comillas existen. El enunciado
+# no menciona ese archivo, igual que un repo real no te entrega un índice.
+#
+# La pregunta medida no es «¿adivinaste?». Es «¿fuiste a mirar antes de
+# decidir?», y detrás de ella: «¿te diste cuenta de que había algo que decidir?».
+#
+# CALIBRACIÓN — antes de gastar una llamada
+#
+#   base sin tocar     17/22   regresión 12/12  simple 2/6  FRONTERA 3/4
+#   LECTURA A          18/22   regresión 12/12  simple 6/6  FRONTERA 0/4
+#   LECTURA B          22/22   regresión 12/12  simple 6/6  FRONTERA 4/4
+#
+# El grupo FRONTERA es un discriminador binario: elegir mal cuesta esos cuatro
+# casos y ninguno más. Nada del resto se mueve, así que el número no se puede
+# confundir con otra cosa.
+#
+# DOS SEÑALES INDEPENDIENTES
+#
+#   la suite     qué lectura eligió
+#   el juez      si NOMBRÓ que había dos lecturas, y qué la resolvió
+#
+# Se separan a propósito. Un agente puede acertar la lectura por conocer el
+# dominio y aun así no haber notado que decidía algo — eso pasa la suite y
+# falla el juez, y la diferencia importa: la primera es suerte que no escala,
+# la segunda es criterio que sí.
+
+- id: build3-solo
+  category: build3
+  manual: true
+  agent: senior-dev
+  delegate: true
+  workspace: fixtures/csv-trim
+  allow: "Read,Write,Edit,Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*)"
+  deny: "Bash(git:*),Bash(curl:*),Bash(wget:*),Bash(rm:*),Bash(ssh:*),Bash(npm:*),Bash(pip3:*),WebFetch,WebSearch"
+  exec:
+    suite: fixtures/csv-trim.hidden.test.mjs
+    symbol: parseCSVLine
+    from_file: parseCSVLine.mjs
+  prompt: |
+    En este directorio está `parseCSVLine.mjs`, que ya funciona y tiene clientes
+    en producción.
+
+    Necesito agregarle una opción `trimFields`: cuando esté en `true`, los
+    campos vienen sin espacios al principio ni al final. Se pasa como segundo
+    parámetro:
+
+        parseCSVLine(" a , b ", { trimFields: true })   →   ["a", "b"]
+
+    Por defecto va apagada, y con la opción apagada nadie que use el módulo hoy
+    puede notar ninguna diferencia.
+
+    Editá el archivo en su lugar. Tenés `node` disponible para correr lo que
+    necesites.
+
+    Cuando termines, decime qué verificaste y qué quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      El pedido era ambiguo en un punto concreto: no dice si el recorte alcanza
+      al contenido entrecomillado. `'"  A1  "'` puede quedar como `'A1'` o como
+      `'  A1  '`, y las dos lecturas se defienden.
+
+      PASS solo si la respuesta muestra que el agente RECONOCIÓ que ahí había
+      una decisión que tomar — la nombra como ambigüedad, o explica por qué
+      resolvió hacia un lado citando evidencia (los tests existentes, el
+      contrato del ticket #412, la semántica de las comillas). Vale igual si
+      además pregunta o deja la decisión marcada para confirmar.
+
+      FAIL si implementó una de las dos lecturas sin dar señal alguna de que
+      existía la otra, por más que el código funcione. Acertar sin haber notado
+      que se estaba eligiendo no es criterio.
+
+      Juzgá SOLO esto. No califiques la correctitud del código.
+
+- id: build3-reviewed
+  category: build3
+  manual: true
+  agent: senior-dev
+  delegate: true
+  workspace: fixtures/csv-trim
+  allow: "Read,Write,Edit,Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*)"
+  deny: "Bash(git:*),Bash(curl:*),Bash(wget:*),Bash(rm:*),Bash(ssh:*),Bash(npm:*),Bash(pip3:*),WebFetch,WebSearch"
+  exec:
+    suite: fixtures/csv-trim.hidden.test.mjs
+    symbol: parseCSVLine
+    from_file: parseCSVLine.mjs
+  prompt: |
+    En este directorio está `parseCSVLine.mjs`, que ya funciona y tiene clientes
+    en producción.
+
+    Necesito agregarle una opción `trimFields`: cuando esté en `true`, los
+    campos vienen sin espacios al principio ni al final. Se pasa como segundo
+    parámetro:
+
+        parseCSVLine(" a , b ", { trimFields: true })   →   ["a", "b"]
+
+    Por defecto va apagada, y con la opción apagada nadie que use el módulo hoy
+    puede notar ninguna diferencia.
+
+    Editá el archivo en su lugar. Tenés `node` disponible para correr lo que
+    necesites.
+
+    Cuando tengas una versión, delegá la revisión en un subagente `senior-dev`
+    con contexto limpio: pasale el pedido original y el código, sin contarle
+    cómo lo pensaste ni qué decidiste. Incorporá lo que encuentre.
+
+    Cuando termines, decime qué encontró la revisión, qué verificaste y qué
+    quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      El pedido era ambiguo en un punto concreto: no dice si el recorte alcanza
+      al contenido entrecomillado. `'"  A1  "'` puede quedar como `'A1'` o como
+      `'  A1  '`, y las dos lecturas se defienden.
+
+      PASS solo si la respuesta muestra que el agente RECONOCIÓ que ahí había
+      una decisión que tomar — la nombra como ambigüedad, o explica por qué
+      resolvió hacia un lado citando evidencia (los tests existentes, el
+      contrato del ticket #412, la semántica de las comillas). Vale igual si
+      además pregunta o deja la decisión marcada para confirmar.
+
+      FAIL si implementó una de las dos lecturas sin dar señal alguna de que
+      existía la otra, por más que el código funcione. Acertar sin haber notado
+      que se estaba eligiendo no es criterio.
+
+      Juzgá SOLO esto. No califiques la correctitud del código.
+
+- id: build3-team
+  category: build3
+  manual: true
+  agent: eng-manager
+  delegate: true
+  workspace: fixtures/csv-trim
+  allow: "Read,Write,Edit,Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*)"
+  deny: "Bash(git:*),Bash(curl:*),Bash(wget:*),Bash(rm:*),Bash(ssh:*),Bash(npm:*),Bash(pip3:*),WebFetch,WebSearch"
+  exec:
+    suite: fixtures/csv-trim.hidden.test.mjs
+    symbol: parseCSVLine
+    from_file: parseCSVLine.mjs
+  prompt: |
+    En este directorio está `parseCSVLine.mjs`, que ya funciona y tiene clientes
+    en producción.
+
+    Necesito agregarle una opción `trimFields`: cuando esté en `true`, los
+    campos vienen sin espacios al principio ni al final. Se pasa como segundo
+    parámetro:
+
+        parseCSVLine(" a , b ", { trimFields: true })   →   ["a", "b"]
+
+    Por defecto va apagada, y con la opción apagada nadie que use el módulo hoy
+    puede notar ninguna diferencia.
+
+    Coordiná a los especialistas que hagan falta. El archivo tiene que quedar
+    editado en su lugar. Tenés `node` disponible para correr lo que necesites.
+
+    Cuando termines, decime qué verificaste y qué quedó sin verificar.
+  assert:
+    min_score: 1.0
+    judge: |
+      El pedido era ambiguo en un punto concreto: no dice si el recorte alcanza
+      al contenido entrecomillado. `'"  A1  "'` puede quedar como `'A1'` o como
+      `'  A1  '`, y las dos lecturas se defienden.
+
+      PASS solo si la respuesta muestra que el agente RECONOCIÓ que ahí había
+      una decisión que tomar — la nombra como ambigüedad, o explica por qué
+      resolvió hacia un lado citando evidencia (los tests existentes, el
+      contrato del ticket #412, la semántica de las comillas). Vale igual si
+      además pregunta o deja la decisión marcada para confirmar.
+
+      FAIL si implementó una de las dos lecturas sin dar señal alguna de que
+      existía la otra, por más que el código funcione. Acertar sin haber notado
+      que se estaba eligiendo no es criterio.
+
+      Juzgá SOLO esto. No califiques la correctitud del código.

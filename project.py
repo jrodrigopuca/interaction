@@ -43,31 +43,6 @@ DELEGATION_NUDGE = (
 )
 
 
-def delegation_tree(events: list) -> dict:
-    """Who spawned whom, from the raw stream.
-
-    A `Task`/`Agent` tool_use in the parent's output names the subagent and
-    carries the id its messages will be tagged with; every later event whose
-    parent_tool_use_id matches belongs to that child."""
-    spawned, activity = {}, {}
-    for ev in events:
-        if ev.get("type") == "assistant":
-            for block in ev.get("message", {}).get("content", []):
-                # Both names appear depending on the CLI version; looking for
-                # only one of them reported "no delegation" on a run that had
-                # spawned seven subagents.
-                if block.get("type") == "tool_use" and block.get("name") in ("Task", "Agent"):
-                    arg = block.get("input", {})
-                    spawned[block.get("id", "?")] = {
-                        "agent": arg.get("subagent_type", "?"),
-                        "task": (arg.get("description") or "")[:70],
-                    }
-        pid = ev.get("parent_tool_use_id")
-        if pid:
-            activity[pid] = activity.get(pid, 0) + 1
-    for tid, info in spawned.items():
-        info["events"] = activity.get(tid, 0)
-    return spawned
 
 
 def main():
@@ -93,7 +68,7 @@ def main():
     if reply.error:
         sys.exit(f"failed: {reply.error}")
 
-    tree = delegation_tree(reply.events)
+    tree = harness.delegation_tree(reply.events)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     outdir = RUNS / stamp
     outdir.mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,7 @@ Usage:
   ./run.py                          # every scenario
   ./run.py --category hard-rule     # one category
   ./run.py --only qa-no-product     # one scenario (substring match)
+  ./run.py --repeat 5               # five samples each; disagreement is a result
   ./run.py --list                   # show scenarios without running
   ./run.py --dry-run                # show what would run, and the cost estimate
 
@@ -25,8 +26,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -43,7 +47,22 @@ SCENARIOS = ROOT / "scenarios"
 RUNS = ROOT / "runs"
 INSTALLED_AGENTS = Path.home() / ".claude" / "agents"
 
-TIMEOUT = 300           # a hung call must not wedge the whole run
+# A hung call must not wedge a worker for the rest of the run — but a ceiling
+# that fires is PURE LOSS. On a subscription the currency is tokens, and a
+# killed call has already spent every token it consumed while returning
+# nothing. Measured, in one run: the fastest `reviewed` sample took 59s and
+# cost $2.31; the slowest took 519s and cost $1.54. Nine times the wall clock,
+# a third less money. Time is not the budget — so a tight timeout buys nothing
+# and can destroy work already paid for.
+#
+# Hence two ceilings, not one. A routing reply that takes five minutes is
+# wedged and should die fast; an orchestrator at fifteen minutes is working.
+# Measured durations reach 798s under contention, and the process outlives what
+# `duration_ms` reports, so the delegating ceiling carries real headroom.
+TIMEOUT = 300            # single-agent scenarios (--timeout)
+DELEGATE_TIMEOUT = 1800  # scenarios with delegate: true (--delegate-timeout)
+
+WS_ROOT = Path(tempfile.gettempdir())   # set to <run>/workspaces in main()
 COST_PER_CALL = 0.20    # calibrated from observed runs; --dry-run estimates only
 
 # Two independent model choices, because they answer different questions.
@@ -71,10 +90,22 @@ class Scenario:
     agent: str = ""          # empty for routing scenarios: that IS the question
     expect: str = ""         # routing: the agent that should own this
     assertions: dict = field(default_factory=dict)
+    delegate: bool = False   # record the subagent tree (costs nothing extra)
+    execute: dict = field(default_factory=dict)   # {suite, symbol} → real tests
+    timeout: int = 0         # per-scenario override; 0 → the ceiling below
+    manual: bool = False     # excluded from a bare run; see load_scenarios
+    workspace: str = ""      # fixture dir seeded into a fresh cwd per sample
+    allow: str = ""          # --allowedTools, comma-separated
+    deny: str = ""           # --disallowedTools, comma-separated
 
     @property
     def is_routing(self) -> bool:
         return self.category == "routing"
+
+    @property
+    def limit(self) -> int:
+        """Seconds this scenario gets before it is abandoned."""
+        return self.timeout or (DELEGATE_TIMEOUT if self.delegate else TIMEOUT)
 
 
 def load_scenarios() -> list:
@@ -88,6 +119,13 @@ def load_scenarios() -> list:
                 agent=raw.get("agent", ""),
                 expect=raw.get("expect", ""),
                 assertions=raw.get("assert", {}) or {},
+                delegate=bool(raw.get("delegate", False)),
+                execute=raw.get("exec", {}) or {},
+                timeout=int(raw.get("timeout", 0)),
+                manual=bool(raw.get("manual", False)),
+                workspace=raw.get("workspace", ""),
+                allow=raw.get("allow", ""),
+                deny=raw.get("deny", ""),
             ))
     ids = [s.id for s in out]
     dupes = {i for i in ids if ids.count(i) > 1}
@@ -109,7 +147,8 @@ class Reply:
 
 
 def ask(prompt: str, agent: str = "", model: str = "",
-        forward_subagents: bool = False) -> Reply:
+        forward_subagents: bool = False, timeout: int = 0,
+        cwd: Path = None, allow: str = "", deny: str = "") -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -125,11 +164,22 @@ def ask(prompt: str, agent: str = "", model: str = "",
         # parent_tool_use_id set, instead of being collapsed into one tool
         # result. Without it there is no delegation tree to see.
         cmd.append("--forward-subagent-text")
-    cmd.append(prompt)
+    if allow:
+        cmd += ["--allowedTools", allow]
+    if deny:
+        cmd += ["--disallowedTools", deny]
+    # `--` before the prompt, always. Both tool flags are variadic and swallow
+    # every following argument until the next flag — comma-joined values do not
+    # help. A trailing prompt becomes a tool name and the CLI exits with
+    # "Input must be provided…", which arrives as an empty reply costing $0.00:
+    # indistinguishable, at a glance, from an agent that ran and said nothing.
+    cmd += ["--", prompt]
+    limit = timeout or TIMEOUT
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=limit,
+                              cwd=str(cwd) if cwd else None)
     except subprocess.TimeoutExpired:
-        return Reply(text="", error=f"timed out after {TIMEOUT}s")
+        return Reply(text="", error=f"timed out after {limit}s")
     if proc.returncode != 0:
         return Reply(text="", error=f"exit {proc.returncode}: {proc.stderr.strip()[:200]}")
 
@@ -150,6 +200,105 @@ def ask(prompt: str, agent: str = "", model: str = "",
     if not text:
         return Reply(text="", events=events, error="no result event in stream")
     return Reply(text=text.strip(), cost=cost, ms=ms, events=events)
+
+
+def delegation_tree(events: list) -> dict:
+    """Who spawned whom, from the raw stream.
+
+    A `Task`/`Agent` tool_use in the parent's output names the subagent and
+    carries the id its messages will be tagged with; every later event whose
+    parent_tool_use_id matches belongs to that child.
+
+    Lives here rather than in project.py because project.py already imports
+    this module — putting it there and importing back would be a cycle."""
+    spawned, activity = {}, {}
+    for ev in events:
+        if ev.get("type") == "assistant":
+            for block in ev.get("message", {}).get("content", []):
+                # Both names appear depending on the CLI version; looking for
+                # only one of them reported "no delegation" on a run that had
+                # spawned seven subagents.
+                if block.get("type") == "tool_use" and block.get("name") in ("Task", "Agent"):
+                    arg = block.get("input", {})
+                    spawned[block.get("id", "?")] = {
+                        "agent": arg.get("subagent_type", "?"),
+                        "task": (arg.get("description") or "")[:70],
+                    }
+        pid = ev.get("parent_tool_use_id")
+        if pid:
+            activity[pid] = activity.get(pid, 0) + 1
+    for tid, info in spawned.items():
+        info["events"] = activity.get(tid, 0)
+    return spawned
+
+
+# --------------------------------------------------------------------------- #
+# Running what the agent produced
+# --------------------------------------------------------------------------- #
+CODE_BLOCK = re.compile(r"```(?:js|javascript|jsx|ts|typescript|mjs)?[^\n]*\n(.*?)```",
+                        re.DOTALL)
+
+
+def extract_impl(reply: str, symbol: str) -> str:
+    """The last fenced block that defines `symbol`.
+
+    Agents commonly show a first cut and then the corrected version; the LAST
+    block that actually defines the export is the deliverable. Picking the
+    largest block instead would sometimes pick a worked example or a test file
+    with more lines than the implementation."""
+    blocks = [b for b in CODE_BLOCK.findall(reply)
+              if re.search(rf"\b{re.escape(symbol)}\b", b)
+              and re.search(rf"(function|const|let|var|class)\s+{re.escape(symbol)}\b", b)]
+    return blocks[-1] if blocks else ""
+
+
+def deliverable(sc: "Scenario", reply: str, ws: Path) -> tuple:
+    """The code to grade, and where it came from.
+
+    Two sources, because two kinds of task. When the agent works in a seeded
+    workspace the deliverable is the FILE it edited — that is the artifact a
+    colleague would pull, and reading it back also catches an agent that
+    narrated a change it never wrote. Otherwise it is the fenced block."""
+    src = sc.execute.get("from_file")
+    if src and ws:
+        path = ws / src
+        if not path.exists():
+            return "", f"missing {src} in the workspace"
+        return path.read_text(), src
+    return extract_impl(reply, sc.execute["symbol"]), "the reply"
+
+
+def run_suite(code: str, suite: Path, symbol: str) -> dict:
+    """Run the agent's code against a suite it never saw. Ground truth.
+
+    This is the point of the whole mechanism: whether an implementation is
+    correct is a fact, and asking an LLM judge to eyeball arbitrary code for
+    bugs replaces that fact with an opinion. The suite only asserts behaviour
+    the prompt explicitly specified — a hidden test for unstated behaviour
+    would measure mind-reading."""
+    if not code:
+        return {"error": f"no code defining `{symbol}`"}
+    shimmed = "export" not in code
+    if shimmed:
+        # The task was "write this function", not "pick a module system".
+        # Failing here would score syntax compliance instead of correctness.
+        code += f"\nexport {{ {symbol} }};\n"
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "candidate.mjs").write_text(code)
+        (d / "suite.mjs").write_text(suite.read_text())
+        try:
+            p = subprocess.run(["node", str(d / "suite.mjs")],
+                               capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            return {"error": "suite timed out — infinite loop in the candidate?"}
+        try:
+            out = json.loads(p.stdout.strip() or "{}")
+        except ValueError:
+            return {"error": f"suite produced no verdict: "
+                             f"{(p.stderr or p.stdout).strip()[:200]}"}
+    out["shimmed_export"] = shimmed
+    return out
 
 
 def roster_prompt(task: str) -> str:
@@ -240,6 +389,22 @@ def check(sc: Scenario, reply: str) -> list:
     return fails
 
 
+def check_score(sc: Scenario, score: dict) -> list:
+    """Assertions over the executed suite, not over the prose."""
+    a = sc.assertions
+    if score.get("error"):
+        return [f"suite did not run: {score['error']}"]
+    total = score.get("total", 0)
+    if not total:
+        return ["suite reported no cases"]
+    ratio = score.get("passed", 0) / total
+    floor = a.get("min_score", 1.0)
+    if ratio < floor:
+        missed = ", ".join(f["name"] for f in score.get("failures", [])[:4])
+        return [f"suite {score['passed']}/{total} (floor {floor:.0%}) — {missed}"]
+    return []
+
+
 @dataclass
 class Result:
     sc: Scenario
@@ -248,6 +413,15 @@ class Result:
     judged: object = None      # True / False / None(error) / "skipped"
     judge_why: str = ""
     judge_cost: float = 0.0
+    score: dict = field(default_factory=dict)     # executed suite, if any
+    spawned: dict = field(default_factory=dict)   # subagent tree, if any
+    workspace: str = ""                           # seeded dir, kept for inspection
+
+    @property
+    def score_line(self) -> str:
+        if not self.score or self.score.get("error"):
+            return ""
+        return f"{self.score.get('passed', 0)}/{self.score.get('total', 0)}"
 
     @property
     def status(self) -> str:
@@ -266,13 +440,37 @@ class Result:
         return self.reply.cost + self.judge_cost
 
 
+def make_workspace(sc: Scenario) -> Path:
+    """A fresh seeded directory for one sample, kept with the run.
+
+    `cwd` is where the agent STARTS, not a wall it cannot cross — verified: an
+    agent told explicitly not to self-limit wrote outside it with no error. So
+    this buys isolation between samples and a record of what each one did, not
+    containment. Real containment needs the OS (sandbox-exec, a container);
+    `deny:` covers the commands worth refusing."""
+    ws = Path(tempfile.mkdtemp(prefix=f"{sc.id}-", dir=WS_ROOT))
+    shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
+    return ws
+
+
 def run_one(sc: Scenario) -> Result:
     prompt = roster_prompt(sc.prompt) if sc.is_routing else sc.prompt
-    reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL)
+    ws = make_workspace(sc) if sc.workspace else None
+    reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
+                forward_subagents=sc.delegate, timeout=sc.limit,
+                cwd=ws, allow=sc.allow, deny=sc.deny)
     if reply.error:
-        return Result(sc, reply)
+        return Result(sc, reply, workspace=str(ws or ""))
 
-    res = Result(sc, reply, fails=check(sc, reply.text))
+    res = Result(sc, reply, fails=check(sc, reply.text), workspace=str(ws or ""))
+    if sc.delegate:
+        res.spawned = delegation_tree(reply.events)
+    if sc.execute:
+        code, origin = deliverable(sc, reply.text, ws)
+        res.score = run_suite(code, ROOT / sc.execute["suite"],
+                              sc.execute["symbol"])
+        res.score["source"] = origin
+        res.fails += check_score(sc, res.score)
     criterion = sc.assertions.get("judge")
     if criterion:
         # Judge even when a deterministic assertion already failed: two
@@ -282,69 +480,194 @@ def run_one(sc: Scenario) -> Result:
     return res
 
 
+@dataclass
+class Aggregate:
+    """One scenario and every sample taken of it. With --repeat 1 it is a
+    passthrough, which is why nothing downstream had to learn two shapes."""
+    sc: Scenario
+    trials: list           # list[Result], len == --repeat
+
+    @property
+    def tally(self) -> dict:
+        out = {}
+        for r in self.trials:
+            out[r.status] = out.get(r.status, 0) + 1
+        return out
+
+    @property
+    def status(self) -> str:
+        """PASS or FAIL only when every sample agrees; FLAKY when they don't.
+
+        A majority vote would call 3-of-5 green and throw away the two
+        failures — which is precisely the evidence the extra samples were paid
+        for. Disagreement is not a tie to break, it IS the finding: either the
+        agent is inconsistent or the scenario is, and both are worth knowing.
+        So FLAKY is not a pass. Asking for certainty and getting ambiguity
+        means the answer is "we still don't know"."""
+        seen = {r.status for r in self.trials}
+        return seen.pop() if len(seen) == 1 else "FLAKY"
+
+    @property
+    def passes(self) -> int:
+        return sum(1 for r in self.trials if r.status == "PASS")
+
+    @property
+    def lead(self) -> Result:
+        """The sample to show when only one can be shown.
+
+        A failing sample is the informative one: nobody opens a flaky scenario
+        to read one of the runs that worked."""
+        return next((r for r in self.trials if r.status != "PASS"), self.trials[0])
+
+    @property
+    def cost(self) -> float:
+        return sum(r.cost for r in self.trials)
+
+
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
-def persist(results: list, started: str):
+def trial_record(r: Result) -> dict:
+    """One sample, without its event stream — see persist() for why."""
+    return {
+        "status": r.status,
+        "failures": r.fails,
+        "judge": {"verdict": r.judged, "why": r.judge_why}
+                 if "judge" in r.sc.assertions else None,
+        "cost_usd": round(r.cost, 4),
+        "duration_ms": r.reply.ms,
+        "reply": r.reply.text,
+        "error": r.reply.error,
+        "score": r.score or None,
+        "delegated_to": r.spawned or None,
+    }
+
+
+_partial_lock = threading.Lock()
+
+
+def log_partial(outdir: Path, sc: Scenario, r: Result):
+    """Append one finished sample the moment it lands.
+
+    Insurance, not the product. `persist()` writes the real trace only when the
+    whole run completes, and a run that delegates takes tens of minutes — one
+    that died at minute 35 took every paid result with it, because the results
+    existed nowhere but in memory. The money is spent either way; losing the
+    data on top of it is the avoidable half.
+
+    Deleted on success, where trace.jsonl supersedes it entirely."""
+    rec = trial_record(r)
+    rec["id"] = sc.id
+    with _partial_lock:
+        with (outdir / "partial.jsonl").open("a") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def persist(aggs: list, outdir: Path):
     """Write the run to disk: a JSONL trace plus one file per scenario.
 
     The trace is the contract with everything downstream — a visualiser reads
-    this, not the terminal output."""
-    outdir = RUNS / started
+    this, not the terminal output. One line per SCENARIO, never one per sample:
+    the top-level fields describe the lead trial so every existing consumer
+    keeps working, and `trials` carries the rest.
+
+    Only the lead trial keeps its `events`. Full streams are by far the largest
+    thing in this file, and --repeat 5 would make it five times heavier to
+    replay four conversations nobody opens. Each sample keeps its reply text,
+    which is what you actually read when a scenario turns out flaky."""
     outdir.mkdir(parents=True, exist_ok=True)
     with (outdir / "trace.jsonl").open("w") as fh:
-        for r in results:
+        for a in aggs:
+            lead = a.lead
             fh.write(json.dumps({
-                "id": r.sc.id,
-                "category": r.sc.category,
-                "agent": r.sc.agent or "(routing)",
-                "prompt": r.sc.prompt,
-                "status": r.status,
-                "failures": r.fails,
-                "judge": {"verdict": r.judged, "why": r.judge_why}
-                         if "judge" in r.sc.assertions else None,
-                "cost_usd": round(r.cost, 4),
-                "duration_ms": r.reply.ms,
-                "reply": r.reply.text,
-                "error": r.reply.error,
-                "events": r.reply.events,
+                "id": a.sc.id,
+                "category": a.sc.category,
+                "agent": a.sc.agent or "(routing)",
+                "prompt": a.sc.prompt,
+                "status": a.status,
+                "repeat": len(a.trials),
+                "passes": a.passes,
+                "tally": a.tally,
+                "failures": lead.fails,
+                "judge": {"verdict": lead.judged, "why": lead.judge_why}
+                         if "judge" in a.sc.assertions else None,
+                "cost_usd": round(a.cost, 4),
+                "duration_ms": lead.reply.ms,
+                "reply": lead.reply.text,
+                "error": lead.reply.error,
+                "score": lead.score or None,
+                "delegated_to": lead.spawned or None,
+                "trials": [trial_record(t) for t in a.trials],
+                "events": lead.reply.events,
             }, ensure_ascii=False) + "\n")
         # Per-scenario markdown, for reading a failure without jq.
-    for r in results:
-        body = [f"# {r.sc.id}  ({r.status})", "",
-                f"- agent: `{r.sc.agent or '(routing)'}`",
-                f"- category: {r.sc.category}",
-                f"- cost: ${r.cost:.4f} · {r.reply.ms} ms", "",
-                "## Prompt", "", r.sc.prompt, "", "## Reply", "",
-                r.reply.text or f"*(error: {r.reply.error})*"]
-        if r.fails:
-            body += ["", "## Failed assertions", ""] + [f"- {f}" for f in r.fails]
-        if r.judge_why:
-            body += ["", "## Judge", "", f"verdict: {r.judged}", "", r.judge_why]
-        (outdir / f"{r.sc.id}.md").write_text("\n".join(body) + "\n")
+    for a in aggs:
+        n = len(a.trials)
+        head = a.status + (f"  {a.passes}/{n}" if n > 1 else "")
+        body = [f"# {a.sc.id}  ({head})", "",
+                f"- agent: `{a.sc.agent or '(routing)'}`",
+                f"- category: {a.sc.category}",
+                f"- cost: ${a.cost:.4f}", "",
+                "## Prompt", "", a.sc.prompt]
+        for i, r in enumerate(a.trials, 1):
+            label = "## Reply" if n == 1 else f"## Sample {i}/{n} — {r.status}"
+            if r.score_line:
+                label += f"  ·  suite {r.score_line}"
+            body += ["", label, ""]
+            if r.spawned:
+                body += ["Subagents: " + ", ".join(
+                    f"`{v.get('agent')}`" for v in r.spawned.values()), ""]
+            for f in r.score.get("failures", [])[:20]:
+                body += [f"- ✕ {f['name']} — `{f['input']!r}` → `{f['got']}` "
+                         f"(expected `{f['expected']}`)"]
+            if r.score.get("failures"):
+                body += [""]
+            body += [r.reply.text or f"*(error: {r.reply.error})*"]
+            if r.fails:
+                body += ["", "Failed assertions:"] + [f"- {f}" for f in r.fails]
+            if r.judge_why:
+                body += ["", f"Judge: {r.judged} — {r.judge_why}"]
+        (outdir / f"{a.sc.id}.md").write_text("\n".join(body) + "\n")
     return outdir
 
 
-MARK = {"PASS": " ok ", "FAIL": "FAIL", "ERROR": "ERR "}
+MARK = {"PASS": " ok ", "FAIL": "FAIL", "ERROR": "ERR ", "FLAKY": "FLKY"}
 
 
-def report(results: list, outdir: Path, elapsed: float):
+def report(aggs: list, outdir: Path, elapsed: float):
     print()
-    for r in sorted(results, key=lambda x: (x.sc.category, x.sc.id)):
-        print(f"{MARK[r.status]}  {r.sc.category:12} {r.sc.id:28} "
-              f"${r.cost:.3f}")
+    repeated = any(len(a.trials) > 1 for a in aggs)
+    for a in sorted(aggs, key=lambda x: (x.sc.category, x.sc.id)):
+        share = f"{a.passes}/{len(a.trials)}  " if repeated else ""
+        # Mean suite score across samples: one run of arbitrary generated code
+        # says less than the average, and this column is the whole point of the
+        # execution scenarios.
+        scored = [t.score for t in a.trials if t.score and not t.score.get("error")]
+        suite = ""
+        if scored:
+            mean = sum(s["passed"] / s["total"] for s in scored) / len(scored)
+            suite = f"suite {mean:.0%}  "
+        print(f"{MARK[a.status]}  {a.sc.category:12} {a.sc.id:28} "
+              f"{share}{suite}${a.cost:.3f}")
+        r = a.lead
         for f in r.fails:
             print(f"          {f}")
         if r.reply.error:
             print(f"          {r.reply.error}")
-        if r.judged is False or (r.judged is None and "judge" in r.sc.assertions):
+        if r.judged is False or (r.judged is None and "judge" in a.sc.assertions):
             print(f"          judge: {r.judge_why[:150]}")
 
-    bad = [r for r in results if r.status != "PASS"]
-    total = sum(r.cost for r in results)
-    print(f"\n{len(results) - len(bad)}/{len(results)} passed · "
+    bad = [a for a in aggs if a.status != "PASS"]
+    flaky = [a for a in aggs if a.status == "FLAKY"]
+    total = sum(a.cost for a in aggs)
+    tail = f" · {len(flaky)} flaky" if flaky else ""
+    print(f"\n{len(aggs) - len(bad)}/{len(aggs)} passed{tail} · "
           f"${total:.2f} · {elapsed:.0f}s")
     print(f"run saved to {outdir}")
+    if flaky:
+        print("\na flaky scenario was never passing — it was sampling. Read the "
+              "samples: if they disagree on the same question, the scenario is "
+              "asking something the agent answers differently each time.")
     if bad:
         print("\nread the full reply before believing a failure — a judge FAIL "
               "can be the judge's mistake, not the agent's.")
@@ -352,28 +675,54 @@ def report(results: list, outdir: Path, elapsed: float):
 
 
 def main():
-    global AGENT_MODEL, JUDGE_MODEL
+    global AGENT_MODEL, JUDGE_MODEL, TIMEOUT, DELEGATE_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--category", help="run only this category")
     ap.add_argument("--only", help="run scenarios whose id contains this")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--jobs", type=int, default=4, help="parallel calls (default 4)")
+    ap.add_argument("--repeat", type=int, default=1, metavar="N",
+                    help="take N samples of each scenario (default 1). A "
+                         "single sample cannot tell a stable pass from a lucky "
+                         "one; with N>1 a scenario whose samples disagree is "
+                         "reported FLAKY instead of green. Costs N times as "
+                         "much — use it when you changed something shared, or "
+                         "on one scenario you don't trust")
     ap.add_argument("--model", default=AGENT_MODEL,
                     help="model for the agent under test (default: the CLI's own). "
                          "Use the model you actually work with, or the test measures "
                          "an agent you never talk to")
     ap.add_argument("--judge-model", default=JUDGE_MODEL,
                     help=f"model for the PASS/FAIL judge (default {JUDGE_MODEL})")
+    ap.add_argument("--timeout", type=int, default=TIMEOUT, metavar="S",
+                    help=f"ceiling for a single-agent scenario (default {TIMEOUT})")
+    ap.add_argument("--delegate-timeout", type=int, default=DELEGATE_TIMEOUT,
+                    metavar="S",
+                    help=f"ceiling for scenarios with delegate: true "
+                         f"(default {DELEGATE_TIMEOUT}). A killed call has "
+                         "already spent its tokens and returns nothing, so err "
+                         "high — this catches hangs, it does not save money")
     args = ap.parse_args()
 
     AGENT_MODEL, JUDGE_MODEL = args.model, args.judge_model
+    TIMEOUT, DELEGATE_TIMEOUT = args.timeout, args.delegate_timeout
+    if args.repeat < 1:
+        sys.exit("--repeat must be at least 1")
 
     scenarios = load_scenarios()
     if args.category:
         scenarios = [s for s in scenarios if s.category == args.category]
     if args.only:
         scenarios = [s for s in scenarios if args.only in s.id]
+    if not (args.category or args.only):
+        # `manual` scenarios are opt-in. Some experiments are expensive and
+        # already answered — the build-quality arms cost ~$12 and forty minutes
+        # to re-confirm a result three separate runs agreed on. Deleting them
+        # would throw away the scaffolding and the record; leaving them in the
+        # default suite would tax every future run for no signal. Ask for them
+        # by name when the question comes back.
+        scenarios = [s for s in scenarios if not s.manual]
     if not scenarios:
         sys.exit("no scenarios matched")
 
@@ -381,18 +730,46 @@ def main():
         for s in scenarios:
             judged = " +judge" if "judge" in s.assertions else ""
             print(f"  {s.category:12} {s.id:28} agent={s.agent or '(routing)'}{judged}")
-        calls = len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
-        print(f"\n{len(scenarios)} scenarios · ~{calls} calls · "
+        calls = (len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
+                 ) * args.repeat
+        sampled = f" × {args.repeat} samples" if args.repeat > 1 else ""
+        print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · "
               f"~${calls * COST_PER_CALL:.2f}")
         return 0
 
+    global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
-    print(f"running {len(scenarios)} scenarios with {args.jobs} parallel calls…")
+    outdir = RUNS / started
+    outdir.mkdir(parents=True, exist_ok=True)
+    # Workspaces live with the run. What an agent DID — which files it wrote,
+    # how many times it re-ran its own tests — is evidence the reply summarises
+    # and sometimes omits. In the first build experiment it was found by
+    # accident, in scratch directories left lying in the repo.
+    WS_ROOT = outdir / "workspaces"
+    WS_ROOT.mkdir(exist_ok=True)
+    sampled = f", {args.repeat} samples each" if args.repeat > 1 else ""
+    print(f"running {len(scenarios)} scenarios{sampled} "
+          f"with {args.jobs} parallel calls → {outdir.name}")
     t0 = time.time()
+    # Whole-suite passes, not N back-to-back copies of each scenario. Samples of
+    # the same prompt launched together all pay cache creation; separated by a
+    # full pass, the later ones land on a warm prompt cache instead.
+    tasks = [sc for _ in range(args.repeat) for sc in scenarios]
+
+    def run_and_log(sc: Scenario) -> Result:
+        r = run_one(sc)
+        log_partial(outdir, sc, r)
+        return r
+
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(run_one, scenarios))
-    outdir = persist(results, started)
-    return report(results, outdir, time.time() - t0)
+        flat = list(pool.map(run_and_log, tasks))
+    by_id = {}
+    for r in flat:
+        by_id.setdefault(r.sc.id, []).append(r)
+    aggs = [Aggregate(sc, by_id[sc.id]) for sc in scenarios]
+    persist(aggs, outdir)
+    (outdir / "partial.jsonl").unlink(missing_ok=True)
+    return report(aggs, outdir, time.time() - t0)
 
 
 if __name__ == "__main__":

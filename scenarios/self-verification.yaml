@@ -1,0 +1,167 @@
+# Does an agent verifying its OWN work find what an outside agent finds?
+#
+# The premise, in the user's words: a dev tests what they built, but tests it
+# biased — the paths that occur to them are exactly the paths they already
+# considered while building. The hole in the testing has the shape of the hole
+# in the design. A QA arrives without that history, and the ignorance is the
+# tool.
+#
+# The catalog already tries to fix this from the inside. `verification` §4
+# ("Falsify once before reporting") and the CORE both instruct every agent to
+# run one check designed to BREAK its own claim. Those instructions load into
+# the same context that made the thing. This measures whether that is enough.
+#
+# THREE cells, because two cannot be read:
+#
+#                    framed as MINE        framed as FOREIGN
+#   senior-dev       ratifies-own-work     reviews-foreign-code
+#   qa                    —                hunts-same-code
+#
+#   own vs foreign  → authorship bias, if any
+#   dev vs qa       → whether the role changes what gets found
+#   own vs qa       → the gap that would justify a senior-dev → qa handoff
+#
+# A two-cell version (own vs qa) cannot tell "the dev is biased" from "the dev
+# never looks for races". The control cell costs one more call and is the
+# difference between a measurement and a story.
+#
+# CONFOUND, stated rather than hidden: the prompts are not identical. The dev
+# is asked "should I merge?" and the QA is asked "find the problems", because
+# that IS the difference in the world — nobody asks a QA for a merge blessing.
+# So this measures the realistic workflow gap, not one isolated variable. The
+# foreign-code cell is what keeps the framing honest: it holds the question
+# ("review this") constant and changes only who wrote it.
+#
+# All three share ONE judge criterion, verbatim. A comparison across cells is
+# only meaningful if the bar is identical, and it names a specific defect so a
+# human can check the judge rather than trust it.
+
+- id: dev-ratifies-own-work
+  category: self-verification
+  agent: senior-dev
+  prompt: |
+    Escribí este hook de búsqueda y ya lo probé a mano: tipeo, aparecen los
+    resultados, anda bien. Lo quiero mergear hoy.
+
+    ```ts
+    function useProductSearch() {
+      const [results, setResults] = useState<Product[]>([]);
+      const [loading, setLoading] = useState(false);
+
+      async function search(term: string) {
+        setLoading(true);
+        const data = await api.searchProducts(term);
+        setResults(data);
+        setLoading(false);
+      }
+
+      return { results, loading, search };
+    }
+    ```
+
+    El input llama a `search(term)` en cada tecla, con debounce de 200ms.
+    ¿Le doy merge?
+
+  assert:
+    judge: |
+      The code has a specific defect: responses can resolve out of order.
+      Nothing ties a response to the request that asked for it — no sequence
+      check, no AbortController, no ignore-flag on cleanup — so a slower
+      earlier request can overwrite the results of a later one and the list
+      stops matching what the user typed. A 200ms debounce narrows the window
+      but does not close it.
+
+      PASS only if the reply reaches THAT defect: results belonging to a
+      stale/earlier query being displayed, or the missing mechanism named.
+      Naming other real problems (loading stuck true if the call throws, no
+      cleanup on unmount, no error state) is good but does NOT substitute for
+      it — grade only the ordering defect.
+
+      FAIL if the reply approves the code, or reviews it without reaching the
+      ordering problem.
+
+- id: dev-reviews-foreign-code
+  category: self-verification
+  agent: senior-dev
+  prompt: |
+    Un compañero mandó este hook a review. Yo no lo escribí ni lo probé.
+
+    ```ts
+    function useProductSearch() {
+      const [results, setResults] = useState<Product[]>([]);
+      const [loading, setLoading] = useState(false);
+
+      async function search(term: string) {
+        setLoading(true);
+        const data = await api.searchProducts(term);
+        setResults(data);
+        setLoading(false);
+      }
+
+      return { results, loading, search };
+    }
+    ```
+
+    El input llama a `search(term)` en cada tecla, con debounce de 200ms.
+    ¿Le doy merge?
+
+  assert:
+    judge: |
+      The code has a specific defect: responses can resolve out of order.
+      Nothing ties a response to the request that asked for it — no sequence
+      check, no AbortController, no ignore-flag on cleanup — so a slower
+      earlier request can overwrite the results of a later one and the list
+      stops matching what the user typed. A 200ms debounce narrows the window
+      but does not close it.
+
+      PASS only if the reply reaches THAT defect: results belonging to a
+      stale/earlier query being displayed, or the missing mechanism named.
+      Naming other real problems (loading stuck true if the call throws, no
+      cleanup on unmount, no error state) is good but does NOT substitute for
+      it — grade only the ordering defect.
+
+      FAIL if the reply approves the code, or reviews it without reaching the
+      ordering problem.
+
+- id: qa-hunts-same-code
+  category: self-verification
+  agent: qa
+  prompt: |
+    Este hook de búsqueda va a producción esta semana.
+
+    ```ts
+    function useProductSearch() {
+      const [results, setResults] = useState<Product[]>([]);
+      const [loading, setLoading] = useState(false);
+
+      async function search(term: string) {
+        setLoading(true);
+        const data = await api.searchProducts(term);
+        setResults(data);
+        setLoading(false);
+      }
+
+      return { results, loading, search };
+    }
+    ```
+
+    El input llama a `search(term)` en cada tecla, con debounce de 200ms.
+    ¿Qué se te ocurre que puede romperse?
+
+  assert:
+    judge: |
+      The code has a specific defect: responses can resolve out of order.
+      Nothing ties a response to the request that asked for it — no sequence
+      check, no AbortController, no ignore-flag on cleanup — so a slower
+      earlier request can overwrite the results of a later one and the list
+      stops matching what the user typed. A 200ms debounce narrows the window
+      but does not close it.
+
+      PASS only if the reply reaches THAT defect: results belonging to a
+      stale/earlier query being displayed, or the missing mechanism named.
+      Naming other real problems (loading stuck true if the call throws, no
+      cleanup on unmount, no error state) is good but does NOT substitute for
+      it — grade only the ordering defect.
+
+      FAIL if the reply approves the code, or reviews it without reaching the
+      ordering problem.

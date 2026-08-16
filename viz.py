@@ -148,22 +148,22 @@ CSS = """
 *{box-sizing:border-box}
 :root{
   --bg:#fbfbfa; --fg:#1a1a19; --dim:#6b6b68; --line:#e4e4e1; --card:#fff;
-  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f;
+  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf;
   --tool:#4a6fa5; --text:#5a4a7a; --think:#8a8a86; --result:#3d7a6c;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#161615; --fg:#e8e8e5; --dim:#9a9a95; --line:#2e2e2c; --card:#1e1e1d;
-  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441;
+  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0;
   --tool:#7fa3d8; --text:#a690cf; --think:#7a7a76; --result:#6cbfa8;
 }}
 :root[data-theme=dark]{
   --bg:#161615; --fg:#e8e8e5; --dim:#9a9a95; --line:#2e2e2c; --card:#1e1e1d;
-  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441;
+  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0;
   --tool:#7fa3d8; --text:#a690cf; --think:#7a7a76; --result:#6cbfa8;
 }
 :root[data-theme=light]{
   --bg:#fbfbfa; --fg:#1a1a19; --dim:#6b6b68; --line:#e4e4e1; --card:#fff;
-  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f;
+  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf;
   --tool:#4a6fa5; --text:#5a4a7a; --think:#8a8a86; --result:#3d7a6c;
 }
 body{margin:0;background:var(--bg);color:var(--fg);
@@ -179,6 +179,16 @@ h1{font-size:20px;margin:0 0 4px} .sub{color:var(--dim);margin:0 0 28px}
 .badge{font-size:11px;font-weight:700;letter-spacing:.04em;padding:1px 7px;
   border-radius:99px;border:1px solid currentColor}
 .PASS{color:var(--pass)} .FAIL{color:var(--fail)} .ERROR{color:var(--err)}
+.FLAKY{color:var(--flaky)}
+/* Samples of one scenario, when --repeat took more than one. */
+.samples{margin:10px 0 0;display:flex;flex-direction:column;gap:6px}
+.sample{border:1px solid var(--line);border-left:3px solid currentColor;
+  border-radius:4px;padding:8px 12px;font-size:13px}
+.sample .who{font:600 11px/1.4 ui-monospace,monospace;margin-bottom:4px;
+  display:flex;gap:8px;align-items:center}
+.sample .txt{color:var(--fg);white-space:pre-wrap;word-break:break-word;
+  max-height:9em;overflow:hidden;cursor:pointer}
+.sample .txt.open{max-height:none}
 .catrow{display:flex;align-items:baseline;gap:10px;margin:26px 0 10px}
 .catrow h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;
   color:var(--dim);margin:0;font-weight:600}
@@ -271,14 +281,33 @@ function openScenario(runIdx, id){
 }
 function render(sc){
   SPK = new Map();          // colours are per-conversation
+  const n = sc.repeat || 1;
   let h = `<div class="meta" style="margin-bottom:10px">
     <span class="badge ${sc.status}">${sc.status}</span>
+    ${n>1?`<span><b>${sc.passes}/${n}</b> samples passed</span>`:''}
     <span>agent <b>${esc(sc.agent)}</b></span>
     <span>$${(sc.cost_usd??0).toFixed(3)}</span>
     <span>${sc.duration_ms||0} ms</span>
     <span>${sc.steps.length} steps</span></div>`;
   if(sc.failures?.length) h += `<div class="fails">✕ ${sc.failures.map(esc).join('<br>✕ ')}</div>`;
   if(sc.judge) h += `<p class="note"><b>judge:</b> ${sc.judge.verdict===true?'PASS':sc.judge.verdict===false?'FAIL':'no verdict'} — ${esc(sc.judge.why)}</p>`;
+
+  // Every sample, not just the one whose conversation is replayed below. The
+  // trace keeps one event stream to stay small, but all the REPLIES — and on a
+  // flaky scenario, reading them side by side is the whole point of --repeat.
+  if(n>1){
+    h += `<h3 style="font-size:13px;margin:18px 0 0">${n} samples</h3>
+          <div class="samples">`;
+    sc.trials.forEach((t,i)=>{
+      const jw = t.judge?.why ? ` — ${esc(t.judge.why)}` : '';
+      h += `<div class="sample ${t.status}">
+        <div class="who"><span class="badge ${t.status}">${t.status}</span>
+          <span>sample ${i+1}</span><span>$${(t.cost_usd??0).toFixed(3)}</span></div>
+        <div class="txt clip">${esc(t.reply || t.error)}</div>
+        ${jw?`<p class="note" style="margin:6px 0 0">judge${jw}</p>`:''}</div>`;
+    });
+    h += `</div>`;
+  }
 
   h += `<div class="ctl"><button id="play">▶ play</button>
         <button id="all">show all</button>
@@ -334,7 +363,7 @@ function render(sc){
 function wire(sc){
   const steps = [...document.querySelectorAll('#tl .step:not(.me)')];
   const pos = document.getElementById('pos');
-  document.querySelectorAll('.bub,.arg').forEach(el=>el.onclick=()=>el.classList.toggle('open'));
+  document.querySelectorAll('.bub,.arg,.sample .txt').forEach(el=>el.onclick=()=>el.classList.toggle('open'));
   const showAll = ()=>{clearInterval(timer);steps.forEach(s=>s.classList.add('on'));
                        pos.textContent=`${steps.length}/${steps.length}`;};
   document.getElementById('all').onclick = showAll;
@@ -381,6 +410,8 @@ def render_overview(runs: list) -> str:
                     f'<div class="card" onclick="openScenario({ri},\'{esc(sc["id"])}\')">'
                     f'<h3>{esc(sc["id"])}</h3>'
                     f'<div class="meta"><span class="badge {sc["status"]}">{sc["status"]}</span>'
+                    + (f'<span>{sc.get("passes", 0)}/{sc["repeat"]}</span>'
+                       if sc.get("repeat", 1) > 1 else '') +
                     f'<span>{esc(sc["agent"])}</span>'
                     f'<span>${sc.get("cost_usd", 0):.3f}</span>'
                     f'<span>{len(sc["steps"])} steps</span></div></div>')
@@ -447,7 +478,11 @@ def build_index(runs_dir: Path) -> str:
         bad = [s for s in scs if s["status"] != "PASS"]
         cats = sorted({s.get("category", "?") for s in scs})
         subs = sum(len(s.get("delegated_to") or {}) for s in scs)
-        state = ("PASS" if not bad else "FAIL")
+        # A run whose only blemish is instability is not the same as one that
+        # failed outright — colouring both red hides which kind of bad it was.
+        state = ("PASS" if not bad
+                 else "FLAKY" if all(s["status"] == "FLAKY" for s in bad)
+                 else "FAIL")
         # A run judged against scenarios that no longer exist is history, not a
         # baseline: comparing a future run to it reads a verdict from criteria
         # nobody kept. Say so rather than deleting the evidence.

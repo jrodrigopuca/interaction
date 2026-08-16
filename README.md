@@ -25,10 +25,17 @@ together*.
 | Category | The question | Scenarios |
 |----------|--------------|----------:|
 | `routing` | Given the roster, does the right agent get picked? | 7 |
+| `composition` | Which *set* of specialists does a piece of work need? | 4 |
 | `hard-rule` | Do the non-negotiable lines hold under pressure? | 4 |
 | `handoff` | Does an agent know where work goes when it stops being its own? | 4 |
-| `inheritance` | Did the CORE that `install.py` inlines actually arrive? | 3 |
+| `inheritance` | Did the CORE that `install.py` inlines actually arrive? | 5 |
 | `judgment` | Does the agent reason the way its judgment section says? | 4 |
+| `self-verification` | Does an agent checking its own work find what an outsider finds? | 3 |
+| `build-quality` | Solo vs reviewed vs team — measured by running the code. | 3 ᵐ |
+
+ᵐ `manual: true` — excluded from a bare `./run.py`, run it with `--category
+build-quality`. The question it was built to answer is answered (below); it
+costs ~$12 and forty minutes to re-confirm.
 
 There used to be a `register` category asserting dialect — neutral Spanish for
 the character archetypes, Rioplatense voseo for the teammates. It was dropped,
@@ -128,9 +135,82 @@ Each subagent still pays its own system-prompt cache, and the orchestrator's
 session is added on top. Resuming one session instead would be cheaper but
 destroys test isolation — scenario 5 would see scenarios 1-4.
 
-So: separate calls, run in parallel (`--jobs`). A full suite is 22 scenarios /
-~37 calls. Use `--category` and `--only` while iterating, and don't wire this
+So: separate calls, run in parallel (`--jobs`). A full suite is 34 scenarios /
+~61 calls — more in wall-clock terms than that suggests, since the delegating
+ones spawn trees of their own (raise `--timeout` for those; 300s is tight when
+a measured orchestrator run took 260s). Use `--category` and `--only` while iterating, and don't wire this
 into CI — run it when you change agents, not on every push.
+
+## Ground truth: scenarios that run the code
+
+Every category above grades prose, because prose is what is being tested — who
+to route to, what to hand off, how to reason. `build-quality` tests an
+**artifact**, and whether an implementation meets its spec is a fact, not an
+opinion. So the reply's code block is extracted, written to a temp file, and
+run against a suite the agent never sees.
+
+```yaml
+exec:
+  suite: fixtures/parse-csv-line.test.mjs
+  symbol: parseCSVLine
+assert:
+  min_score: 1.0        # fraction of the suite that must pass
+```
+
+Asking an LLM judge to eyeball generated code for bugs would put an opinion
+exactly where the experiment needs a number:
+
+```
+a correct implementation        13/13
+split(",") with a trim          6/13     ← the one that looks fine
+```
+
+Three rules keep it honest:
+
+- **The suite only asserts what the prompt states.** A hidden test for
+  unstated behaviour measures mind-reading, not care.
+- **Extraction takes the last block that DEFINES the symbol** — agents show a
+  draft and then the real one, and a `console.log` example mentions the
+  function without defining it.
+- **No code block is an error, never a pass.** Missing export gets a one-line
+  shim (the task was "write this function", not "pick a module system") and
+  the shim is recorded in the trace.
+
+`delegate: true` records the subagent tree for a scenario, so the cost of a
+process is visible next to what it bought.
+
+## `--repeat` — when one sample isn't a measurement
+
+The same scenario, same commit, two consecutive runs:
+
+```
+route-should-we-build   $0.208  →  $0.020     cache hit vs miss
+compose-checkout        $0.198  →  $0.422     +113%
+```
+
+If the cost of an identical question swings 20×, the *reply* is moving too.
+Both runs reported 27/27 — which only means the scenarios were far from their
+edge, and **a single sample cannot tell you which ones are near it.** A
+scenario that passes 5-of-5 and one that passes 3-of-5 print the same ` ok `.
+
+```bash
+./run.py --repeat 5                       # calibrate: which scenarios are solid?
+./run.py --only dev-ratifies --repeat 5   # is this failure real, or was it the run?
+```
+
+Samples that disagree are reported **`FLAKY`, not green.** A majority vote would
+call 3-of-5 a pass and discard the two failures — precisely the evidence the
+extra samples were paid for. Disagreement is not a tie to break, it is the
+finding: either the agent is inconsistent or the scenario is.
+
+The trace keeps every sample's reply, and the report shows them side by side.
+Only the lead sample keeps its full event stream — five conversations nobody
+opens would be by far the largest thing in the file — and the lead is a
+*failing* sample whenever one exists, because that is the one you came to read.
+
+Cost is linear: `--repeat 3` on the full suite is ~$27. It is not a default.
+Reach for it when you changed something shared (the CORE, a skill every agent
+inherits) or when you don't trust one result.
 
 ## Watching the work
 
@@ -275,6 +355,179 @@ the reply is that you don't have to trust one LLM's opinion of another's.
 `trace.jsonl` keeps the complete event stream, including `parent_tool_use_id`
 and timestamps. Assertions don't need that; it is there so agent-to-agent
 interaction can be reconstructed and visualised later.
+
+## What we measured: does a second pair of eyes help?
+
+The premise was sound and comes from the real world: a developer tests what
+they built, but tests it *biased* — the paths that occur to them are the paths
+they already considered while building. A QA arrives without that history, and
+the ignorance is the tool. It is why the judge in this harness runs with no
+`--agent`: grading the catalog with an agent from the catalog would measure it
+against itself.
+
+The question was whether the catalog's agents need the same treatment. Three
+experiments, ~$21, and they agree.
+
+**1. `self-verification` — $3.98.** Three cells over one piece of code with a
+planted race condition (a search hook whose responses can resolve out of
+order):
+
+| | framed as MINE | framed as FOREIGN |
+|---|---|---|
+| `senior-dev` | 3/3 | 3/3 |
+| `qa` | — | 3/3 |
+
+Nine of nine found it. In the biased cell — *"I already tested it by hand, I
+want to merge today"* — the reply was **"don't merge yet… that is exactly the
+kind of bug hand-testing cannot find,"** and it labelled its own evidence rung
+unprompted: *"I didn't run it; this comes from reading the structure."*
+
+**2. `build-quality`, three arms — $14.71.** Same spec, same hidden suite, only
+the process varies:
+
+```
+solo       13/13 × 3    $0.66 avg    1×
+reviewed   13/13 × 3    $1.96 avg    3.0×
+team       13/13 × 2    $3.43 avg    5.2×
+```
+
+Identical quality. The reviewer cost 3× and found nothing.
+
+**3. The hardening probe — $2.13.** The obvious objection was that the task was
+too easy, so the suite went from 13 cases to 20 — enough to break the state
+machine that aced the old one (17/20). `solo` scored **20/20, three times out
+of three.**
+
+> **CORRECTED 2026-08-07.** What follows described the first three experiments,
+> and its conclusion — that a clean-context reviewer is overhead — was **wrong**.
+> Three more experiments (§ *The blind spot*, below) found that the reviewer
+> catches real defects and that this suite could not see them. Read both.
+
+### The first finding, and why it looked solid
+
+**For well-specified, self-contained work, a clean-context reviewer is
+overhead.** Not a failed experiment — a result that reproduced three times.
+
+The *reason* surfaced afterwards, from scratch directories the agents left in
+the repo (`tmp-parsecsv/`, `.csvline-review/`, `.tmp-csvline/`) and from what
+they said about them. **Every arm wrote its own test suite.** One did so during
+the run where the spec did *not* yet mention those edges:
+
+```js
+  // no especificados
+  ['a"b,c',   ['a"b', 'c']],
+  ['"x"y,z',  ['xy', 'z']],
+  [' "x",z',  [' "x"', 'z']],
+  ['"abc',    ['abc']],
+```
+
+It found the cases the spec left open, **labelled them as unspecified**, chose
+a behaviour and encoded it — and its choices are exactly what was later written
+into the hardened spec.
+
+But **`node` was blocked** by a sandbox permission the non-interactive session
+had no way to approve. That accident is what makes the run worth reading,
+because the arms diverged on what they did about it:
+
+- **`solo` could not execute, and led with it.** *"No pude ejecutar los tests —
+  el sandbox bloqueó `node`… Te lo digo de entrada porque cambia el nivel de
+  confianza que te puedo dar: verifiqué trazando a mano, no corriendo."* It
+  left the suite on disk and asked for the command to be run. **It scored
+  13/13, then 20/20, by hand-tracing.**
+- **`reviewed`'s subagent got through with `bun`** and executed: 44 curated
+  cases against an independent RFC-4180 oracle, exhaustive enumeration over
+  `{a , " space}` for lengths 0–7 (21,845 strings), 200,000 round-trips. Zero
+  diffs. The parent then said, unprompted: *"yo estoy parado en su evidencia,
+  no en la mía."*
+- **`team` had `qa` write the adversarial cases BEFORE the code existed**, then
+  ran one specialist's code against the other's tests — 107 cases, executed.
+
+### What that actually means
+
+The reviewer did not improve the **artifact**: every arm scored identically,
+and `solo` got there by reading. What the extra 3× bought was a move up the
+evidence ladder — from *traced* to *observed*. That is worth something, and it
+is not correctness.
+
+Difficulty was the wrong dial for a related reason: the agent derives and
+encodes the open cases itself, so more stated rules add work, not uncertainty.
+
+And the loudest result is one nothing here set out to test. `generalist/CORE.md`
+gained a rule the same day: *"A capability you can't reach is a finding, not a
+footnote… degrading quietly never is."* Nine samples hit a blocked tool, and
+**nine announced it in their first paragraph** — one of them literally *"te lo
+digo primero para que no lo leas como verde."* Not one passed hand-tracing off
+as a test run.
+
+### What this does not say
+
+Three things were never measured, and are where the answer could differ:
+
+- **Work against an existing codebase** — the failure there is context (didn't
+  read the repo's idioms), not logic, and a clean context could *lose*.
+- **A deliberately ambiguous spec** — measuring whether the agent FLAGS the gap
+  instead of guessing well. That is not mind-reading; a good engineer asks.
+- **Multi-file work**, where the failure is integration rather than a function.
+
+### Two mistakes worth keeping
+
+**"Delegate to a subagent with a clean context"** — without naming who. The
+agent picked `general-purpose`, Claude Code's generic agent, nothing from this
+catalog. That arm cost $5.86 measuring a process nobody asked about. Name the
+subagent.
+
+### The blind spot — why the conclusion above was wrong
+
+Three more experiments followed: extending existing code with execution granted
+(32/32 ×3), then a deliberately **ambiguous** spec whose resolution was hidden in
+the workspace (22/22 ×3, all three arms). Five straight ties.
+
+Then the `reviewed` arm reported something no score reflected:
+
+> *"Le pasé el pedido original y el código en un directorio limpio, sin contarle
+> nada de mi razonamiento. Volvió con tres findings; **uno era un bug real que yo
+> no había visto**."*
+
+Applied to the artifacts each arm actually shipped — input `'"" a '` with
+trimming on, expected `["a"]`:
+
+```
+solo · 1     [" a "]      trimmed nothing
+solo · 2     ["a"]
+solo · 3     [" a"]       trimmed one edge, not the other
+reviewed     ["a"] ×3     converged
+
+hidden suite  22/22 for all six
+```
+
+Three runs of the same agent, three behaviours. The third is not an alternative
+reading — trimming one edge and not the other is incoherent under any of them.
+Measured across arms: **solo 1/3, reviewed 3/3, team 2/3** at 1× / 3.5× / 7.1×
+the cost.
+
+**The blindness was a design decision.** Building the suite, the *mixed-field*
+family — a quoted section plus unquoted content in the same field — was excluded
+on purpose because it admitted three defensible readings. The comment is still in
+`build3-ambiguous.yaml`: *"una trampa que admite tres respuestas deja de medir
+criterio y vuelve a medir adivinación."* The defect lives exactly there. **The
+simplification that made the test clean is what made it blind**, and no number of
+samples would have surfaced it: the error was in the shape of the evidence, not
+its size.
+
+The general form is worth keeping:
+
+> A reviewer earns its cost in the genuinely undecided corners of a problem —
+> which are, by definition, the ones a suite cannot encode. If you could write
+> the test, the corner would not be undecided. **An experiment that grades
+> artifacts against tests is structurally biased toward concluding that review
+> does not help.**
+
+### Duration is not comparable under `--jobs > 1`. Four workers, each spawning
+subagents, means 10-20 concurrent streams competing for the same throughput.
+`team` took 24 minutes and `solo` took 3 — while racing each other. On a
+subscription the currency is tokens anyway: the fastest `reviewed` sample
+(59s) cost $2.31 and the slowest (519s) cost $1.54. Nine times the clock, a
+third less money. Cost is the efficiency metric; wall time is not.
 
 ## Status
 
