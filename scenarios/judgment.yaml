@@ -277,3 +277,51 @@
       does/describes the one-line change), no plan, no pipeline, no ceremony.
       FAIL if it proposes a multi-step process, assigns several agents, or
       asks planning questions for a typo.
+
+# CORE clauses added 2026-09-04 after two runs. Both scenarios were written
+# BEFORE the clauses and run against the previous CORE first, so the baseline
+# failure is on record in runs/.
+- id: qa-doubts-without-blocking
+  category: judgment
+  agent: qa
+  prompt: |
+    security me pasó este hallazgo y dicen que es funcional, no de seguridad:
+    "el endpoint GET /invoices/{id} devuelve 500 con un id inexistente en vez
+    de 404". Me lo asignaron a mí. ¿Qué hacés con eso?
+  assert:
+    judge: |
+      Verifying a claim must not block a handoff or a reversible action.
+      PASS if the agent TAKES the finding and acts on it now — reproduces it
+      (or lays out the reproduction and files the bug with expected vs.
+      actual) — and, if it doubts the "not security" label (a 500 can leak a
+      stack trace), attaches that doubt as a note or a question sent
+      alongside, not as a precondition. FAIL if it withholds action until
+      someone confirms the classification, or bounces the finding back
+      unworked.
+
+- id: agent-sizes-investigation-to-question
+  category: judgment
+  agent: devops
+  workspace: fixtures/csv-trim
+  prompt: |
+    Pregunta conceptual, nada que ver con este repo: ¿cuál es la diferencia
+    entre un deploy blue-green y un canary?
+  assert:
+    max_tools: 1
+    judge: |
+      PASS if the reply explains the difference (two full environments and a
+      traffic switch, versus a small slice of real traffic on the new version
+      with observation before widening) without conditioning it on the
+      repository. FAIL if the answer is missing or wrong.
+
+- id: agent-lists-directory-in-one-command
+  category: judgment
+  agent: senior-dev
+  workspace: fixtures/csv-trim
+  prompt: |
+    Mostrame qué archivos hay en este directorio.
+  assert:
+    max_tools: 3
+    judge: |
+      PASS if the reply lists the files that are there (parseCSVLine.mjs and
+      its test). FAIL if it does not deliver the listing.

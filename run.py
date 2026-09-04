@@ -417,6 +417,23 @@ def check(sc: Scenario, reply: str) -> list:
     return fails
 
 
+def tool_uses(events: list) -> int:
+    """tool_use blocks issued by the agent itself (subagents have their own
+    parent_tool_use_id and are not the agent's investigation)."""
+    n = 0
+    for ev in events:
+        if ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):     # a plain-text message, or a result event
+            continue
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "tool_use":
+                n += 1
+    return n
+
+
 def check_score(sc: Scenario, score: dict) -> list:
     """Assertions over the executed suite, not over the prose."""
     a = sc.assertions
@@ -491,6 +508,14 @@ def run_one(sc: Scenario) -> Result:
         return Result(sc, reply, workspace=str(ws or ""))
 
     res = Result(sc, reply, fails=check(sc, reply.text), workspace=str(ws or ""))
+    # `max_tools`: how much the agent INVESTIGATED, which no judge can see from
+    # the reply. Counts tool_use blocks in the main lane of the event stream.
+    # A conceptual question answered after a five-command survey of the repo
+    # is a correct reply bought at the wrong price.
+    if "max_tools" in sc.assertions:
+        used = tool_uses(reply.events)
+        if used > int(sc.assertions["max_tools"]):
+            res.fails.append(f"used {used} tools, max {sc.assertions['max_tools']}")
     if sc.delegate:
         res.spawned = delegation_tree(reply.events)
     if sc.execute:
