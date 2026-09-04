@@ -82,9 +82,14 @@ Two kinds, mixable in one scenario:
       developer, WITHOUT sounding territorial or blaming.
 ```
 
-**The judge is deliberately neutral** — invoked with plain `claude -p`, never
-with an agent from the catalog. Grading the catalog with the catalog would
-measure it against itself. And a verdict that doesn't parse as PASS/FAIL is an
+**The judge is deliberately neutral** — invoked with `claude -p --safe-mode`,
+its own one-paragraph system prompt and no tools; never with an agent from the
+catalog. Grading the catalog with the catalog would measure it against itself,
+and grading it with the user's own `CLAUDE.md` loaded is the same mistake one
+layer down: until `--safe-mode`, the judge answered YES to "do your
+instructions mention Senior Architect or Rioplatense?". It also makes a strong
+judge cheap — ~$0.004 per verdict on Opus instead of ~$0.40, because the
+default session's tool schemas alone were ~30k tokens of cache write. And a verdict that doesn't parse as PASS/FAIL is an
 `ERROR`, never a pass: a harness that fails toward green is worse than none.
 
 **Routing works differently.** It's the one thing you can't test by invoking an
@@ -98,14 +103,21 @@ the installed copy is what actually runs.
 Two independent knobs, because they answer different questions:
 
 ```bash
-./run.py --model opus --judge-model sonnet    # defaults: CLI's own + sonnet
+./run.py                                      # defaults: agent on sonnet, judge on opus
+./run.py --model opus --only dev-ratifies     # re-check one failure on a stronger agent
 ```
 
-- `--model` — the agent under test. **Use the model you actually work with.**
-  Testing `qa` on Sonnet while you work on Opus measures an agent you never
-  talk to.
-- `--judge-model` — a PASS/FAIL classifier over a short reply. Opus there is
-  waste; it defaults to Sonnet.
+- `--model` — the agent under test. Defaults to **Sonnet**: a model in daily
+  use here, and at the current price ladder the biggest lever on what a run
+  costs. It also makes the suite a robustness test — a prompt that steers
+  Sonnet steers the stronger models too. A failure that smells like capability
+  rather than prompt gets re-run once on `--model opus` before the agent file
+  is touched; a full run on the strongest model is a release check, not the
+  default.
+- `--judge-model` — the PASS/FAIL classifier. Defaults to **Opus**: the judge
+  decides the verdict, and a lenient judge turns every run green, which is
+  the failure mode this harness exists to avoid. Its prompt is short, so the
+  stronger model is cheap on this side.
 
 ## What a run costs
 

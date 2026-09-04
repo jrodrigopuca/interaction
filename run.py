@@ -63,20 +63,27 @@ TIMEOUT = 300            # single-agent scenarios (--timeout)
 DELEGATE_TIMEOUT = 1800  # scenarios with delegate: true (--delegate-timeout)
 
 WS_ROOT = Path(tempfile.gettempdir())   # set to <run>/workspaces in main()
-COST_PER_CALL = 0.20    # calibrated from observed runs; --dry-run estimates only
+COST_PER_CALL = 0.10    # --dry-run estimates only. Recalibrated 2026-09-04 with the
+                        # sonnet agent / safe-mode opus judge defaults: a cold agent
+                        # call ~$0.17, a judge ~$0.02-0.03, tool-heavy agents more.
 
 # Two independent model choices, because they answer different questions.
 #
-# The agent under test should run on the model you ACTUALLY use — testing qa on
-# Sonnet while you work with Opus measures an agent you never talk to. Default
-# is empty: inherit whatever the CLI is configured with.
+# The agent under test runs on Sonnet: a model the user works with daily, and
+# at the current price ladder (Sonnet 5 under half of Opus 5 per token) the
+# single largest lever on a run's cost. It also makes the suite a robustness
+# test — an agent file that steers Sonnet steers the stronger models too. When
+# a scenario fails here and you suspect capability rather than the prompt,
+# re-run that one with `--model opus` (or the model you actually talk to)
+# before touching the agent.
 #
-# The judge is a PASS/FAIL classifier over a short reply. Opus there is waste,
-# so it defaults to a cheaper model. On a subscription the currency is
-# rate-limit budget rather than dollars, and the judge is roughly half the
-# calls in a full run.
-AGENT_MODEL = ""        # --model
-JUDGE_MODEL = "sonnet"  # --judge-model
+# The judge runs on Opus: it is what decides PASS/FAIL, and a lenient judge
+# turns every run green — the failure mode this harness exists to avoid. The
+# judge's prompt is short, so the stronger model costs far less here than it
+# would on the agent side. On a subscription the currency is rate-limit
+# budget rather than dollars.
+AGENT_MODEL = "sonnet"  # --model
+JUDGE_MODEL = "opus"    # --judge-model
 
 
 # --------------------------------------------------------------------------- #
@@ -148,7 +155,8 @@ class Reply:
 
 def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
-        cwd: Path = None, allow: str = "", deny: str = "") -> Reply:
+        cwd: Path = None, allow: str = "", deny: str = "",
+        safe_mode: bool = False, system: str = "", tools: str = None) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -168,6 +176,22 @@ def ask(prompt: str, agent: str = "", model: str = "",
         cmd += ["--allowedTools", allow]
     if deny:
         cmd += ["--disallowedTools", deny]
+    if safe_mode:
+        # Every customization off: CLAUDE.md, output styles, skills, hooks,
+        # agents. A grader must not inherit the user's persona — measured: with
+        # the default session the judge answered YES to "do your instructions
+        # mention Senior Architect or Rioplatense?"; with --safe-mode, NO.
+        # (`--bare` would do the same but skips keychain reads, so a
+        # subscription session is not logged in.)
+        cmd.append("--safe-mode")
+    if system:
+        # REPLACES Claude Code's default system prompt (~37k tokens, paid as a
+        # cache write on every fresh session). The judge needs a paragraph.
+        cmd += ["--system-prompt", system]
+    if tools is not None:
+        # "" disables every built-in tool. Variadic like the tool flags above,
+        # so it must sit right before the `--` that ends flag parsing.
+        cmd += ["--tools", tools]
     # `--` before the prompt, always. Both tool flags are variadic and swallow
     # every following argument until the next flag — comma-joined values do not
     # help. A trailing prompt becomes a tool name and the CLI exits with
@@ -177,7 +201,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
     limit = timeout or TIMEOUT
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=limit,
-                              cwd=str(cwd) if cwd else None)
+                              cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return Reply(text="", error=f"timed out after {limit}s")
     if proc.returncode != 0:
@@ -344,11 +368,15 @@ def judge(criterion: str, reply: str) -> tuple:
     the same catalog would measure it against itself. An unparseable verdict is
     an ERROR, never a pass — a harness that fails toward green is worse than no
     harness."""
-    prompt = (JUDGE_PREAMBLE +
-              f"CRITERION:\n{criterion}\n\nREPLY TO GRADE:\n---\n{reply}\n---\n\n"
+    prompt = (f"CRITERION:\n{criterion}\n\nREPLY TO GRADE:\n---\n{reply}\n---\n\n"
               "Answer with exactly PASS or FAIL on the first line, then one "
               "sentence explaining why.")
-    r = ask(prompt, model=JUDGE_MODEL)
+    # A grader is a one-shot classifier: no tools, no customizations, and its
+    # own one-paragraph system prompt instead of Claude Code's. Measured on one
+    # scenario: the default session made the Opus judge cost ~$0.40 (tool
+    # schemas alone were ~30k tokens of cache write); with --safe-mode,
+    # --system-prompt and --tools "" the same verdict costs ~$0.004.
+    r = ask(prompt, model=JUDGE_MODEL, safe_mode=True, system=JUDGE_PREAMBLE, tools="")
     if r.error:
         return None, f"judge call failed: {r.error}", r.cost
     head = r.text.strip().splitlines()[0].strip().upper() if r.text.strip() else ""
@@ -535,6 +563,8 @@ def trial_record(r: Result) -> dict:
         "judge": {"verdict": r.judged, "why": r.judge_why}
                  if "judge" in r.sc.assertions else None,
         "cost_usd": round(r.cost, 4),
+        "agent_cost_usd": round(r.reply.cost, 4),
+        "judge_cost_usd": round(r.judge_cost, 4),
         "duration_ms": r.reply.ms,
         "reply": r.reply.text,
         "error": r.reply.error,
