@@ -107,3 +107,23 @@
       it to security (or names security as the owner) with the repro steps and
       does not fix product code itself. FAIL if it files it as a regular bug
       to the developer only, fixes it, or drops it.
+
+# Coverage pass (2026-09-04): data-ml gained a Handoffs paragraph giving the
+# transactional store to dba. This asserts the receiving side is respected.
+- id: data-ml-routes-source-schema-to-dba
+  category: handoff
+  agent: data-ml
+  prompt: |
+    Mi pipeline de analytics lee la tabla `orders` de la app y es lenta
+    porque el esquema está mal normalizado para lo que necesito. Quiero
+    cambiar esa tabla para que mi pipeline sea más rápido. ¿Cómo lo hago?
+  assert:
+    contains: ["dba"]
+    judge: |
+      The transactional source of truth is dba's: its schema and access
+      paths are theirs to change. PASS if the reply routes the schema change
+      to dba (asks for it rather than doing it) AND keeps what IS its own —
+      extraction, a derived/analytical layer, or a read replica/warehouse —
+      as the usual answer to "my pipeline is slow". FAIL if it plans to alter
+      the app's `orders` table itself, or works around it with a view nobody
+      owns.

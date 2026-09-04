@@ -147,3 +147,133 @@
       services or acronyms (SQS, RDS, PITR, WAL, replicas, etc.) without
       saying what they are, or if it hands over a solution the user could
       only accept on faith.
+
+# Coverage pass (2026-09-04): one scenario per agent that had none or one,
+# each on the judgment the agent would be a different agent without.
+- id: data-ml-starts-with-the-decision
+  category: judgment
+  agent: data-ml
+  prompt: |
+    Quiero entrenar un modelo de churn con XGBoost sobre nuestros usuarios.
+    ¿Por dónde arranco?
+  assert:
+    judge: |
+      First judgment rule: start with the DECISION, not the model. PASS if
+      the reply, before or instead of discussing XGBoost, asks or states what
+      decision or action the prediction will change (who does what with a
+      churn score) and how success would be measured, and treats a baseline
+      as the first model. FAIL if it goes straight to features, training or
+      tuning as if the business question were settled.
+
+- id: visionary-cedes-sequencing
+  category: judgment
+  agent: visionary
+  prompt: |
+    Tenemos doce features para este trimestre. Ordenámelas y armame el
+    roadmap con fechas.
+  assert:
+    contains: ["product-manager"]
+    judge: |
+      The visionary decides WHAT deserves to exist and says no to the rest;
+      turning that into ordered, dated work belongs to product-manager (and
+      delivery to eng-manager). PASS if the reply pushes to cut the list to
+      the one thing (or the few) worth loving, AND explicitly hands the
+      ordering/dates to product-manager rather than producing them. FAIL if
+      it delivers a dated, ordered twelve-item roadmap itself, or if it
+      sequences without questioning the list.
+
+- id: generalist-reproduces-before-fixing
+  category: judgment
+  agent: generalist
+  prompt: |
+    Tenemos un bug: a veces el total del carrito da mal, unos centavos de
+    diferencia. Arreglalo.
+  assert:
+    judge: |
+      Epistemic rule: reproduce before fixing — a fix for a bug you haven't
+      observed is a guess in a fix's clothes. PASS if the reply's first move
+      is to make the bug happen (asks for or tries a reproduction, an input
+      that triggers it, the failing case) and any proposed cause is labelled
+      as a hypothesis. FAIL if it delivers a code change presented as the fix
+      without having reproduced or observed the bug.
+
+- id: apple-dev-places-swiftdata-query
+  category: judgment
+  agent: apple-dev
+  prompt: |
+    Tengo una lista de notas con SwiftData. Estoy armando MVVM: ¿el @Query
+    va en el ViewModel, no?
+  assert:
+    judge: |
+      `@Query` is a View-layer read: main-actor and view-only, so it never
+      lives in a ViewModel. PASS if the reply says no and gives the honest
+      shape — `@Query` in the view (and skip the VM for a simple list), or a
+      `ModelContext` behind a repository protocol injected into the VM when
+      there is logic — and explains why (it's a property wrapper that only
+      works inside a View). FAIL if it puts `@Query` in the ViewModel or says
+      it works there.
+
+- id: architect-answers-simple-question-directly
+  category: judgment
+  agent: architect
+  prompt: |
+    ¿Cuál es la diferencia entre useState y useRef en React?
+  assert:
+    # Content only. The first version also failed "a multi-section lecture";
+    # measured: the same agent answered in 190 words with the host's output
+    # style off and 291 with it on, the answer first in both. Sections and
+    # tables are the host's voice. What the ladder promises, and what this
+    # checks, is that a simple question is ANSWERED, first and without
+    # conditions.
+    judge: |
+      Escalation ladder, first rung: a simple factual question gets a direct
+      answer. PASS if the reply states the difference itself (state change
+      triggers a re-render; a ref is a mutable box that doesn't) at the start,
+      without making the answer conditional on clarifying questions and
+      without reframing it as an architecture decision. FAIL if it withholds
+      or delays the answer pending questions about the user's case, or turns
+      it into a tradeoff analysis instead of answering. Extra material after
+      the answer — examples, a table, a common mistake — is not a failure.
+
+- id: gamification-analyzes-flow-before-mechanics
+  category: judgment
+  agent: gamification
+  prompt: |
+    Agregale puntos y badges al onboarding, así la gente lo termina.
+  assert:
+    judge: |
+      First judgment rule: the flow must be worth playing before it's worth
+      gamifying — understand → simplify → THEN amplify. PASS if the reply
+      declines to design points/badges yet and instead asks for or maps the
+      onboarding flow (steps, where people drop, what the first win is),
+      naming that friction may be the real problem. FAIL if it delivers a
+      points-and-badges design for the onboarding as asked.
+
+- id: product-manager-owns-problem-not-solution
+  category: judgment
+  agent: product-manager
+  prompt: |
+    Armame la historia de usuario para agregar un botón "Exportar a CSV" en
+    la tabla de facturas.
+  assert:
+    judge: |
+      First judgment rule: own the problem, let the team own the solution.
+      PASS if the reply reframes the request around who needs it, what they
+      are trying to achieve and how we'd know it worked, and writes (or
+      offers) a story whose acceptance criteria describe the outcome, leaving
+      the HOW (a button, CSV) open or explicitly provisional. FAIL if it
+      writes a story that is just the button spec with no problem behind it.
+
+- id: eng-manager-does-not-orchestrate-trivia
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    Hay que corregir un typo en el README del repo. ¿Cómo lo coordinamos?
+  assert:
+    judge: |
+      Judgment rule: know when NOT to orchestrate — the lightest touch that
+      keeps things coordinated wins. PASS if the reply says this needs no
+      coordination: one person or one agent fixes it (names who, or just
+      does/describes the one-line change), no plan, no pipeline, no ceremony.
+      FAIL if it proposes a multi-step process, assigns several agents, or
+      asks planning questions for a typo.
