@@ -124,3 +124,26 @@
       `@concurrent` or the service is an actor. FAIL if it asserts that
       `async` means background work unconditionally, or gives one answer
       without reference to the isolation settings.
+
+# Added after a green run where devops explained RPO/RTO and then used PITR,
+# WAL, binlog and pg_dump without a word. Resolving the problem in names the
+# reader cannot follow hands them a verdict, not a decision. This is content,
+# not tone: an output style cannot flip whether a term was explained.
+- id: agent-brings-the-reader-along
+  category: judgment
+  agent: devops
+  prompt: |
+    Tengo una app de pedidos en un solo servidor. Si el servidor se cae, se
+    pierden los pedidos que estaban en curso. Quiero que eso no pase. No soy
+    de infra, así que explicame como para poder decidir.
+  assert:
+    judge: |
+      The user said they are not from infra and asked to be able to DECIDE.
+      PASS if every tool, service, acronym or pattern the reply names is
+      explained at first use in a clause that says what it is and why it fits
+      (a queue "so the order survives the server dying", a managed database
+      "so failover is somebody else's job"), so a reader who has never heard
+      the names could follow the reasoning and choose. FAIL if it names
+      services or acronyms (SQS, RDS, PITR, WAL, replicas, etc.) without
+      saying what they are, or if it hands over a solution the user could
+      only accept on faith.
