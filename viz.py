@@ -245,11 +245,31 @@ button:hover{border-color:var(--dim)}
 .prompt{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--text);
   border-radius:6px;padding:12px 14px;white-space:pre-wrap;font-size:13.5px;margin:4px 0 8px}
 .idx td.n{font-family:ui-monospace,monospace}
+.idx tr.day td{background:transparent;color:var(--dim);font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding-top:22px;border:0;cursor:default}
+.idx tr.day:hover td{background:transparent}
+.idx td.what{max-width:460px} .idx .ids{font-family:ui-monospace,monospace;font-size:12px;color:var(--dim);display:block;margin-top:2px}
 .idx tr{cursor:pointer} .idx tr:hover td{background:var(--card)}
 .ctl{display:flex;gap:8px;align-items:center;margin:4px 0 14px}
 .reply{border-left:2px solid var(--line);padding-left:14px;white-space:pre-wrap;
   color:var(--fg);font-size:13px;margin-top:6px}
 .note{color:var(--dim);font-size:12px;margin:6px 0 0}
+/* Per-scenario structure: charge sheet → verdict → samples → conversation. */
+h3.sec{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--dim);margin:22px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line,#ddd)}
+.q{color:var(--dim);font-style:italic;font-size:13px}
+.catrow .q{margin-left:12px}
+.spec{background:var(--card);border-radius:8px;padding:12px 14px}
+.spec .q{margin-bottom:8px}
+.checks{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chk{font-family:ui-monospace,monospace;font-size:12px;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--line,#ddd)}
+.crit{white-space:pre-wrap;font-size:13px;line-height:1.45}
+.verdict{border-left:3px solid var(--dim);padding:8px 14px;border-radius:0 8px 8px 0;background:var(--card)}
+.verdict.PASS{border-color:var(--pass)} .verdict.FAIL{border-color:var(--fail)}
+.verdict.ERROR{border-color:var(--err)} .verdict.FLAKY{border-color:var(--flaky)}
+.verdict .jw{margin:6px 0 0;font-size:13px;line-height:1.45}
+.card .looks{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.35;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .fails{color:var(--fail);font-size:12.5px;margin:8px 0 0}
 table{border-collapse:collapse;width:100%;font-size:13px}
 td,th{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
@@ -282,21 +302,47 @@ function openScenario(runIdx, id){
 function render(sc){
   SPK = new Map();          // colours are per-conversation
   const n = sc.repeat || 1;
+  const spec = D.specs[sc.id];
+  const catq = D.catq[sc.category] || '';
   let h = `<div class="meta" style="margin-bottom:10px">
     <span class="badge ${sc.status}">${sc.status}</span>
     ${n>1?`<span><b>${sc.passes}/${n}</b> samples passed</span>`:''}
+    <span>${esc(sc.category)}</span>
     <span>agent <b>${esc(sc.agent)}</b></span>
     <span>$${(sc.cost_usd??0).toFixed(3)}</span>
     <span>${sc.duration_ms||0} ms</span>
     <span>${sc.steps.length} steps</span></div>`;
+
+  // 1. The charge sheet: what this test looks for, before any verdict. Read
+  // from the YAML — the trace never carried it.
+  h += `<h3 class="sec">What this test looks for</h3><div class="spec">`;
+  if(catq) h += `<div class="q">${esc(sc.category)} — ${esc(catq)}</div>`;
+  if(spec){
+    if(spec.checks.length)
+      h += `<div class="checks">${spec.checks.map(c=>`<span class="chk">✓ ${esc(c)}</span>`).join('')}</div>`;
+    if(spec.judge) h += `<div class="crit">${esc(spec.judge)}</div>`;
+    if(!spec.checks.length && !spec.judge) h += `<p class="note">no assertions declared</p>`;
+    if(spec.workspace) h += `<p class="note">runs in a fresh copy of <code>${esc(spec.workspace)}</code></p>`;
+  } else {
+    h += `<p class="note">this scenario is no longer defined in scenarios/*.yaml — the verdict below was reached against a criterion nobody kept</p>`;
+  }
+  h += `</div>`;
+
+  // 2. The verdict, with every reason it was reached.
+  h += `<h3 class="sec">Verdict</h3><div class="verdict ${sc.status}">
+        <div class="who"><span class="badge ${sc.status}">${sc.status}</span>
+        ${n>1?`<span>${sc.passes}/${n} samples</span>`:''}</div>`;
   if(sc.failures?.length) h += `<div class="fails">✕ ${sc.failures.map(esc).join('<br>✕ ')}</div>`;
-  if(sc.judge) h += `<p class="note"><b>judge:</b> ${sc.judge.verdict===true?'PASS':sc.judge.verdict===false?'FAIL':'no verdict'} — ${esc(sc.judge.why)}</p>`;
+  if(sc.judge) h += `<p class="jw"><b>judge — ${sc.judge.verdict===true?'PASS':sc.judge.verdict===false?'FAIL':'no verdict'}:</b> ${esc(sc.judge.why)}</p>`;
+  if(sc.error) h += `<div class="fails">error: ${esc(sc.error)}</div>`;
+  if(!sc.failures?.length && !sc.judge && !sc.error) h += `<p class="note">deterministic checks passed</p>`;
+  h += `</div>`;
 
   // Every sample, not just the one whose conversation is replayed below. The
   // trace keeps one event stream to stay small, but all the REPLIES — and on a
   // flaky scenario, reading them side by side is the whole point of --repeat.
   if(n>1){
-    h += `<h3 style="font-size:13px;margin:18px 0 0">${n} samples</h3>
+    h += `<h3 class="sec">Samples — ${n}, side by side</h3>
           <div class="samples">`;
     sc.trials.forEach((t,i)=>{
       const jw = t.judge?.why ? ` — ${esc(t.judge.why)}` : '';
@@ -309,7 +355,8 @@ function render(sc){
     h += `</div>`;
   }
 
-  h += `<div class="ctl"><button id="play">▶ play</button>
+  h += `<h3 class="sec">Conversation</h3>
+        <div class="ctl"><button id="play">▶ play</button>
         <button id="all">show all</button>
         <span class="note" id="pos"></span></div>`;
 
@@ -356,7 +403,7 @@ function render(sc){
   // Only when it is NOT already the last bubble — otherwise it is the same
   // text printed twice, which reads as if the agent repeated itself.
   if(sc.reply && sc.reply.trim() !== (lastText?.detail||'').trim())
-    h += `<h3 style="font-size:13px;margin:22px 0 0">Final reply</h3>
+    h += `<h3 class="sec">Final reply</h3>
           <div class="reply">${esc(sc.reply)}</div>`;
   return h;
 }
@@ -391,7 +438,8 @@ def esc(s):
     return html.escape(str(s or ""))
 
 
-def render_overview(runs: list) -> str:
+def render_overview(runs: list, specs: dict = None) -> str:
+    specs = specs or {}
     out = []
     for ri, run in enumerate(runs):
         cats = {}
@@ -403,9 +451,12 @@ def render_overview(runs: list) -> str:
                    f'<span class="meta">{len(run["scenarios"]) - bad}/{len(run["scenarios"])}'
                    f' passed · ${total:.2f}</span></div>')
         for cat, scs in sorted(cats.items()):
-            out.append(f'<div class="catrow"><h2>{esc(cat)}</h2><div class="rule"></div></div>')
+            q = CATEGORY_QUESTION.get(cat, "")
+            out.append(f'<div class="catrow"><h2>{esc(cat)}</h2><div class="rule"></div>'
+                       + (f'<span class="q">{esc(q)}</span>' if q else '') + '</div>')
             out.append('<div class="grid">')
             for sc in sorted(scs, key=lambda s: s["id"]):
+                spec = specs.get(sc["id"])
                 out.append(
                     f'<div class="card" onclick="openScenario({ri},\'{esc(sc["id"])}\')">'
                     f'<h3>{esc(sc["id"])}</h3>'
@@ -414,7 +465,8 @@ def render_overview(runs: list) -> str:
                        if sc.get("repeat", 1) > 1 else '') +
                     f'<span>{esc(sc["agent"])}</span>'
                     f'<span>${sc.get("cost_usd", 0):.3f}</span>'
-                    f'<span>{len(sc["steps"])} steps</span></div></div>')
+                    f'<span>{len(sc["steps"])} steps</span></div>'
+                    f'<div class="looks">{esc(looks_for(spec))}</div></div>')
             out.append("</div>")
     return "\n".join(out)
 
@@ -447,6 +499,79 @@ def render_compare(runs: list) -> str:
             f'that does the thing and one that sometimes does it.</p>')
 
 
+# The question each category asks, from the README table. Shown above the
+# cards so a reader knows what kind of promise is being checked before reading
+# any single scenario.
+CATEGORY_QUESTION = {
+    "routing": "Given the roster, does the right agent get picked?",
+    "composition": "Which SET of specialists does a piece of work need?",
+    "hard-rule": "Do the non-negotiable lines hold under pressure?",
+    "handoff": "Does the agent know where work goes when it stops being its own?",
+    "inheritance": "Did the CORE that install.py inlines actually arrive?",
+    "judgment": "Does the agent reason the way its judgment section says?",
+    "self-verification": "Does an agent checking its own work find what an outsider finds?",
+    "build-quality": "Solo vs reviewed vs team — measured by running the code.",
+}
+
+
+def load_specs(root: Path) -> dict:
+    """id -> what the scenario looks for, read from scenarios/*.yaml.
+
+    The trace records the verdict and the judge's reason, never the CRITERION:
+    that lives in the YAML, and a report that shows a FAIL without what was
+    being asked for is a verdict with no charge sheet."""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    out = {}
+    for f in sorted((root / "scenarios").glob("*.yaml")):
+        for s in yaml.safe_load(f.read_text()) or []:
+            a = s.get("assert") or {}
+            checks = []
+            if s.get("expect"):
+                checks.append(f"routes to `{s['expect']}`")
+            if a.get("matches"):
+                checks.append(f"reply matches /{a['matches']}/")
+            for n in a.get("contains") or []:
+                checks.append(f"mentions `{n}`")
+            for n in a.get("not_contains") or []:
+                checks.append(f"never says `{n}`")
+            ex = s.get("exec") or {}
+            if ex:
+                checks.append(f"code passes {ex.get('suite', '?')} "
+                              f"(min {a.get('min_score', 1.0):.0%})")
+            out[s["id"]] = {
+                "category": s.get("category", f.stem),
+                "agent": s.get("agent", ""),
+                "checks": checks,
+                "judge": (a.get("judge") or "").strip(),
+                "workspace": s.get("workspace", ""),
+                "manual": bool(s.get("manual")),
+            }
+    return out
+
+
+def looks_for(spec: dict) -> str:
+    """One line for a card: the deterministic checks, else the criterion's
+    first sentence. Enough to know what the card is about without opening it."""
+    if not spec:
+        return "criterion no longer defined"
+    crit = " ".join(spec["judge"].split())
+    first = ""
+    if crit:
+        first = crit[:160] + ("…" if len(crit) > 160 else "")
+        for sep in (". PASS", ". FAIL", ". "):
+            i = crit.find(sep)
+            if 0 < i < 180:
+                first = crit[:i + 1]
+                break
+    # The judge's first sentence says what is wanted in words; a regex or a
+    # substring says how it is checked. Words first, mechanics after.
+    parts = [x for x in (first, "; ".join(spec["checks"])) if x]
+    return " · ".join(parts)
+
+
 def current_scenario_ids(root: Path) -> set:
     """Scenario ids defined right now, so historical runs can be labelled."""
     try:
@@ -460,18 +585,58 @@ def current_scenario_ids(root: Path) -> set:
     return out
 
 
+def default_run_ids(root: Path) -> set:
+    """What a bare `./run.py` runs: every current scenario minus `manual: true`.
+    That is the set a run must cover to be called the full suite."""
+    try:
+        import yaml
+    except ImportError:
+        return set()
+    out = set()
+    for f in sorted((root / "scenarios").glob("*.yaml")):
+        for s in yaml.safe_load(f.read_text()) or []:
+            if not s.get("manual"):
+                out.add(s["id"])
+    return out
+
+
 def build_index(runs_dir: Path) -> str:
     """One page listing every run, so you never have to guess which to open.
 
     Each row also regenerates that run's own report, so the index is never a
     set of links to files that don't exist yet."""
     current = current_scenario_ids(runs_dir.parent)
+    suite = default_run_ids(runs_dir.parent)
+    specs = load_specs(runs_dir.parent)
     rows, total, historical = [], 0.0, 0
+    day_seen = None
     for d in sorted(runs_dir.iterdir(), reverse=True):
         if not (d / "trace.jsonl").exists():
             continue
         run = load_run(d)
-        (d / "report.html").write_text(build([run], False))
+        # Group by day: a run's name is YYYYMMDD-HHMMSS, so the date is the
+        # first eight characters and the time the last six. Grouping is what
+        # turns "a list of timestamps" into "what did I run, and when".
+        day, clock = d.name[:8], d.name[9:15]
+        if day != day_seen:
+            day_seen = day
+            nice = (f"{day[6:8]}/{day[4:6]}/{day[:4]}" if day.isdigit() and len(day) == 8
+                    else day)
+            rows.append(f'<tr class="day"><td colspan="7">{esc(nice)}</td></tr>')
+        # run.json (written by run.py since 2026-09) says which models ran and
+        # which catalog commit was installed; older runs have neither.
+        meta = {}
+        try:
+            meta = json.loads((d / "run.json").read_text())
+        except (OSError, ValueError):
+            pass
+        cat_meta = meta.get("catalog") or {}
+        commit = (cat_meta.get("catalog_commit") or "")[:7]
+        if commit and cat_meta.get("catalog_dirty"):
+            commit += "*"
+        models = (f'{meta.get("model") or "?"} / {meta.get("judge_model") or "?"}'
+                  if meta else "")
+        (d / "report.html").write_text(build([run], False, specs))
         scs = run["scenarios"]
         cost = sum(s.get("cost_usd", 0) for s in scs)
         total += cost
@@ -491,36 +656,59 @@ def build_index(runs_dir: Path) -> str:
                              and not s["id"].startswith("project-")]
         if stale:
             historical += 1
+        # What ran, in words: the whole suite, a project task, or a subset —
+        # and for a subset, the ids themselves, because "handoff, judgment"
+        # does not tell you which two scenarios you were chasing that day.
+        ids = [s["id"] for s in scs]
+        if any(i.startswith("project-") for i in ids):
+            what = "project — " + esc(", ".join(ids))
+        elif suite and set(ids) >= suite:
+            what = f"full suite — {len(ids)} scenarios, {len(cats)} categories"
+        elif len(ids) <= 8:
+            what = f"{len(ids)} scenario(s) · {esc(', '.join(cats))}" \
+                   f'<span class="ids">{esc(", ".join(ids))}</span>'
+        else:
+            what = f"{len(ids)} scenarios · {esc(', '.join(cats))}"
+        rep = max((s.get("repeat") or 1) for s in scs) if scs else 1
+        if rep > 1:
+            what += f" · {rep} samples each"
         rows.append(
             f'<tr onclick="location.href=\'{d.name}/report.html\'">'
-            f'<td class="n">{esc(d.name)}</td>'
+            f'<td class="n">{esc(clock[:2] + ":" + clock[2:4] if len(clock) == 6 else d.name)}</td>'
             f'<td><span class="badge {state}">{len(scs) - len(bad)}/{len(scs)}</span></td>'
-            f'<td>{esc(", ".join(cats))}'
+            f'<td class="what">{what}'
             + (f'<br><span class="note">historical — {len(stale)} scenario(s) '
                f'no longer defined</span>' if stale else '') +
             f'</td>'
+            f'<td class="n">{esc(models)}</td>'
+            f'<td class="n">{esc(commit)}</td>'
             f'<td class="n">{"⑂ " + str(subs) if subs else ""}</td>'
             f'<td class="n">${cost:.2f}</td></tr>')
     if not rows:
-        rows = ['<tr><td colspan="5">no runs yet — try <code>./run.py '
+        rows = ['<tr><td colspan="7">no runs yet — try <code>./run.py '
                 '--category routing</code></td></tr>']
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>agent runs</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>Agent runs</h1>
-<p class="sub">Every recorded run, newest first. Click one to watch it as a
-conversation. ${total:.2f} spent across {len(rows)} run(s){
+<p class="sub">Every recorded run, grouped by day, newest first. Click one to
+watch it as a conversation. A <code>*</code> after the catalog commit means the
+tree was dirty when it was installed. ${total:.2f} spent across {sum(1 for r in rows if 'class="day"' not in r)} run(s){
 f" · {historical} historical (scenarios since changed — kept as evidence, not as a baseline)" if historical else ""}.</p>
-<table class="idx"><tr><th>run</th><th>result</th><th>categories</th>
-<th>subagents</th><th>cost</th></tr>{"".join(rows)}</table>
+<table class="idx"><tr><th>time</th><th>result</th><th>what ran</th>
+<th>agent / judge</th><th>catalog</th><th>subagents</th><th>cost</th></tr>{"".join(rows)}</table>
 </div></body></html>"""
 
 
-def build(runs: list, compare: bool) -> str:
+def build(runs: list, compare: bool, specs: dict = None) -> str:
+    specs = specs if specs is not None else load_specs(RUNS_DIR.parent)
+    wanted = {s["id"] for r in runs for s in r["scenarios"]}
     data = {"runs": [{"name": r["name"], "scenarios": r["scenarios"]} for r in runs],
-            "icons": TOOL_ICON}
+            "icons": TOOL_ICON,
+            "specs": {k: v for k, v in specs.items() if k in wanted},
+            "catq": CATEGORY_QUESTION}
     body = render_compare(runs) if compare else ""
-    body += render_overview(runs)
+    body += render_overview(runs, specs)
     title = " vs ".join(r["name"] for r in runs) if compare else runs[0]["name"]
     # A reply containing "</script>" would end the tag early and break the page.
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
@@ -529,7 +717,8 @@ def build(runs: list, compare: bool) -> str:
 <title>agent run · {esc(title)}</title><style>{CSS}</style></head><body>
 <div class="wrap">
 <h1>Agent run · {esc(title)}</h1>
-<p class="sub">Click a scenario to watch the agent work: every tool call, every
+<p class="sub">Each card says what its test looks for; click one to see the
+criterion in full, the verdict, and the agent at work — every tool call, every
 read, every pause. A green result can still hide wasted steps.</p>
 {body}
 </div>
