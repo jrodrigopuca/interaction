@@ -1,5 +1,7 @@
 # interaction
 
+> Guía de uso en español, comando por comando: [GUIA.md](GUIA.md).
+
 Behavioural harness for the **local-agents** catalog. Its `validate.py` proves
 the *files* are well formed — 17 checks over structure, conventions and links.
 Nothing proved the agents *behave* the way those files promise. That is what

@@ -720,9 +720,10 @@ def main():
                          "much — use it when you changed something shared, or "
                          "on one scenario you don't trust")
     ap.add_argument("--model", default=AGENT_MODEL,
-                    help="model for the agent under test (default: the CLI's own). "
-                         "Use the model you actually work with, or the test measures "
-                         "an agent you never talk to")
+                    help="model for the agent under test (default sonnet: a model in "
+                         "daily use, and the biggest lever on cost). Re-run a failure "
+                         "that smells like capability with --model opus before "
+                         "touching the agent")
     ap.add_argument("--judge-model", default=JUDGE_MODEL,
                     help=f"model for the PASS/FAIL judge (default {JUDGE_MODEL})")
     ap.add_argument("--timeout", type=int, default=TIMEOUT, metavar="S",
