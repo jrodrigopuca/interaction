@@ -678,7 +678,7 @@ def main():
     global AGENT_MODEL, JUDGE_MODEL, TIMEOUT, DELEGATE_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--category", help="run only this category")
-    ap.add_argument("--only", help="run scenarios whose id contains this")
+    ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any)")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--jobs", type=int, default=4, help="parallel calls (default 4)")
@@ -714,7 +714,8 @@ def main():
     if args.category:
         scenarios = [s for s in scenarios if s.category == args.category]
     if args.only:
-        scenarios = [s for s in scenarios if args.only in s.id]
+        wanted = [o.strip() for o in args.only.split(",") if o.strip()]
+        scenarios = [s for s in scenarios if any(o in s.id for o in wanted)]
     if not (args.category or args.only):
         # `manual` scenarios are opt-in. Some experiments are expensive and
         # already answered — the build-quality arms cost ~$12 and forty minutes
@@ -747,6 +748,20 @@ def main():
     # accident, in scratch directories left lying in the repo.
     WS_ROOT = outdir / "workspaces"
     WS_ROOT.mkdir(exist_ok=True)
+    # Pin the run to the catalog version that was INSTALLED when it ran. The
+    # installer stamps ~/.claude/.local-agents.json with the commit it copied;
+    # without carrying it here a verdict cannot be tied to an agent version.
+    manifest = INSTALLED_AGENTS.parent / ".local-agents.json"
+    stamp = {"started": started, "model": args.model or "(cli default)",
+             "judge_model": args.judge_model}
+    try:
+        stamp["catalog"] = json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        stamp["catalog"] = None
+    (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
+    cat = stamp["catalog"] or {}
+    print(f"catalog {cat.get('catalog_commit', '?')[:7]}"
+          f"{' (dirty)' if cat.get('catalog_dirty') else ''} installed {cat.get('installed_at', '?')}")
     sampled = f", {args.repeat} samples each" if args.repeat > 1 else ""
     print(f"running {len(scenarios)} scenarios{sampled} "
           f"with {args.jobs} parallel calls → {outdir.name}")

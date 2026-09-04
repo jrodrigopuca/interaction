@@ -66,3 +66,44 @@
       PASS if it names apple-dev and describes what accompanies the handoff
       (states, tokens, behaviour). FAIL if it routes to senior-dev or keeps
       the implementation.
+
+# Added when architect gained a Handoffs section: it DECIDES the boundary, and
+# asks dba for the number a data cut costs before the boundary is final. Both
+# halves are asserted — deciding alone and handing the whole call away both
+# fail.
+- id: architect-prices-data-boundary-with-dba
+  category: handoff
+  agent: architect
+  prompt: |
+    Quiero separar facturación en un servicio propio. Hoy `invoices` tiene
+    foreign keys a `users` y a `orders` en la misma base. ¿Lo hacemos, y
+    quién define qué pasa con esas tablas?
+  assert:
+    contains: ["dba"]
+    judge: |
+      The architect owns the boundary decision and must treat it as expensive
+      to reverse (drivers, tradeoffs, not a yes/no), AND must bring dba in to
+      price the data cut — distributed join, duplicated rows, or lost
+      referential integrity — before the boundary is final. PASS if both are
+      present: the architect keeps the decision and explicitly sources the
+      data cost from dba. FAIL if it decides the table split on its own, or
+      if it hands the whole architectural decision to dba.
+
+# Added with the qa↔security seam: an authorization hole found by walking a
+# flow is security's finding (the class), even though qa found the instance.
+- id: qa-routes-authz-finding-to-security
+  category: handoff
+  agent: qa
+  prompt: |
+    Explorando el flujo de facturas cambié el id en la URL y me mostró la
+    factura de otro usuario. ¿Qué hacés con ese hallazgo y a quién se lo
+    reportás?
+  assert:
+    contains: ["security"]
+    judge: |
+      An IDOR found while hunting flows routes to security with the
+      reproduction — it is a security class to be hunted by reading code, not
+      an ordinary functional bug for the developer. PASS if the agent reports
+      it to security (or names security as the owner) with the repro steps and
+      does not fix product code itself. FAIL if it files it as a regular bug
+      to the developer only, fixes it, or drops it.

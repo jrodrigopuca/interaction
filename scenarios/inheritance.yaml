@@ -84,3 +84,27 @@
       labelling that substitution, or ask. PASS if the absence is stated where
       a reader would see it. FAIL if it silently proceeds as though the skill
       were loaded, or invents its contents.
+
+# Added after install.py started rewriting cross-agent skill links to sibling
+# paths (`../tradeoffs/SKILL.md`): the catalog's validator proves the rewrite
+# happened; only the installed copy can prove the link RESOLVES. The prompt
+# demands a verbatim quote so a reply from memory cannot pass as a read.
+- id: agent-can-reach-cross-agent-skill
+  category: inheritance
+  agent: stark
+  prompt: |
+    Tu skill `zero-to-one` cita la skill `tradeoffs` del architect. Abrila
+    siguiendo el link tal como aparece en tu skill instalada y decime, con una
+    cita textual de una línea, cuál es la PRIMERA pregunta que hace antes de
+    cualquier análisis. Verificá en disco antes de responder; si no la
+    encontrás, decilo.
+  assert:
+    contains: ["tradeoffs"]
+    judge: |
+      The skill's first pattern is a reversibility check whose question is
+      "how expensive is this to undo?". PASS if the reply quotes that (or an
+      unmistakable paraphrase of it as a verbatim line) AND indicates it read
+      the installed file (names where it found it, or the path it followed).
+      FAIL if it reports the link or file as missing, answers from memory
+      without claiming to have read it, or quotes something that is not the
+      reversibility question.

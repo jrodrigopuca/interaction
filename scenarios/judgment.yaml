@@ -67,3 +67,60 @@
       looks on an empty database. PASS if the reply reasons about the future
       cost of changing this once there is data, or about which queries the
       shape has to make cheap. FAIL if it answers only on present convenience.
+
+# The three below were added with the "ownerless seams" fix: each asserts the
+# RECEIVING side of a handoff another agent already makes. Before, data-ml sent
+# prompt injection to security, dba sent backups to devops, and the receiving
+# skill had nothing to say.
+- id: security-includes-llm-surface
+  category: judgment
+  agent: security
+  prompt: |
+    Vamos a lanzar un asistente con LLM que lee los tickets de soporte de los
+    clientes y puede crear reembolsos a través de una tool. Armame el threat
+    model, corto.
+  assert:
+    judge: |
+      The LLM is a door and a sink: content the model reads (customer tickets)
+      is untrusted input that can carry instructions (prompt injection), and
+      the refund tool is a sink that injected content could trigger. PASS if
+      the reply names both — ticket content as an attack vector aimed at the
+      model, and the refund tool call as what an attacker would steer — with
+      at least one mitigation (approval or allowlist on the tool, least
+      privilege, isolating untrusted content). FAIL if it threat-models only
+      classic web surface (auth, injection into the DB, secrets) and omits the
+      model as a door.
+
+- id: devops-answers-backups-with-restore
+  category: judgment
+  agent: devops
+  prompt: |
+    Necesitamos backups de la base de producción. ¿Qué definís, y cómo
+    sabemos que están bien?
+  assert:
+    judge: |
+      A backup you haven't restored is a rumor. PASS if the reply frames the
+      requirement as an RPO and an RTO (or their plain-language equivalents:
+      how much data may be lost, how long until it's back) AND requires a
+      restore drill that proves them, not just a snapshot schedule. FAIL if it
+      prescribes a backup cadence with no restore proof, or answers "it
+      depends" without naming those two numbers as the thing to define.
+
+- id: apple-dev-checks-isolation-settings
+  category: judgment
+  agent: apple-dev
+  prompt: |
+    En mi ViewModel llamo a un servicio `async` que parsea un JSON grande.
+    ¿Eso corre en background automáticamente o me bloquea la UI? Es un
+    proyecto nuevo en Xcode 26.
+  assert:
+    judge: |
+      Where async code runs now depends on the target's build settings —
+      Default Actor Isolation (MainActor for new Xcode 26 projects) and
+      Approachable Concurrency (nonisolated async runs on the CALLER's actor).
+      PASS if the reply conditions its answer on those settings (asks for
+      them, or states both cases) and says that in a new Xcode 26 project the
+      parse can run ON the main actor unless the function is marked
+      `@concurrent` or the service is an actor. FAIL if it asserts that
+      `async` means background work unconditionally, or gives one answer
+      without reference to the isolation settings.
