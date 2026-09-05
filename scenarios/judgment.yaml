@@ -137,15 +137,21 @@
     pierden los pedidos que estaban en curso. Quiero que eso no pase. No soy
     de infra, así que explicame como para poder decidir.
   assert:
+    # Bar is the DECISION, not the glossary. Measured on Sonnet and on Opus:
+    # 2/3 each with "every term"; the failing samples explained everything
+    # the user had to choose between and dropped a secondary word inside a
+    # benefits aside ("point-in-time recovery", "multi-zona"). That is not
+    # the failure the user reported ("use SQS and RDS", full stop).
     judge: |
       The user said they are not from infra and asked to be able to DECIDE.
-      PASS if every tool, service, acronym or pattern the reply names is
-      explained at first use in a clause that says what it is and why it fits
-      (a queue "so the order survives the server dying", a managed database
-      "so failover is somebody else's job"), so a reader who has never heard
-      the names could follow the reasoning and choose. FAIL if it names
-      services or acronyms (SQS, RDS, PITR, WAL, replicas, etc.) without
-      saying what they are, or if it hands over a solution the user could
+      PASS if every option the reply asks the user to choose between, and
+      every mechanism it rests that choice on (a queue, idempotency, a managed
+      database, a replica, a load balancer), is explained at first use in a
+      clause that says what it is and why it fits — so a reader who has never
+      heard the names could follow the reasoning and choose. An unexplained
+      word inside a list of side benefits does not fail it. FAIL if a named
+      service or acronym IS the recommendation and is never explained ("use
+      SQS and RDS"), or if the reply hands over a solution the user could
       only accept on faith.
 
 # Coverage pass (2026-09-04): one scenario per agent that had none or one,
@@ -204,14 +210,22 @@
     Tengo una lista de notas con SwiftData. Estoy armando MVVM: ¿el @Query
     va en el ViewModel, no?
   assert:
+    # apple-dev is a mentor by contract: on a doubt it may open Socratic,
+    # with a hint, and withhold the last word for the learner. One sample did
+    # exactly that (3/3 answered directly on repeat). A hint whose mechanism
+    # can only lead to "no" is the right answer in that mode, so it passes.
     judge: |
       `@Query` is a View-layer read: main-actor and view-only, so it never
-      lives in a ViewModel. PASS if the reply says no and gives the honest
-      shape — `@Query` in the view (and skip the VM for a simple list), or a
-      `ModelContext` behind a repository protocol injected into the VM when
-      there is logic — and explains why (it's a property wrapper that only
-      works inside a View). FAIL if it puts `@Query` in the ViewModel or says
-      it works there.
+      lives in a ViewModel. PASS if the reply either (a) says no and gives
+      the honest shape — `@Query` in the view (and skip the VM for a simple
+      list), or a `ModelContext` behind a repository protocol injected into
+      the VM when there is logic — explaining why (a property wrapper that
+      only works inside a View), or (b) opens Socratically with a hint whose
+      mechanism can only lead there (it's a DynamicProperty re-evaluated by
+      SwiftUI's render of a View; a plain class isn't in that cycle), even if
+      it withholds the final word for the learner. FAIL if it puts `@Query`
+      in the ViewModel, says it works there, or gives a hint that points the
+      wrong way.
 
 - id: architect-answers-simple-question-directly
   category: judgment
