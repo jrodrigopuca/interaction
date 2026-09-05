@@ -181,6 +181,8 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     judge: |                        # criterio para el juez, cuesta una llamada
       PASS if ... FAIL if ...
     min_score: 1.0                  # solo con exec: fracción de la suite que debe pasar
+    max_tools: 3                    # tope de herramientas invocadas por el agente (del trace)
+    forbidden_tools: [Edit, Write]  # herramientas que no debe haber invocado (del trace)
   exec:                             # build-quality: corre el código de la respuesta
     suite: fixtures/parse-csv-line.test.mjs
     symbol: parseCSVLine

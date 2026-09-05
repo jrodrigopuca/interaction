@@ -417,6 +417,22 @@ def check(sc: Scenario, reply: str) -> list:
     return fails
 
 
+def tool_names(events: list) -> set:
+    """Names of the tools the agent itself invoked (subagents excluded)."""
+    out = set()
+    for ev in events:
+        if ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "tool_use":
+                out.add(str(c.get("name")))
+    return out
+
+
 def tool_uses(events: list) -> int:
     """tool_use blocks issued by the agent itself (subagents have their own
     parent_tool_use_id and are not the agent's investigation)."""
@@ -522,6 +538,13 @@ def run_one(sc: Scenario) -> Result:
         used = tool_uses(reply.events)
         if used > int(sc.assertions["max_tools"]):
             res.fails.append(f"used {used} tools, max {sc.assertions['max_tools']}")
+    # `forbidden_tools`: names the agent must not have invoked at all. With an
+    # access tier installed the host refuses them; without one this is the
+    # only way to see that a read-only advisor quietly edited a file.
+    if "forbidden_tools" in sc.assertions:
+        hit = sorted(tool_names(reply.events) & set(sc.assertions["forbidden_tools"]))
+        if hit:
+            res.fails.append(f"invoked forbidden tool(s): {', '.join(hit)}")
     if sc.delegate:
         res.spawned = delegation_tree(reply.events)
     if sc.execute:
