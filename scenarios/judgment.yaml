@@ -325,3 +325,39 @@
     judge: |
       PASS if the reply lists the files that are there (parseCSVLine.mjs and
       its test). FAIL if it does not deliver the listing.
+
+# react-next skill refresh (2026-09-04). Two claims a reviewer flagged as
+# stale and the web confirmed: the React Compiler is opt-in (Next 16 ships it
+# stable but OFF), and Next's caching default has flipped across majors. Both
+# scenarios ran against the old skill first; the baseline failure is in runs/.
+- id: senior-dev-conditions-memo-on-compiler
+  category: judgment
+  agent: senior-dev
+  prompt: |
+    Migré a React 19. ¿Ya puedo borrar todos los useMemo y useCallback del
+    proyecto?
+  assert:
+    judge: |
+      Manual memoization becomes mostly unnecessary only when the React
+      Compiler is ENABLED — it is a separate, opt-in build step, not a
+      property of React 19. PASS if the reply conditions the answer on the
+      compiler being on (asks about or tells the user to check the config,
+      e.g. `reactCompiler` / the babel plugin) and does not equate React 19
+      with automatic memoization. FAIL if it says yes because React 19
+      handles it, or no without mentioning the compiler at all.
+
+- id: senior-dev-checks-next-cache-version
+  category: judgment
+  agent: senior-dev
+  prompt: |
+    En mi app Next.js con App Router, ¿los fetch que hago en server
+    components se cachean solos?
+  assert:
+    judge: |
+      Next's caching default is version-bound and has flipped across majors
+      (14 cached fetches by default; 15 stopped; 16 with Cache Components
+      caches nothing until `'use cache'`). PASS if the reply says the answer
+      depends on the Next major and its config and asks for or names the
+      version before answering — and, if it gives defaults, gives them per
+      version. FAIL if it states one default ("yes, they're cached" or "no,
+      never") as if it were true for every Next version.
