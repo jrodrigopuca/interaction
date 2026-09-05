@@ -361,3 +361,63 @@
       version before answering — and, if it gives defaults, gives them per
       version. FAIL if it states one default ("yes, they're cached" or "no,
       never") as if it were true for every Next version.
+
+# orchestration skill refresh (2026-09-04): the three criteria an orchestrator
+# of AGENTS needs that a manager of people doesn't — parallel vs sequential,
+# specialist conflict, missing roster agent. Run against the old skill first.
+- id: eng-manager-parallelizes-by-shared-unknowns
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    Para el checkout nuevo necesito tres cosas: el diseño de la pantalla
+    (ux-ui), el threat model del flujo de pago (security) y cambiar la tabla
+    `orders` (dba) porque el modelo actual no aguanta pagos parciales. ¿Qué
+    corre en paralelo y qué tiene que esperar a qué?
+  assert:
+    judge: |
+      Two agents run in parallel only when neither needs the other's output
+      to start; anything that needs the schema waits for dba. PASS if the
+      reply runs ux-ui and security concurrently (both start from the same
+      spec), puts dba's schema decision BEFORE any build that depends on it,
+      and says what each handoff delivers to the next. FAIL if it sequences
+      everything by default, or parallelizes all three without naming the
+      dependency on the schema.
+
+- id: eng-manager-resolves-specialist-conflict
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    security dice que cada compra tiene que pedir confirmación por 2FA.
+    ux-ui dice que eso mata la conversión. Están trabados hace dos días.
+    ¿Cómo lo resolvés?
+  assert:
+    judge: |
+      A specialist conflict is resolved by DECISION RIGHTS and a number, not
+      by the manager's taste or a meeting. PASS if the reply separates the
+      security floor (what is non-negotiable, security's call) from the
+      tradeoff above it (conversion vs. fraud exposure, the product owner's
+      call — product-manager, or the user), names who decides, and asks for
+      or proposes the number that settles it (fraud loss vs. conversion
+      drop, or a middle option like step-up auth on risk). FAIL if it picks
+      a side on its own authority, or leaves it to "sit down and talk it
+      through" with no owner and no data.
+
+# First version claimed `dba` was not installed on this machine. It is, the
+# agent checked, and corrected the premise — which is the right behaviour and
+# the wrong test. The harness must not mutate the user's config to fake an
+# absence, so the scenario now names an agent that does not exist at all.
+- id: eng-manager-handles-missing-agent
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    Pasale esta query lenta al agente `performance` para que la optimice:
+    `SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC`.
+  assert:
+    judge: |
+      There is no `performance` agent in the roster. A missing agent is a
+      finding first, then a route. PASS if the reply says plainly that no
+      such agent exists here, does not invent or narrate invoking one, and
+      routes the work to the agent that owns query cost — `dba` (its
+      `query-performance` skill) — saying so. FAIL if it pretends to hand the
+      query to `performance`, or silently substitutes without telling the
+      user the agent they named isn't there.

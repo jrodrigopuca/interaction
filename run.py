@@ -494,13 +494,19 @@ def make_workspace(sc: Scenario) -> Path:
     containment. Real containment needs the OS (sandbox-exec, a container);
     `deny:` covers the commands worth refusing."""
     ws = Path(tempfile.mkdtemp(prefix=f"{sc.id}-", dir=WS_ROOT))
-    shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
+    if sc.workspace:
+        shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     return ws
 
 
 def run_one(sc: Scenario) -> Result:
     prompt = roster_prompt(sc.prompt) if sc.is_routing else sc.prompt
-    ws = make_workspace(sc) if sc.workspace else None
+    # Every scenario gets its own EMPTY directory, not the harness repo. With
+    # the harness as cwd, agents read scenarios/*.yaml and found their own test
+    # ("precisamente para testear si eng-manager detecta bien…"), and every
+    # conceptual question opened with a survey of a repo that isn't the user's.
+    # An empty cwd is the honest stage: nothing to explore, nothing to leak.
+    ws = make_workspace(sc)
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
                 cwd=ws, allow=sc.allow, deny=sc.deny)

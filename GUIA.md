@@ -84,7 +84,7 @@ runs/20260904-144312/
 ├── partial.jsonl     # se va escribiendo durante la corrida, por si se corta
 ├── <id>.md           # un informe legible por escenario
 ├── report.html       # lo genera viz.py
-└── workspaces/       # directorios de trabajo de los escenarios que los usan
+└── workspaces/       # un directorio VACÍO por muestra (o sembrado con `workspace:`); nunca el repo del harness
 ```
 
 En `trace.jsonl`, cada trial registra `agent_cost_usd` y `judge_cost_usd` por
@@ -184,7 +184,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   exec:                             # build-quality: corre el código de la respuesta
     suite: fixtures/parse-csv-line.test.mjs
     symbol: parseCSVLine
-  workspace: fixtures/csv-trim      # directorio que se copia como cwd fresco por muestra
+  workspace: fixtures/csv-trim      # se copia al cwd vacío de la muestra; sin esto el cwd queda vacío
   allow: "Bash(fd:*)"               # --allowedTools
   deny: "Bash(brew:*)"              # --disallowedTools
   delegate: true                    # graba el árbol de subagentes
@@ -241,6 +241,9 @@ No lo pongas en CI: se corre cuando cambian agentes, no en cada push.
   cuesta una décima. Para comparar costos, comparás corridas frías.
 - **`ls -la` puede devolver vacío en el sandbox del workspace** sin error.
   `fd` sí responde. Está anotado en la memoria de eng-manager.
+- **El agente corre en un directorio vacío, a propósito.** Antes el cwd era este
+  repo y los agentes leían `scenarios/*.yaml`: una muestra dijo "precisamente
+  para testear si eng-manager detecta bien…". Estaba viendo su propio examen.
 - **Escribir memoria durante una evaluación es posible**: los agentes tienen
   `memory: user`. Un escenario puede contaminar al siguiente. Si un resultado
   no cierra, mirá `~/.claude/agent-memory/<agente>/`.
