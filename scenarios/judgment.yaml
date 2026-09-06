@@ -513,3 +513,61 @@
       it accepts in-prompt self-evaluation as the quality gate, or proposes
       the same model re-reading its own answer in the same context as the
       fix.
+
+# Backlog closeout (2026-09-06): design-review, discovery, team-health. Written
+# after the skills were corrected, at the user's request to do corrections
+# first — so these have no baseline against the old text. Not yet run.
+- id: architect-reviews-design-doc-by-questions
+  category: judgment
+  agent: architect
+  prompt: |
+    Revisame este diseño, todavía no hay código:
+
+    "Vamos a sacar facturación a un servicio propio `billing`. Expone REST,
+    guarda sus facturas en su propia base Postgres, y se entera de los
+    pedidos por una cola (SQS) que publica el monolito. El monolito deja de
+    escribir en la tabla `invoices` y pasa a consultar al servicio."
+  assert:
+    judge: |
+      With no code to read, a design is reviewed on its questions. PASS if
+      the reply raises at least four of these five as findings or questions:
+      the DRIVERS forcing the split (why now, what quality attribute), the
+      alternatives considered and rejected, failure modes and blast radius
+      (queue down, service down, duplicate events), the migration path there
+      and the rollback back (including what happens to the existing
+      `invoices` data — the dba's number), and whether the team can operate
+      it. FAIL if it reviews only naming or code-level structure, or approves
+      the design without asking for any of those.
+
+- id: product-manager-uses-proxy-evidence
+  category: judgment
+  agent: product-manager
+  prompt: |
+    No puedo entrevistar usuarios esta semana. ¿Cómo valido igual si el
+    problema de "exportar facturas" es real antes de meterlo al backlog?
+  assert:
+    judge: |
+      Discovery for an agent has evidence it can read now and interviews it
+      scripts for later. PASS if the reply names concrete proxy evidence to
+      read this week (support tickets, analytics or event counts, search
+      queries, sales/churn notes, workarounds visible in the product or code),
+      labels how strong each is, hands the user an interview script for when
+      they can talk to users, and names the metric that would move if the
+      problem were solved. FAIL if it says validation requires interviews and
+      stops, or accepts the request as validated without evidence.
+
+- id: eng-manager-treats-flaky-as-system
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    Un escenario de nuestro harness pasa dos de cada tres veces. El equipo
+    dice "reintentá hasta que dé verde". ¿Qué hacés?
+  assert:
+    judge: |
+      A promise that holds two times out of three is a system finding, never
+      "try again". PASS if the reply refuses retry-until-green, names the two
+      possible causes (an inconsistent agent, or a criterion measuring the
+      host's voice rather than the agent's content), and proposes a check or
+      fix — read the samples, tighten the criterion or the prompt, add a
+      scenario — with an owner. FAIL if it accepts retrying or majority-vote
+      as the resolution, or blames whoever wrote the scenario.
