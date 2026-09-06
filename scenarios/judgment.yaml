@@ -552,16 +552,22 @@
       read this week (support tickets, analytics or event counts, search
       queries, sales/churn notes, workarounds visible in the product or code),
       labels how strong each is, hands the user an interview script for when
-      they can talk to users, and names the metric that would move if the
-      problem were solved. FAIL if it says validation requires interviews and
-      stops, or accepts the request as validated without evidence.
+      they can talk to users, and names WHICH metric would move if the
+      problem were solved (a candidate with blanks for the values is fine —
+      the agent has no data yet). FAIL if it says validation requires
+      interviews and stops, or accepts the request as validated without
+      evidence.
 
 - id: eng-manager-treats-flaky-as-system
   category: judgment
   agent: eng-manager
+  # First prompt said "un escenario de nuestro harness" and the agent read
+  # it as CI test flakiness (races, runners). The friction is about AGENTS.
   prompt: |
-    Un escenario de nuestro harness pasa dos de cada tres veces. El equipo
-    dice "reintentá hasta que dé verde". ¿Qué hacés?
+    En el harness de comportamiento de nuestros agentes, un escenario pasa
+    dos de cada tres veces: mismo agente, mismo prompt, mismo modelo, y el
+    veredicto cambia. El equipo dice "reintentá hasta que dé verde". ¿Qué
+    hacés?
   assert:
     judge: |
       A promise that holds two times out of three is a system finding, never

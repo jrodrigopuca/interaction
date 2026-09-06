@@ -246,7 +246,12 @@ def transcript_of(events: list, final: str) -> str:
         if ev.get("parent_tool_use_id"):
             continue
         msg = ev.get("message")
-        content = msg.get("content") if isinstance(msg, dict) else None
+        # Assistant turns only. Tool results arrive as user-role messages and
+        # a skill's file lands there as text — grading it as the agent's own
+        # words made the judge read a SKILL.md as if the agent had said it.
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
         if not isinstance(content, list):
             continue
         for c in content:
