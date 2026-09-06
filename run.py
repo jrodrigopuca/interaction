@@ -146,11 +146,21 @@ def load_scenarios() -> list:
 # --------------------------------------------------------------------------- #
 @dataclass
 class Reply:
-    text: str
+    text: str                 # the final result text — what `claude -p` returns
     cost: float = 0.0
     ms: int = 0
     events: list = field(default_factory=list)
     error: str = ""
+    transcript: str = ""      # every text turn the agent wrote, in order
+
+    @property
+    def graded(self) -> str:
+        """What the assertions and the judge read: the whole conversation the
+        user would have seen, not only its last message. Measured: eng-manager
+        opened with "`performance` no existe en el roster", delegated, and
+        closed with the specialist's report — the final text alone failed a
+        criterion the agent had met in its first sentence."""
+        return self.transcript or self.text
 
 
 def ask(prompt: str, agent: str = "", model: str = "",
@@ -223,7 +233,28 @@ def ask(prompt: str, agent: str = "", model: str = "",
             ms = ev.get("duration_ms", 0)
     if not text:
         return Reply(text="", events=events, error="no result event in stream")
-    return Reply(text=text.strip(), cost=cost, ms=ms, events=events)
+    return Reply(text=text.strip(), cost=cost, ms=ms, events=events,
+                 transcript=transcript_of(events, text))
+
+
+def transcript_of(events: list, final: str) -> str:
+    """The agent's own text turns (main lane), joined in order. Subagent text
+    is excluded: it is the specialist's voice, not the agent's. The final
+    result is appended if the stream did not already carry it as a turn."""
+    turns = []
+    for ev in events:
+        if ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text" and (c.get("text") or "").strip():
+                turns.append(c["text"].strip())
+    if final.strip() and (not turns or turns[-1] != final.strip()):
+        turns.append(final.strip())
+    return "\n\n".join(turns)
 
 
 def delegation_tree(events: list) -> dict:
@@ -529,7 +560,7 @@ def run_one(sc: Scenario) -> Result:
     if reply.error:
         return Result(sc, reply, workspace=str(ws or ""))
 
-    res = Result(sc, reply, fails=check(sc, reply.text), workspace=str(ws or ""))
+    res = Result(sc, reply, fails=check(sc, reply.graded), workspace=str(ws or ""))
     # `max_tools`: how much the agent INVESTIGATED, which no judge can see from
     # the reply. Counts tool_use blocks in the main lane of the event stream.
     # A conceptual question answered after a five-command survey of the repo
@@ -548,7 +579,7 @@ def run_one(sc: Scenario) -> Result:
     if sc.delegate:
         res.spawned = delegation_tree(reply.events)
     if sc.execute:
-        code, origin = deliverable(sc, reply.text, ws)
+        code, origin = deliverable(sc, reply.graded, ws)
         res.score = run_suite(code, ROOT / sc.execute["suite"],
                               sc.execute["symbol"])
         res.score["source"] = origin
@@ -557,7 +588,7 @@ def run_one(sc: Scenario) -> Result:
     if criterion:
         # Judge even when a deterministic assertion already failed: two
         # independent signals on one run are cheaper than a second run later.
-        ok, why, cost = judge(criterion, reply.text)
+        ok, why, cost = judge(criterion, reply.graded)
         res.judged, res.judge_why, res.judge_cost = ok, why, cost
     return res
 

@@ -94,6 +94,10 @@ separado; el `cost_usd` es la suma.
 
 - ` ok ` cumplió. `FAIL` no cumplió, con la razón del juez debajo. `ERROR`
   el juez no dio veredicto o la llamada falló: nunca cuenta como PASS.
+- **El juez y las aserciones leen la transcripción completa del agente,** no solo
+  su último mensaje. Un agente que delega dice algo, llama a un subagente y cierra
+  con el reporte; lo que dijo antes de delegar cuenta, porque vos lo ves en la
+  sesión. El texto de los subagentes queda afuera: es la voz del especialista.
 - **Un FAIL se lee entero antes de creerlo.** Abrí el `<id>.md` o el HTML: un
   FAIL puede ser error del juez y no del agente.
 - Si un escenario te da dudas, `--only <id> --repeat 3`. Tres muestras que
