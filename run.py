@@ -548,7 +548,43 @@ def make_workspace(sc: Scenario) -> Path:
     ws = Path(tempfile.mkdtemp(prefix=f"{sc.id}-", dir=WS_ROOT))
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
+    shadow_agents(ws)
     return ws
+
+
+AGENTS_DIR = Path.home() / ".claude" / "agents"
+
+
+def shadow_agents(ws: Path) -> None:
+    """Copy the installed agents into `<ws>/.claude/agents/` with memory
+    scoped to the workspace, so a run never writes the user's real memory.
+
+    The catalog installs every agent with `memory: user`, which persists to
+    `~/.claude/agent-memory/<agent>/` — the same files the user's real sessions
+    read. Measured 2026-09-06: five of six agents with memory on this machine
+    had learned it from the harness, dated to the suites that wrote it — qa
+    "knew" the user's workflow routes findings from security (that is scenario
+    `qa-doubts-without-blocking`), devops "knew" the user is not from infra
+    (`agent-brings-the-reader-along`), eng-manager and senior-dev recorded the
+    empty cwd and the sandbox as gotchas about the user's machine. A scenario
+    written as a fact about the person is hallucination with a file behind it.
+
+    A project-level `.claude/agents/<name>.md` outranks the user-level one
+    with the same name (docs: priority 3 over 4), and `claude -p --agent`
+    resolves it from the cwd — verified with a probe agent that only existed
+    in the workspace. With `memory: local` the memory lands in
+    `<ws>/.claude/agent-memory-local/<agent>/`, kept with the run: what an
+    agent chose to remember from one task is now inspectable evidence, not a
+    leak. Delegated subagents resolve the same shadow copies."""
+    if not AGENTS_DIR.is_dir():
+        return
+    dst = ws / ".claude" / "agents"
+    dst.mkdir(parents=True, exist_ok=True)
+    for src in AGENTS_DIR.glob("*.md"):
+        text = src.read_text(encoding="utf-8")
+        text = re.sub(r"^memory:\s*\S+\s*$", "memory: local", text,
+                      count=1, flags=re.MULTILINE)
+        (dst / src.name).write_text(text, encoding="utf-8")
 
 
 def run_one(sc: Scenario) -> Result:

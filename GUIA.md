@@ -246,10 +246,19 @@ No lo pongas en CI: se corre cuando cambian agentes, no en cada push.
 - **El caché engaña al medir costo.** El mismo escenario tres minutos después
   cuesta una décima. Para comparar costos, comparás corridas frías.
 - **`ls -la` puede devolver vacío en el sandbox del workspace** sin error.
-  `fd` sí responde. Está anotado en la memoria de eng-manager.
+  `fd` sí responde. Es un gotcha del harness, no de tu máquina: por eso la
+  memoria de las corridas ya no llega a tu home (ver abajo).
 - **El agente corre en un directorio vacío, a propósito.** Antes el cwd era este
   repo y los agentes leían `scenarios/*.yaml`: una muestra dijo "precisamente
   para testear si eng-manager detecta bien…". Estaba viendo su propio examen.
-- **Escribir memoria durante una evaluación es posible**: los agentes tienen
-  `memory: user`. Un escenario puede contaminar al siguiente. Si un resultado
-  no cierra, mirá `~/.claude/agent-memory/<agente>/`.
+- **La memoria de una corrida queda en el workspace, no en tu home.** Cada
+  muestra recibe una copia de los agentes instalados en `<ws>/.claude/agents/`
+  con `memory: local`; esa copia tiene prioridad sobre `~/.claude/agents/` y
+  lo que el agente decida recordar cae en `<ws>/.claude/agent-memory-local/`.
+  Antes escribían en `~/.claude/agent-memory/<agente>/` con `memory: user`, y
+  el 2026-09-06 cinco de seis memorias reales eran escenarios del harness
+  guardados como hechos sobre vos (qa "sabía" que security te triagea
+  hallazgos; devops, que no sos de infra). Si un resultado no cierra, mirá el
+  `agent-memory-local` de esa muestra: es evidencia de qué eligió persistir.
+  Costo: el cwd "vacío" ahora tiene un `.claude/` oculto; un agente que lista
+  el directorio lo ve y lo nombra como config del proyecto, nada más.
