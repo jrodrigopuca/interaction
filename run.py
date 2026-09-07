@@ -415,8 +415,13 @@ def judge(criterion: str, reply: str) -> tuple:
     r = ask(prompt, model=JUDGE_MODEL, safe_mode=True, system=JUDGE_PREAMBLE, tools="")
     if r.error:
         return None, f"judge call failed: {r.error}", r.cost
-    head = r.text.strip().splitlines()[0].strip().upper() if r.text.strip() else ""
-    why = " ".join(r.text.strip().splitlines()[1:]).strip() or r.text.strip()
+    # The verdict is the first line that says something. Seen: a verdict
+    # preceded by a bare `<br>` line, which read as "no verdict" and turned a
+    # 3/3 into a flaky — the parser's mistake, not the agent's.
+    lines = [l.strip() for l in r.text.strip().splitlines()
+             if l.strip() and not re.fullmatch(r"(<[^>]+>|\W)+", l.strip())]
+    head = lines[0].lstrip("*_#` ").upper() if lines else ""
+    why = " ".join(lines[1:]).strip() or r.text.strip()
     if head.startswith("PASS"):
         return True, why, r.cost
     if head.startswith("FAIL"):
@@ -451,6 +456,19 @@ def check(sc: Scenario, reply: str) -> list:
         if n > a["max_words"]:
             fails.append(f"{n} words, limit {a['max_words']}")
     return fails
+
+
+def memory_types(ws: Path, agent: str) -> set:
+    """The `type:` of every memory file the agent wrote in this workspace."""
+    found = set()
+    if not ws or not agent:
+        return found
+    for f in (ws / ".claude" / "agent-memory-local" / agent).glob("*.md"):
+        if f.name == "MEMORY.md":
+            continue
+        m = re.search(r"^\s*type:\s*(\S+)", f.read_text(encoding="utf-8"), re.M)
+        found.add(m.group(1) if m else "untyped")
+    return found
 
 
 def tool_names(events: list) -> set:
@@ -617,6 +635,16 @@ def run_one(sc: Scenario) -> Result:
         hit = sorted(tool_names(reply.events) & set(sc.assertions["forbidden_tools"]))
         if hit:
             res.fails.append(f"invoked forbidden tool(s): {', '.join(hit)}")
+    # `memory_forbid_types`: what the agent chose to PERSIST from this one task.
+    # Shadowed agents write to `<ws>/.claude/agent-memory-local/<agent>/`, so
+    # the files are evidence kept with the run. The catalog's rule is that an
+    # episode is not a fact: a note typed `user` after a single task claims
+    # something about the person they never said, and a `project` note in
+    # agent memory is a decision that belongs in the repo as an ADR.
+    if "memory_forbid_types" in sc.assertions:
+        hit = memory_types(ws, sc.agent) & set(sc.assertions["memory_forbid_types"])
+        if hit:
+            res.fails.append(f"persisted memory typed {', '.join(sorted(hit))}")
     if sc.delegate:
         res.spawned = delegation_tree(reply.events)
     if sc.execute:

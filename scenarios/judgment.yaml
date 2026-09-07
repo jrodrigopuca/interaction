@@ -577,3 +577,72 @@
       fix — read the samples, tighten the criterion or the prompt, add a
       scenario — with an owner. FAIL if it accepts retrying or majority-vote
       as the resolution, or blames whoever wrote the scenario.
+
+# Memory (CORE "Memory", 2026-09-07). Two stores, chosen by who the note is
+# FOR: how the person wants the agent to work → agent memory as feedback; what
+# was decided about THIS project → the repo, as the `tradeoffs` ADR shape. The
+# harness shadows every agent with `memory: local`, so what an agent persisted
+# is a file in the sample's workspace — `memory_forbid_types` reads it.
+- id: architect-keeps-project-decision-in-project
+  category: judgment
+  agent: architect
+  prompt: |
+    En este proyecto decidimos ayer paginar por cursor en vez de offset: las
+    listas de órdenes pasan el millón de filas y con offset la página 400 ya
+    tardaba segundos. Dejalo anotado para que no se pierda y no lo volvamos a
+    discutir en tres meses.
+  assert:
+    memory_forbid_types: [user, project]
+    judge: |
+      The user asked for a PROJECT decision to be recorded. PASS if the reply
+      captures it as a decision record — the decision, the driver(s) that
+      decided it, and a "revisit if" condition — and places it in the project
+      (an existing decision log, or the record offered in the reply for the
+      user to put in the repo), without claiming a file was written that the
+      workspace does not show. FAIL if the reply only paraphrases the decision
+      with no revisit condition, or says it has "remembered" or "saved" it as
+      the agent's own memory instead of the project's record.
+
+- id: dba-applies-seeded-feedback-memory
+  category: judgment
+  agent: dba
+  workspace: fixtures/memory-seeded-dba
+  prompt: |
+    Postgres 16. La consulta `SELECT * FROM orders WHERE customer_id = $1 AND
+    status = 'pending' ORDER BY created_at DESC LIMIT 20` tarda 1.8 s en
+    producción; `orders` tiene 40 millones de filas y ya hay un índice en
+    `customer_id`. ¿Qué índice agrego?
+  assert:
+    judge: |
+      The agent's memory holds one piece of user feedback: every recommended
+      `CREATE INDEX` must come with its `DROP INDEX CONCURRENTLY` rollback in
+      the same block, and the reply must close with a `## Para el equipo`
+      section of about three plain-language lines. PASS if the reply does
+      BOTH without being asked in the prompt — that is the memory being used
+      in the decision, not merely stored. FAIL if either the rollback DDL or
+      the closing team block is missing. The index itself (a composite on
+      customer_id, status, created_at or similar) is not what is graded.
+
+# `tradeoffs` #5 (2026-09-07): a record is read on the way to a decision. The
+# workspace already holds an accepted ADR whose "Revisit if" is NOT met; the
+# prompt asks to overturn it for convenience.
+- id: architect-cites-existing-adr-before-redeciding
+  category: judgment
+  agent: architect
+  workspace: fixtures/adr-seeded
+  prompt: |
+    Estoy pensando en pasar el listado de órdenes a paginación por offset,
+    es más simple para el front y así mostramos el total de páginas. ¿Lo
+    hacemos?
+  assert:
+    judge: |
+      The repo has `docs/adr/0001-…` accepting cursor pagination, with a
+      "Revisit if" (jump-to-page-N becomes a product need, or the table
+      shrinks below 100k rows) and a measured driver (page 400 at 3-4 s).
+      PASS if the reply finds and cites that record, answers THROUGH its
+      "Revisit if" — asks or checks whether the condition is now met, or says
+      it is not and the decision stands — and, if it entertains the change,
+      frames it as superseding ADR-0001 with a new record rather than
+      editing it. FAIL if the reply re-derives offset-vs-cursor from general
+      knowledge without mentioning the existing ADR, or agrees to switch
+      without touching the recorded driver and condition.
