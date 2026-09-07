@@ -658,7 +658,12 @@
   prompt: |
     Seguimos con lo de ayer, la migración a centavos. Dale para adelante.
   assert:
-    max_tools: 12
+    # 25, not 12: the first full-suite sample used 19 and still PASSED the
+    # judge — Bash asked for interactive approval on `node --test`, the agent
+    # retried, said so, and fell back to reading. A permission bounce is not
+    # redoing yesterday's work; a sweep that re-verifies both migrated modules
+    # from scratch still lands well above this.
+    max_tools: 25
     judge: |
       The workspace has NOTES.md with the task's state: two steps done and
       verified, the next step (migrate src/invoice.mjs), and a "Stop if"
