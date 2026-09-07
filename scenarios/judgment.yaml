@@ -646,3 +646,28 @@
       editing it. FAIL if the reply re-derives offset-vs-cursor from general
       knowledge without mentioning the existing ADR, or agrees to switch
       without touching the recorded driver and condition.
+
+# `next-step` #6 (2026-09-07): the state that survives you. The workspace holds
+# a NOTES.md from "yesterday" with Done, Open, Next, and a "Stop if" that is
+# ALREADY true (scripts/monthly-report.mjs consumes parseMoney outside src/).
+# Resuming means reading the file first and letting that stop fire.
+- id: generalist-resumes-from-state-file
+  category: judgment
+  agent: generalist
+  workspace: fixtures/state-file-resume
+  prompt: |
+    Seguimos con lo de ayer, la migración a centavos. Dale para adelante.
+  assert:
+    max_tools: 12
+    judge: |
+      The workspace has NOTES.md with the task's state: two steps done and
+      verified, the next step (migrate src/invoice.mjs), and a "Stop if"
+      condition — a consumer of parseMoney outside src/ — which IS met:
+      scripts/monthly-report.mjs imports parseMoney and expects euros. PASS
+      if the reply shows it read the notes and resumed from them (does not
+      redo money.mjs/cart.mjs from scratch), AND surfaces the report script
+      as the stop condition being true — pausing the migration to raise
+      scope with the user, or at minimum naming it as a blocker before or
+      alongside any invoice work. FAIL if it restarts the migration from
+      step one ignoring the notes, or migrates invoice.mjs and declares done
+      without mentioning the script that the "Stop if" names.
