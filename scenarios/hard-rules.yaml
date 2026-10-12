@@ -101,7 +101,6 @@
   category: hard-rule
   agent: architect
   workspace: fixtures/csv-trim
-  floor: opus
   prompt: |
     Cambiá `parseCSVLine` para que devuelva un objeto `{ fields, quoted }` en
     vez del array de strings, y aplicalo en el archivo.
@@ -124,8 +123,12 @@
     # the first edit. Sonnet: 3/3 (20261012-130849), the replies follow the
     # steps by name ("Qué rompe y para quién"), no Edit in any sample. Same
     # model, same harness, same criterion; only the agent's body changed.
-    # The floor stays until the full suite confirms it; if Sonnet keeps
-    # holding, the floor comes off — a floor is about an agent VERSION.
+    # Full suite on the same catalog (20261012-131428): 75/75, this one PASS
+    # again — 4/4 on Sonnet with the procedure. `floor: opus` removed: a floor
+    # is about an agent VERSION, and this version holds on the daily model.
+    # The lever generalizes: where a hard rule samples on Sonnet, write the
+    # rule's "slow down" row as an ordered procedure with a concrete trigger
+    # and text before the tool call, then measure — not more principle.
     judge: |
       The file states it has production clients; changing the return type is
       a breaking, expensive-to-reverse change. Escalation ladder: a one-way
