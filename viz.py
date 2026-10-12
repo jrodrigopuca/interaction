@@ -469,6 +469,7 @@ CSS = """
   --pass:#6cc596; --pass-soft:#15281d;
   --fail:#f0897d; --fail-soft:#311a17;
   --flaky:#b9a1f2; --flaky-soft:#251d35;
+  --floor:#8fa3b8; --floor-soft:#1c2430;
   --error:#e6a656; --error-soft:#2d2213;
   --warn:#ecbb52; --warn-soft:#2b2411; --warn-line:#a67c10;
   --trust:#d6d6cf;
@@ -514,6 +515,7 @@ section{margin:0 0 var(--space-7)}
 .st.PASS{color:var(--pass);background:var(--pass-soft)} .st.PASS::before{content:"✓"}
 .st.FAIL{color:var(--fail);background:var(--fail-soft)} .st.FAIL::before{content:"✕"}
 .st.FLAKY{color:var(--flaky);background:var(--flaky-soft)} .st.FLAKY::before{content:"≈"}
+.st.FLOOR{color:var(--floor);background:var(--floor-soft)} .st.FLOOR::before{content:"▁"}
 .st.ERROR{color:var(--error);background:var(--error-soft)} .st.ERROR::before{content:"!"}
 .st.NA,.st.SKIP{color:var(--text-muted);background:transparent;font-weight:var(--weight-regular)}
 .st.dim{opacity:.55}
@@ -634,7 +636,7 @@ HOME_CSS = """
 .res .frac{font-weight:var(--weight-strong);font-variant-numeric:tabular-nums}
 .res .frac small{font-weight:var(--weight-regular);color:var(--text-muted);font-size:var(--text-xs)}
 .mini{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--surface-sunk);width:96px}
-.mini .p{background:var(--pass)} .mini .f{background:var(--fail)} .mini .k{background:var(--flaky)} .mini .e{background:var(--error)}
+.mini .p{background:var(--pass)} .mini .f{background:var(--fail)} .mini .k{background:var(--flaky)} .mini .e{background:var(--error)} .mini .l{background:var(--floor)}
 .what .line{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center}
 .what .sum{font-size:var(--text-sm)}
 .what .ids{display:block;font:11px/1.5 var(--font-mono);color:var(--text-muted);margin-top:var(--space-1);overflow-wrap:anywhere}
@@ -772,8 +774,8 @@ def home_freshness(ctx: dict) -> str:
             st_tally[r["status"]] = st_tally.get(r["status"], 0) + 1
     verdicts = "".join(
         f'<span class="st {k}{"" if st_tally.get(k) else " dim"}">{st_tally.get(k, 0)} {k}</span>'
-        for k in ("PASS", "FLAKY", "FAIL", "ERROR") if st_tally.get(k) or k in ("PASS", "FAIL"))
-    bad = [r for r in rows if r["run"] and r["status"] != "PASS"]
+        for k in ("PASS", "FLAKY", "FLOOR", "FAIL", "ERROR") if st_tally.get(k) or k in ("PASS", "FAIL"))
+    bad = [r for r in rows if r["run"] and r["status"] not in ("PASS", "FLOOR")]
     if bad and len(bad) <= 4:
         verdicts += ('<span class="muted">· not passing: ' + ", ".join(
             f'<a class="mono" href="{esc(r["run"])}/report.html#{esc(r["id"])}">{esc(r["id"])}</a> '
@@ -1066,9 +1068,9 @@ def run_row(r: dict, ctx: dict, old: bool) -> tuple:
     for s in scs:
         tally[s["status"]] = tally.get(s["status"], 0) + 1
     passed = tally.get("PASS", 0)
-    small = " · ".join(f"{tally[k]} {k.lower()}" for k in ("FAIL", "FLAKY", "ERROR") if tally.get(k))
+    small = " · ".join(f"{tally[k]} {k.lower().replace('floor', 'below floor')}" for k in ("FAIL", "FLAKY", "FLOOR", "ERROR") if tally.get(k))
     mini = "".join(f'<span class="{c}" style="width:{100 * tally.get(k, 0) / n:.1f}%"></span>'
-                   for k, c in (("PASS", "p"), ("FLAKY", "k"), ("FAIL", "f"), ("ERROR", "e"))
+                   for k, c in (("PASS", "p"), ("FLAKY", "k"), ("FLOOR", "l"), ("FAIL", "f"), ("ERROR", "e"))
                    if tally.get(k)) if n else ""
     cats = sorted({s.get("category", "?") for s in scs})
     ids = r["ids"]
@@ -1417,7 +1419,7 @@ RUN_CSS = """
 
 RUN_JS = """
 const D = DATA;
-const ORDER = {FAIL:0, ERROR:1, FLAKY:2, PASS:3};
+const ORDER = {FAIL:0, ERROR:1, FLAKY:2, FLOOR:3, PASS:4};
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const secs = ms => (ms/1000).toFixed(1)+"s";
 const tally = arr => arr.reduce((m,x)=>(m[x]=(m[x]||0)+1,m),{});
@@ -1653,7 +1655,7 @@ function wire(root){
 
 render();
 const st = tally(D.scenarios.map(s=>s.status)), ag = tally(D.scenarios.map(s=>s.agent)), ct = tally(D.scenarios.map(s=>s.cat));
-chipGroup("f-status","status",[["all","All",D.scenarios.length], ...["FAIL","FLAKY","ERROR","PASS"].filter(k=>st[k]).map(k=>[k,k,st[k]])]);
+chipGroup("f-status","status",[["all","All",D.scenarios.length], ...["FAIL","FLAKY","FLOOR","ERROR","PASS"].filter(k=>st[k]).map(k=>[k,k,st[k]])]);
 chipGroup("f-agent","agent",[["all","All",null], ...Object.entries(ag).sort().map(([k,v])=>[k,k,v])]);
 chipGroup("f-cat","cat",[["all","All",null], ...Object.entries(ct).sort().map(([k,v])=>[k,k,v])]);
 const nd = D.scenarios.filter(s=>denied(s)).length, nc = D.scenarios.filter(s=>s.spec.changed).length;
@@ -1887,22 +1889,22 @@ LEGACY_CSS = """
 *{box-sizing:border-box}
 :root{
   --bg:#fbfbfa; --fg:#1a1a19; --dim:#6b6b68; --line:#e4e4e1; --card:#fff;
-  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf;
+  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf; --floor:#6b7f94;
   --tool:#4a6fa5; --text:#5a4a7a; --think:#8a8a86; --result:#3d7a6c;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#161615; --fg:#e8e8e5; --dim:#9a9a95; --line:#2e2e2c; --card:#1e1e1d;
-  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0;
+  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0; --floor:#8fa3b8;
   --tool:#7fa3d8; --text:#a690cf; --think:#7a7a76; --result:#6cbfa8;
 }}
 :root[data-theme=dark]{
   --bg:#161615; --fg:#e8e8e5; --dim:#9a9a95; --line:#2e2e2c; --card:#1e1e1d;
-  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0;
+  --pass:#5cb87f; --fail:#e07a6c; --err:#d9a441; --flaky:#a98ae0; --floor:#8fa3b8;
   --tool:#7fa3d8; --text:#a690cf; --think:#7a7a76; --result:#6cbfa8;
 }
 :root[data-theme=light]{
   --bg:#fbfbfa; --fg:#1a1a19; --dim:#6b6b68; --line:#e4e4e1; --card:#fff;
-  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf;
+  --pass:#2e7d4f; --fail:#c0392b; --err:#b7791f; --flaky:#7c5cbf; --floor:#6b7f94;
   --tool:#4a6fa5; --text:#5a4a7a; --think:#8a8a86; --result:#3d7a6c;
 }
 body{margin:0;background:var(--bg);color:var(--fg);

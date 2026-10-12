@@ -154,6 +154,7 @@ class Scenario:
     workspace: str = ""      # fixture dir seeded into a fresh cwd per sample
     allow: str = ""          # --allowedTools, comma-separated
     deny: str = ""           # --disallowedTools, comma-separated
+    floor: str = ""          # smallest model family the rule was MEASURED to hold on
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
 
     @property
@@ -245,8 +246,12 @@ def load_scenarios() -> list:
                 workspace=raw.get("workspace", ""),
                 allow=raw.get("allow", ""),
                 deny=raw.get("deny", ""),
+                floor=raw.get("floor", "") or "",
                 fingerprint=_digest(src),
             ))
+    for s in out:
+        if s.floor and s.floor not in MODEL_LADDER:
+            sys.exit(f"{s.id}: floor `{s.floor}` is not one of {MODEL_LADDER}")
     ids = [s.id for s in out]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
@@ -796,6 +801,26 @@ def check_score(sc: Scenario, score: dict) -> list:
     return []
 
 
+# A floor is a MEASURED claim, not a guess: the smallest model family on which
+# the scenario's rule held N/3 (B-034). Below it a FAIL is reported as FLOOR —
+# the model, not the agent — and does not fail the run; a PASS still counts.
+# Measured once already: architect-slows-one-way-door-before-editing, 1/13 on
+# Sonnet and 3/3 on Opus with the same installed agent (B-033). A scenario
+# without a floor claims nothing and is judged as before.
+MODEL_LADDER = ("haiku", "sonnet", "opus")
+
+
+def model_family(model_id: str) -> str:
+    """'claude-sonnet-5-5' → 'sonnet'; unknown → '' (claims nothing)."""
+    low = (model_id or "").lower()
+    return next((f for f in MODEL_LADDER if f in low), "")
+
+
+def below_floor(sc: Scenario, model_id: str) -> bool:
+    fam = model_family(model_id)
+    return bool(sc.floor and fam and MODEL_LADDER.index(fam) < MODEL_LADDER.index(sc.floor))
+
+
 @dataclass
 class Result:
     sc: Scenario
@@ -817,6 +842,14 @@ class Result:
 
     @property
     def status(self) -> str:
+        st = self.verdict
+        if st == "FAIL" and self.below_floor:
+            return "FLOOR"
+        return st
+
+    @property
+    def verdict(self) -> str:
+        """The sample on its own merits, floor ignored."""
         if self.reply.error:
             return "ERROR"
         if self.fails:
@@ -826,6 +859,10 @@ class Result:
         if self.judged is False:
             return "FAIL"
         return "PASS"
+
+    @property
+    def below_floor(self) -> bool:
+        return below_floor(self.sc, self.reply.model)
 
     @property
     def cost(self) -> float:
@@ -1027,6 +1064,8 @@ class Aggregate:
         So FLAKY is not a pass. Asking for certainty and getting ambiguity
         means the answer is "we still don't know"."""
         seen = {r.status for r in self.trials}
+        if "FLOOR" in seen and seen <= {"PASS", "FLOOR"}:
+            return "FLOOR"      # sampling below the floor is what the floor predicts
         return seen.pop() if len(seen) == 1 else "FLAKY"
 
     @property
@@ -1177,6 +1216,8 @@ def trial_record(r: Result) -> dict:
         "score": r.score or None,
         "delegated_to": r.spawned or None,
         "model": r.reply.model or None,
+        "below_floor": r.below_floor,
+        "verdict": r.verdict,
         "output_style": r.reply.output_style or None,
         "permission_denials": permission_denials(r.reply.events) or None,
         "tools_used": lane_tools(r.reply.events)[0] or None,
@@ -1232,6 +1273,7 @@ def persist(aggs: list, outdir: Path):
                 # changed, this says to WHAT).
                 "assert": a.sc.assertions,
                 "status": a.status,
+                "floor": a.sc.floor or None,
                 "repeat": len(a.trials),
                 "passes": a.passes,
                 "tally": a.tally,
@@ -1278,7 +1320,7 @@ def persist(aggs: list, outdir: Path):
     return outdir
 
 
-MARK = {"PASS": " ok ", "FAIL": "FAIL", "ERROR": "ERR ", "FLAKY": "FLKY"}
+MARK = {"PASS": " ok ", "FAIL": "FAIL", "ERROR": "ERR ", "FLAKY": "FLKY", "FLOOR": "flr "}
 
 
 def report(aggs: list, outdir: Path, elapsed: float):
@@ -1304,10 +1346,12 @@ def report(aggs: list, outdir: Path, elapsed: float):
         if r.judged is False or (r.judged is None and "judge" in a.sc.assertions):
             print(f"          judge: {r.judge_why[:150]}")
 
-    bad = [a for a in aggs if a.status != "PASS"]
+    bad = [a for a in aggs if a.status not in ("PASS", "FLOOR")]
     flaky = [a for a in aggs if a.status == "FLAKY"]
+    floored = [a for a in aggs if a.status == "FLOOR"]
     total = sum(a.cost for a in aggs)
     tail = f" · {len(flaky)} flaky" if flaky else ""
+    tail += f" · {len(floored)} below floor" if floored else ""
     print(f"\n{len(aggs) - len(bad)}/{len(aggs)} passed{tail} · "
           f"${total:.2f} · {elapsed:.0f}s")
     print(f"run saved to {outdir}")
@@ -1316,6 +1360,11 @@ def report(aggs: list, outdir: Path, elapsed: float):
     if denied:
         print(f"\npermission denials in {len(denied)} scenario(s): {', '.join(denied)}"
               f"\n  a PASS here may hide a tool the agent needed — read the trace")
+    if floored:
+        print("\nbelow floor: " + ", ".join(f"{a.sc.id} (floor {a.sc.floor})" for a in floored)
+              + "\n  the rule was measured to hold on a stronger model than this run used; "
+              "neither a pass nor a failure of the agent — re-check on --model <floor> "
+              "before touching it")
     if flaky:
         print("\na flaky scenario was never passing — it was sampling. Read the "
               "samples: if they disagree on the same question, the scenario is "

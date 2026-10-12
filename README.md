@@ -134,6 +134,18 @@ Two independent knobs, because they answer different questions:
   rather than prompt gets re-run once on `--model opus` before the agent file
   is touched; a full run on the strongest model is a release check, not the
   default.
+- **A floor is where "steers the stronger models too" stops.** Measured
+  (B-033): `architect-slows-one-way-door-before-editing` held 3/3 on Opus and
+  1/13 on Sonnet with the same installed agent. A scenario may declare
+  `floor: opus` (or `sonnet`, `haiku`) — the smallest model family the rule
+  was MEASURED to hold on, N/3, never guessed. Run below its floor, a FAIL is
+  reported as **FLOOR** ("below floor"): the model, not the agent, and it does
+  not fail the run; a PASS still counts. The suite keeps running on Sonnet,
+  the model in daily use; Opus is for ESTABLISHING a floor when Sonnet
+  samples, not a routine run. For a rule that a host can enforce by tool
+  name, the floor is not the last word: a twin scenario closes that gate
+  (`deny:` the tool, assert `unchanged_files`) and holds on any model — see
+  `*-behind-the-gate` in `hard-rules.yaml`.
 - `--judge-model` — the PASS/FAIL classifier. Defaults to **Opus**: the judge
   decides the verdict, and a lenient judge turns every run green, which is
   the failure mode this harness exists to avoid. Its prompt is short, so the
