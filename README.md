@@ -9,6 +9,7 @@ this repo does.
 
 ```bash
 ./run.py --dry-run              # what would run, and what it costs
+./run.py --applicability        # which past verdicts still apply to today's install (free)
 ./run.py --category routing     # one category
 ./run.py --only qa-never        # one scenario
 ./run.py                        # everything
@@ -225,6 +226,42 @@ opens would be by far the largest thing in the file — and the lead is a
 Cost is linear: `--repeat 3` on the full suite is ~$27. It is not a default.
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
+
+## Is that verdict still evidence?
+
+A run tests what is **installed** under `~/.claude`, with the host as it is that
+day — not what the catalog says. On 2026-10-11 an A/B run swapped the order of
+two inherited sections in `devops.md`, and both runs recorded the same catalog
+commit, model and judge: nothing on disk could tell them apart.
+
+So every `run.json` now carries `fingerprints`, taken when the run starts —
+short hashes, not contents:
+
+| Field | What it pins |
+|---|---|
+| `harness` | this repo's commit, and whether it had uncommitted changes |
+| `cli` | `claude --version` |
+| `agents` | each installed `~/.claude/agents/*.md` |
+| `skills` | the whole `~/.claude/skills` tree, the user's own skills included |
+| `claude_md` | the host's `~/.claude/CLAUDE.md` |
+| `scenarios` | each scenario's YAML entry plus its fixture |
+
+and `effective`, written when it ends: the models that actually answered (the
+init event resolves `--model sonnet` and "(cli default)"), the judge's, and the
+output styles in force. Each trial also records its own `model` and
+`output_style` — an output style once made peers interrogate instead of commit.
+
+`--applicability` reads those against today's install and classifies each
+scenario's latest verdict, without calling a model:
+
+| Class | Meaning |
+|---|---|
+| `current` | same scenario, same installed agent(s) and skills, same model |
+| `partial` | same scenario, but the agent, the skills or the model changed |
+| `historic` | the scenario changed, or the run predates fingerprints |
+
+Runs before 2026-10-11 have no fingerprints and read as `historic`; they are
+not rebuilt, because the install they ran against is gone.
 
 ## Watching the work
 

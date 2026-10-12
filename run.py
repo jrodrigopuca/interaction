@@ -24,6 +24,7 @@ Requires PyYAML and the `claude` CLI on PATH.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -84,6 +85,7 @@ COST_PER_CALL = 0.10    # --dry-run estimates only. Recalibrated 2026-09-04 with
 # budget rather than dollars.
 AGENT_MODEL = "sonnet"  # --model
 JUDGE_MODEL = "opus"    # --judge-model
+JUDGE_SEEN = set()      # models the judge's init events reported; see run.json
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +106,7 @@ class Scenario:
     workspace: str = ""      # fixture dir seeded into a fresh cwd per sample
     allow: str = ""          # --allowedTools, comma-separated
     deny: str = ""           # --disallowedTools, comma-separated
+    fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
 
     @property
     def is_routing(self) -> bool:
@@ -115,10 +118,66 @@ class Scenario:
         return self.timeout or (DELEGATE_TIMEOUT if self.delegate else TIMEOUT)
 
 
+def _digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def tree_digest(path: Path) -> str:
+    """One hash for a directory: every file's relative path and content. A
+    missing dir hashes as empty, so its absence is recorded too."""
+    if not path.exists():
+        return _digest(b"")
+    files = sorted(p for p in path.rglob("*") if p.is_file())
+    return _digest(b"".join(str(f.relative_to(path)).encode() + b"\0" + f.read_bytes()
+                            for f in files))
+
+
+def host_fingerprints(scenarios: list) -> dict:
+    """Everything a verdict depends on besides the scenario itself.
+
+    The catalog commit was the only anchor, and it was not enough: on
+    2026-10-11 an A/B run swapped the order of two inherited sections in
+    devops.md, and both runs recorded the same commit, model and judge — the
+    harness tests what is INSTALLED under ~/.claude, with the host as it is,
+    not what the catalog says. Hashes, not contents: enough to tell two runs
+    apart and to tell an old result from one that still applies."""
+    def git(*args):
+        try:
+            return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
+                                  text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    try:
+        cli = subprocess.run(["claude", "--version"], capture_output=True, text=True,
+                             timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        cli = ""
+    claude_dir = INSTALLED_AGENTS.parent
+    claude_md = claude_dir / "CLAUDE.md"
+    return {
+        "harness": {"commit": git("rev-parse", "HEAD") or None,
+                    "dirty": bool(git("status", "--porcelain"))},
+        "cli": cli or None,
+        "agents": {p.stem: _digest(p.read_bytes())
+                   for p in sorted(INSTALLED_AGENTS.glob("*.md"))},
+        # Every installed skill, the user's own included: an agent sees them all.
+        "skills": tree_digest(claude_dir / "skills"),
+        # The host's own instructions reach every agent in a run.
+        "claude_md": _digest(claude_md.read_bytes()) if claude_md.exists() else None,
+        "scenarios": {s.id: s.fingerprint for s in scenarios},
+    }
+
+
 def load_scenarios() -> list:
     out = []
     for path in sorted(SCENARIOS.glob("*.yaml")):
         for raw in yaml.safe_load(path.read_text()) or []:
+            # What the verdict was measured AGAINST: prompt, assertions, judge
+            # criterion and the fixture it seeds. A PASS from before the
+            # criterion changed is not evidence about the scenario as it is now.
+            src = json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()
+            if raw.get("workspace"):
+                src += tree_digest(ROOT / raw["workspace"]).encode()
             out.append(Scenario(
                 id=raw["id"],
                 category=raw.get("category", path.stem),
@@ -133,6 +192,7 @@ def load_scenarios() -> list:
                 workspace=raw.get("workspace", ""),
                 allow=raw.get("allow", ""),
                 deny=raw.get("deny", ""),
+                fingerprint=_digest(src),
             ))
     ids = [s.id for s in out]
     dupes = {i for i in ids if ids.count(i) > 1}
@@ -152,6 +212,8 @@ class Reply:
     events: list = field(default_factory=list)
     error: str = ""
     transcript: str = ""      # every text turn the agent wrote, in order
+    model: str = ""           # the model that ACTUALLY answered (init event)
+    output_style: str = ""    # host output style in force (init event)
 
     @property
     def graded(self) -> str:
@@ -218,6 +280,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
         return Reply(text="", error=f"exit {proc.returncode}: {proc.stderr.strip()[:200]}")
 
     events, text, cost, ms = [], "", 0.0, 0
+    model = style = ""
     for line in proc.stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -227,6 +290,11 @@ def ask(prompt: str, agent: str = "", model: str = "",
         except ValueError:
             continue
         events.append(ev)
+        if ev.get("type") == "system" and ev.get("subtype") == "init":
+            # `--model sonnet` is an alias, and no flag is "(cli default)":
+            # neither says which model answered. The init event does — and the
+            # output style, which once made peers interrogate instead of commit.
+            model, style = ev.get("model", "") or "", ev.get("output_style", "") or ""
         if ev.get("type") == "result":
             text = ev.get("result", "") or text
             cost = ev.get("total_cost_usd", 0.0)
@@ -234,7 +302,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
     if not text:
         return Reply(text="", events=events, error="no result event in stream")
     return Reply(text=text.strip(), cost=cost, ms=ms, events=events,
-                 transcript=transcript_of(events, text))
+                 transcript=transcript_of(events, text), model=model, output_style=style)
 
 
 def transcript_of(events: list, final: str) -> str:
@@ -413,6 +481,8 @@ def judge(criterion: str, reply: str) -> tuple:
     # schemas alone were ~30k tokens of cache write); with --safe-mode,
     # --system-prompt and --tools "" the same verdict costs ~$0.004.
     r = ask(prompt, model=JUDGE_MODEL, safe_mode=True, system=JUDGE_PREAMBLE, tools="")
+    if r.model:
+        JUDGE_SEEN.add(r.model)
     if r.error:
         return None, f"judge call failed: {r.error}", r.cost
     # The verdict is the first line that says something. Seen: a verdict
@@ -707,6 +777,62 @@ class Aggregate:
 
 
 # --------------------------------------------------------------------------- #
+# Applicability: is an old verdict still evidence about today's install?
+# --------------------------------------------------------------------------- #
+def applicability(scenarios: list, model: str) -> int:
+    """For each scenario, its latest verdict and whether it still applies.
+
+    current   same scenario, same installed agent(s) and skills, same model
+    partial   same scenario, but the agent, the skills or the model changed
+    historic  the scenario itself changed, or the run predates fingerprints
+
+    Costs nothing: it compares hashes, it never calls a model."""
+    now = host_fingerprints(scenarios)
+    latest = {}
+    for d in sorted(RUNS.glob("*"), reverse=True):
+        trace = d / "trace.jsonl"
+        if not trace.is_file():
+            continue
+        try:
+            meta = json.loads((d / "run.json").read_text())
+        except (OSError, ValueError):
+            meta = {}
+        for line in trace.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            latest.setdefault(rec.get("id"), (d.name, rec, meta))
+    counts = {"current": 0, "partial": 0, "historic": 0, "never run": 0}
+    for sc in scenarios:
+        if sc.id not in latest:
+            counts["never run"] += 1
+            print(f"  {'never run':9}  {sc.id}")
+            continue
+        run, rec, meta = latest[sc.id]
+        then = meta.get("fingerprints") or {}
+        why = []
+        if not then:
+            cls, why = "historic", ["run has no fingerprints"]
+        elif then.get("scenarios", {}).get(sc.id) != sc.fingerprint:
+            cls, why = "historic", ["scenario changed"]
+        else:
+            agents = [sc.agent] if sc.agent else sorted(now["agents"])
+            if any(then.get("agents", {}).get(a) != now["agents"].get(a) for a in agents):
+                why.append("agent changed")
+            if then.get("skills") != now["skills"]:
+                why.append("skills changed")
+            if meta.get("model") != model:
+                why.append(f"model {meta.get('model')} → {model}")
+            cls = "partial" if why else "current"
+        counts[cls] += 1
+        print(f"  {cls:9}  {sc.id:44} {rec.get('status', '?'):6} {run}"
+              f"{'  (' + ', '.join(why) + ')' if why else ''}")
+    print("\n" + " · ".join(f"{n} {k}" for k, n in counts.items() if n))
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
 def trial_record(r: Result) -> dict:
@@ -724,6 +850,8 @@ def trial_record(r: Result) -> dict:
         "error": r.reply.error,
         "score": r.score or None,
         "delegated_to": r.spawned or None,
+        "model": r.reply.model or None,
+        "output_style": r.reply.output_style or None,
     }
 
 
@@ -865,6 +993,9 @@ def main():
     ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any)")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
+    ap.add_argument("--applicability", action="store_true",
+                    help="for each scenario, does its latest verdict still apply to "
+                         "what is installed now? (no model calls)")
     ap.add_argument("--jobs", type=int, default=4, help="parallel calls (default 4)")
     ap.add_argument("--repeat", type=int, default=1, metavar="N",
                     help="take N samples of each scenario (default 1). A "
@@ -912,6 +1043,9 @@ def main():
     if not scenarios:
         sys.exit("no scenarios matched")
 
+    if args.applicability:
+        return applicability(scenarios, args.model)
+
     if args.list or args.dry_run:
         for s in scenarios:
             judged = " +judge" if "judge" in s.assertions else ""
@@ -943,6 +1077,7 @@ def main():
         stamp["catalog"] = json.loads(manifest.read_text())
     except (OSError, ValueError):
         stamp["catalog"] = None
+    stamp["fingerprints"] = host_fingerprints(scenarios)
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     cat = stamp["catalog"] or {}
     print(f"catalog {cat.get('catalog_commit', '?')[:7]}"
@@ -969,6 +1104,13 @@ def main():
     aggs = [Aggregate(sc, by_id[sc.id]) for sc in scenarios]
     persist(aggs, outdir)
     (outdir / "partial.jsonl").unlink(missing_ok=True)
+    # What actually ran, known only after the calls: aliases resolved, styles seen.
+    stamp["effective"] = {
+        "agent_models": sorted({r.reply.model for r in flat if r.reply.model}),
+        "judge_models": sorted(JUDGE_SEEN),
+        "output_styles": sorted({r.reply.output_style for r in flat if r.reply.output_style}),
+    }
+    (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     return report(aggs, outdir, time.time() - t0)
 
 
