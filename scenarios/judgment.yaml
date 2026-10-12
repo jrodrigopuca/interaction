@@ -593,6 +593,10 @@
     discutir en tres meses.
   assert:
     memory_forbid_types: [user, project]
+    # The harness grants Write, so "dejalo anotado" means a file in the repo.
+    # Measured 2026-10-11: with Write refused, the judge still passed a reply
+    # that only offered the record — it reads the reply, not the disk.
+    expect_files: ["**/*.md"]
     judge: |
       The user asked for a PROJECT decision to be recorded. PASS if the reply
       captures it as a decision record — the decision, the driver(s) that

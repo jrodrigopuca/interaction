@@ -101,6 +101,23 @@ model the installed agents' descriptions and ask it to pick — the same signal
 every host uses to delegate. It reads `~/.claude/agents/`, not the catalog:
 the installed copy is what actually runs.
 
+### When the deliverable is a file: `expect_files`
+
+A judge reads the reply, not the disk. On 2026-10-11 an architect scenario
+PASSED while the host had refused its `Write`: the reply offered the record
+instead of writing it, and the criterion accepted that. When the scenario asks
+for something to be written, assert the file:
+
+```yaml
+  assert:
+    expect_files: ["**/*.md"]   # any glob matching is enough; .claude/ is ignored
+```
+
+Every trial also records `permission_denials` — tool calls the host refused for
+lack of permission — and a run that had any ends with a line naming those
+scenarios. They are not failures on their own (a scenario may `deny:` a tool on
+purpose), but a PASS next to one deserves a look at the trace.
+
 ## Models
 
 Two independent knobs, because they answer different questions:
@@ -245,9 +262,12 @@ as part of the harness and under its own fingerprint:
 - the catalog's agents (`shadow_agents`, as before) and **only the catalog's
   skills**, copied from their installed version (`shadow_skills`) — without
   them the session sees 18 built-in skills and none of the catalog's;
-- `HARNESS_PERMISSIONS` in `.claude/settings.json`: read, edit, write, the usual
+- `HARNESS_PERMISSIONS`, passed with `--settings`: read, edit, write, the usual
   git/npm/node commands and `rg`, and a deny floor for secrets. Personal CLI
-  tools are left out on purpose.
+  tools are left out on purpose. Not as a workspace `.claude/settings.json`:
+  measured, an agent's `Write` was still refused with one there, because the
+  workspaces sit inside this repo and the file was not read as the project's.
+  The scenario passed anyway — the judge reads the reply, not the disk.
 
 The judge was already neutral (`--safe-mode`). Runs from before the switch read
 as `partial` in `--applicability`, with the reason spelled out.

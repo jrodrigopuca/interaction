@@ -57,9 +57,13 @@ INSTALLED_AGENTS = Path.home() / ".claude" / "agents"
 # and NO. The catalog installs onto machines that have neither, and an output
 # style once made peers interrogate instead of commit.
 #
-# What user-level settings used to supply, the workspace now supplies, as part
-# of the harness and under its own fingerprint: the catalog's agents and
-# skills (shadow_agents, shadow_skills) and these permissions. They mirror a
+# What user-level settings used to supply, the harness now supplies, under its
+# own fingerprint: the catalog's agents and skills, copied into each workspace
+# (shadow_agents, shadow_skills), and these permissions, passed with
+# `--settings`. Not as a workspace `.claude/settings.json`: measured, a Write
+# was still refused with one there — the workspaces live inside this repo, and
+# that file was not read as the project's — while `--settings` applies
+# whatever the setting sources. They mirror a
 # developer's ordinary grants — read, edit, the usual git/npm commands, and a
 # floor that keeps secrets unread — minus anyone's personal CLI tools, which
 # the catalog cannot assume (root rule 15).
@@ -279,6 +283,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
         cmd += ["--disallowedTools", deny]
     if neutral:
         cmd += NEUTRAL_SESSION
+        cmd += ["--settings", json.dumps({"permissions": HARNESS_PERMISSIONS})]
     if safe_mode:
         # Every customization off: CLAUDE.md, output styles, skills, hooks,
         # agents. A grader must not inherit the user's persona — measured: with
@@ -533,6 +538,39 @@ def judge(criterion: str, reply: str) -> tuple:
 # --------------------------------------------------------------------------- #
 # Assertions
 # --------------------------------------------------------------------------- #
+def permission_denials(events: list) -> list:
+    """Tool calls the host refused for lack of permission, in the main lane.
+
+    A judge reads the reply, not the disk: on 2026-10-11 an architect scenario
+    PASSED while its Write was refused — the reply offered the record instead.
+    A refusal is not always a failure (a scenario may `deny:` a tool on
+    purpose), so it is recorded and surfaced, never silently passed over."""
+    out = []
+    for ev in events or []:
+        if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                text = b.get("content")
+                text = text if isinstance(text, str) else json.dumps(text)
+                if "permission" in text.lower():
+                    out.append(text[:160])
+    return out
+
+
+def written_files(ws: Path, globs: list) -> list:
+    """Files in the workspace matching any glob, outside `.claude/` (the
+    harness's own shadow copies and the agent's memory live there)."""
+    if not ws:
+        return []
+    return sorted({str(p.relative_to(ws)) for g in globs for p in ws.glob(g)
+                   if p.is_file() and ".claude" not in p.relative_to(ws).parts})
+
+
 def check(sc: Scenario, reply: str) -> list:
     """Deterministic assertions. Returns a list of failure strings."""
     fails = []
@@ -669,9 +707,6 @@ def make_workspace(sc: Scenario) -> Path:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     shadow_agents(ws)
     shadow_skills(ws)
-    settings = ws / ".claude" / "settings.json"
-    settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(json.dumps({"permissions": HARNESS_PERMISSIONS}, indent=2))
     return ws
 
 
@@ -766,6 +801,14 @@ def run_one(sc: Scenario) -> Result:
     # `forbidden_tools`: names the agent must not have invoked at all. With an
     # access tier installed the host refuses them; without one this is the
     # only way to see that a read-only advisor quietly edited a file.
+    # `expect_files`: the deliverable is a file, so look at the disk. Any glob
+    # matching is enough — the scenario fixes WHAT must exist, not its name.
+    if "expect_files" in sc.assertions:
+        globs = sc.assertions["expect_files"]
+        globs = [globs] if isinstance(globs, str) else list(globs)
+        if not written_files(ws, globs):
+            res.fails.append(f"no file matching {', '.join(globs)} was written "
+                             f"to the workspace")
     if "forbidden_tools" in sc.assertions:
         hit = sorted(tool_names(reply.events) & set(sc.assertions["forbidden_tools"]))
         if hit:
@@ -922,6 +965,7 @@ def trial_record(r: Result) -> dict:
         "delegated_to": r.spawned or None,
         "model": r.reply.model or None,
         "output_style": r.reply.output_style or None,
+        "permission_denials": permission_denials(r.reply.events) or None,
     }
 
 
@@ -1046,6 +1090,11 @@ def report(aggs: list, outdir: Path, elapsed: float):
     print(f"\n{len(aggs) - len(bad)}/{len(aggs)} passed{tail} · "
           f"${total:.2f} · {elapsed:.0f}s")
     print(f"run saved to {outdir}")
+    denied = [a.sc.id for a in aggs
+              if any(permission_denials(t.reply.events) for t in a.trials)]
+    if denied:
+        print(f"\npermission denials in {len(denied)} scenario(s): {', '.join(denied)}"
+              f"\n  a PASS here may hide a tool the agent needed — read the trace")
     if flaky:
         print("\na flaky scenario was never passing — it was sampling. Read the "
               "samples: if they disagree on the same question, the scenario is "
