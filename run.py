@@ -48,6 +48,32 @@ SCENARIOS = ROOT / "scenarios"
 RUNS = ROOT / "runs"
 INSTALLED_AGENTS = Path.home() / ".claude" / "agents"
 
+# The agent under test runs in a NEUTRAL session: `--setting-sources
+# project,local` leaves out everything user-level — the output style, the
+# user's ~/.claude/CLAUDE.md, their own skills, plugins, hooks and permissions.
+# Measured 2026-10-11: by default the session ran with the user's `Mentor`
+# output style and answered YES, quoting it, when asked whether its
+# instructions mentioned the user's CLAUDE.md; with this flag, style `default`
+# and NO. The catalog installs onto machines that have neither, and an output
+# style once made peers interrogate instead of commit.
+#
+# What user-level settings used to supply, the workspace now supplies, as part
+# of the harness and under its own fingerprint: the catalog's agents and
+# skills (shadow_agents, shadow_skills) and these permissions. They mirror a
+# developer's ordinary grants — read, edit, the usual git/npm commands, and a
+# floor that keeps secrets unread — minus anyone's personal CLI tools, which
+# the catalog cannot assume (root rule 15).
+NEUTRAL_SESSION = ["--setting-sources", "project,local"]
+HARNESS_PERMISSIONS = {
+    "allow": ["Read", "Edit", "Write", "Glob", "Grep",
+              "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)",
+              "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git log:*)",
+              "Bash(git stash:*)", "Bash(git fetch:*)", "Bash(git pull:*)",
+              "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)", "Bash(rg:*)"],
+    "deny": ["Read(.env)", "Read(.env.*)", "Read(**/.env)", "Read(**/.env.*)",
+             "Read(**/secrets/**)", "Read(**/credentials.json)"],
+}
+
 # A hung call must not wedge a worker for the rest of the run — but a ceiling
 # that fires is PURE LOSS. On a subscription the currency is tokens, and a
 # killed call has already spent every token it consumed while returning
@@ -153,17 +179,19 @@ def host_fingerprints(scenarios: list) -> dict:
     except (OSError, subprocess.SubprocessError):
         cli = ""
     claude_dir = INSTALLED_AGENTS.parent
-    claude_md = claude_dir / "CLAUDE.md"
     return {
         "harness": {"commit": git("rev-parse", "HEAD") or None,
                     "dirty": bool(git("status", "--porcelain"))},
         "cli": cli or None,
         "agents": {p.stem: _digest(p.read_bytes())
                    for p in sorted(INSTALLED_AGENTS.glob("*.md"))},
-        # Every installed skill, the user's own included: an agent sees them all.
-        "skills": tree_digest(claude_dir / "skills"),
-        # The host's own instructions reach every agent in a run.
-        "claude_md": _digest(claude_md.read_bytes()) if claude_md.exists() else None,
+        # The installed catalog skills — exactly what shadow_skills copies.
+        "skills": _digest(b"".join(
+            name.encode() + b"\0" + tree_digest(claude_dir / "skills" / name).encode()
+            for name in sorted(catalog_skill_names())
+            if (claude_dir / "skills" / name / "SKILL.md").is_file())),
+        "isolation": " ".join(NEUTRAL_SESSION),
+        "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
     }
 
@@ -228,7 +256,8 @@ class Reply:
 def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
         cwd: Path = None, allow: str = "", deny: str = "",
-        safe_mode: bool = False, system: str = "", tools: str = None) -> Reply:
+        safe_mode: bool = False, system: str = "", tools: str = None,
+        neutral: bool = False) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -248,6 +277,8 @@ def ask(prompt: str, agent: str = "", model: str = "",
         cmd += ["--allowedTools", allow]
     if deny:
         cmd += ["--disallowedTools", deny]
+    if neutral:
+        cmd += NEUTRAL_SESSION
     if safe_mode:
         # Every customization off: CLAUDE.md, output styles, skills, hooks,
         # agents. A grader must not inherit the user's persona — measured: with
@@ -637,7 +668,41 @@ def make_workspace(sc: Scenario) -> Path:
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     shadow_agents(ws)
+    shadow_skills(ws)
+    settings = ws / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps({"permissions": HARNESS_PERMISSIONS}, indent=2))
     return ws
+
+
+def catalog_skill_names() -> set:
+    """Names of the catalog's skills, read from the catalog the install came
+    from (its path is in the installer's stamp). Without it there is no way to
+    tell a catalog skill from one of the user's, so a neutral run refuses."""
+    manifest = INSTALLED_AGENTS.parent / ".local-agents.json"
+    try:
+        catalog = Path(json.loads(manifest.read_text())["catalog_path"])
+    except (OSError, ValueError, KeyError):
+        sys.exit(f"no catalog path in {manifest} — install the catalog with its "
+                 f"install.py first; a neutral run copies only the catalog's skills")
+    return ({p.parent.name for p in catalog.glob("*/skills/*/SKILL.md")}
+            | {p.parent.name for p in catalog.glob("skills/*/SKILL.md")})
+
+
+def shadow_skills(ws: Path) -> None:
+    """Copy the INSTALLED copy of each catalog skill into `<ws>/.claude/skills/`.
+
+    The neutral session no longer reads ~/.claude/skills (it is user-level), and
+    measured: without this an agent sees 19 skills instead of 93 and loses every
+    catalog one. Copying the installed copy, not the catalog source, tests what
+    the installer produced. Only catalog skills: the user's own would make the
+    run depend on whoever runs it."""
+    src_root = INSTALLED_AGENTS.parent / "skills"
+    dst = ws / ".claude" / "skills"
+    for name in sorted(catalog_skill_names()):
+        src = src_root / name
+        if (src / "SKILL.md").is_file():
+            shutil.copytree(src, dst / name, dirs_exist_ok=True)
 
 
 AGENTS_DIR = Path.home() / ".claude" / "agents"
@@ -685,7 +750,7 @@ def run_one(sc: Scenario) -> Result:
     ws = make_workspace(sc)
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
-                cwd=ws, allow=sc.allow, deny=sc.deny)
+                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=True)
     if reply.error:
         return Result(sc, reply, workspace=str(ws or ""))
 
@@ -782,7 +847,8 @@ class Aggregate:
 def applicability(scenarios: list, model: str) -> int:
     """For each scenario, its latest verdict and whether it still applies.
 
-    current   same scenario, same installed agent(s) and skills, same model
+    current   same scenario, same installed agent(s) and skills, same model,
+              same session isolation and permissions
     partial   same scenario, but the agent, the skills or the model changed
     historic  the scenario itself changed, or the run predates fingerprints
 
@@ -822,6 +888,10 @@ def applicability(scenarios: list, model: str) -> int:
                 why.append("agent changed")
             if then.get("skills") != now["skills"]:
                 why.append("skills changed")
+            if then.get("isolation") != now["isolation"]:
+                why.append("session isolation changed")
+            if then.get("permissions") != now["permissions"]:
+                why.append("permissions changed")
             if meta.get("model") != model:
                 why.append(f"model {meta.get('model')} → {model}")
             cls = "partial" if why else "current"

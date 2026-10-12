@@ -227,6 +227,31 @@ Cost is linear: `--repeat 3` on the full suite is ~$27. It is not a default.
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
 
+## A neutral session
+
+The agent under test runs with `--setting-sources project,local`, which leaves
+out everything user-level: the output style, `~/.claude/CLAUDE.md`, the user's
+own skills, plugins, hooks and permissions. The catalog installs onto machines
+that have none of those, so a run that carried them measured one person's setup.
+
+Measured 2026-10-11 before switching: by default the session ran in the user's
+`Mentor` output style, and asked whether its instructions mentioned a phrase
+that only exists in the user's `CLAUDE.md`, it answered YES and quoted it. With
+the flag: style `default`, and NO.
+
+What user-level settings used to supply, each sample's workspace now supplies,
+as part of the harness and under its own fingerprint:
+
+- the catalog's agents (`shadow_agents`, as before) and **only the catalog's
+  skills**, copied from their installed version (`shadow_skills`) — without
+  them the session sees 18 built-in skills and none of the catalog's;
+- `HARNESS_PERMISSIONS` in `.claude/settings.json`: read, edit, write, the usual
+  git/npm/node commands and `rg`, and a deny floor for secrets. Personal CLI
+  tools are left out on purpose.
+
+The judge was already neutral (`--safe-mode`). Runs from before the switch read
+as `partial` in `--applicability`, with the reason spelled out.
+
 ## Is that verdict still evidence?
 
 A run tests what is **installed** under `~/.claude`, with the host as it is that
