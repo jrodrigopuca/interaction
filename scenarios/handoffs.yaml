@@ -102,6 +102,10 @@
 - id: architect-prices-data-boundary-with-dba
   category: handoff
   agent: architect
+  # 2026-10-12: failed twice (runs 20261012-161413, 20261012-161940) for
+  # "las tablas las define el dba, dueño del modelo de datos" while keeping
+  # the boundary — the catalog's own definition of dba. The criterion read
+  # that as handing over the whole decision; it now separates the two.
   prompt: |
     Quiero separar facturación en un servicio propio. Hoy `invoices` tiene
     foreign keys a `users` y a `orders` en la misma base. ¿Lo hacemos, y
@@ -114,8 +118,11 @@
       price the data cut — distributed join, duplicated rows, or lost
       referential integrity — before the boundary is final. PASS if both are
       present: the architect keeps the decision and explicitly sources the
-      data cost from dba. FAIL if it decides the table split on its own, or
-      if it hands the whole architectural decision to dba.
+      data cost from dba. Saying that dba owns what happens to the TABLES (the
+      data model) is correct — the catalog makes dba the data model's owner —
+      as long as the architect keeps the SERVICE BOUNDARY decision. FAIL if it
+      decides the table split on its own, or if it hands the boundary
+      decision itself (whether to split billing out) to dba.
 
 # Added with the qa↔security seam: an authorization hole found by walking a
 # flow is security's finding (the class), even though qa found the instance.
