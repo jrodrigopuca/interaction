@@ -579,7 +579,10 @@ def permission_denials(events: list) -> list:
                 # Two wordings: "...requested permissions to write..." and
                 # "This command requires approval" — the first detector knew
                 # only the first and missed every refused Bash command.
-                if "permission" in low or "requires approval" in low:
+                # A third wording, for a command the host cannot vet up front
+                # (a compound with `||`/`&&`): "can't be checked before it runs".
+                if ("permission" in low or "requires approval" in low
+                        or "can't be checked before it runs" in low):
                     out.append(text[:160])
     return out
 

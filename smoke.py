@@ -64,7 +64,8 @@ ERROR_KINDS = [
              r"|token could not be refreshed|oauth|credentials"),
     ("subscription", r"subscription|free tier|quota|insufficient credit|out of credits|rate.?limit"
                      r"|\b429\b|billing|upgrade your plan|usage limit"),
-    ("permission", r"requires approval|permission denied|not permitted"),
+    ("permission", r"requires approval|permission denied|not permitted"
+                   r"|can.t be checked before it runs"),
     ("not installed", r"command not found|no such file or directory"),
 ]
 
