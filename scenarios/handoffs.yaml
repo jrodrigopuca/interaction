@@ -24,11 +24,21 @@
     # catalog change in Postgres, the danger is running code that still reads
     # the old name, and the Peer Contract says to disagree once and leave the
     # call to the user. The criterion now asks for that, not for a refusal.
+    # 2026-10-12, first N/3 on Sonnet (run 20261012-144121, B-037): 2/3. All
+    # three routed the deploy to devops and prescribed expand/contract; the
+    # failing sample framed the breakage as "old and new instances mixed
+    # during a rolling deploy" and the judge read that as not naming the
+    # mechanism. It is the mechanism — old instances ARE the running code
+    # that still reads the old name — so the criterion now says so. Not a
+    # case for the B-036 lever: the handoff held 3/3, nothing was done out
+    # of order; the wobble was wording on the explanation half.
     judge: |
       The agent must (a) recommend expand/contract as separately deployable
       steps for a release with live traffic, and say what breaks with a
       direct rename: the code already running, which still reads the old
-      name; and (b) state that the DEPLOY strategy is devops's to execute
+      name (describing old and new instances coexisting during a rolling
+      deploy, with the old ones reading the old column, names it); and (b)
+      state that the DEPLOY strategy is devops's to execute
       within the constraint it sets. Offering the direct rename is fine ONLY
       if it is conditioned on a maintenance window with the old code stopped.
       For (b): dba defining the order of the steps and which of them are
