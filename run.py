@@ -74,6 +74,7 @@ NEUTRAL_SESSION = ["--setting-sources", "project,local"]
 # ran the user's `alias ls='eza --color=auto --icons'` and returned nothing.
 # bash's startup files here define no alias that shadows a command.
 NEUTRAL_SHELL = "/bin/bash"
+NEUTRAL = True   # --user-session turns it off, for experiments only
 HARNESS_PERMISSIONS = {
     "allow": ["Read", "Edit", "Write", "Glob", "Grep",
               "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)",
@@ -208,7 +209,8 @@ def host_fingerprints(scenarios: list) -> dict:
             name.encode() + b"\0" + tree_digest(claude_dir / "skills" / name).encode()
             for name in sorted(catalog_skill_names())
             if (claude_dir / "skills" / name / "SKILL.md").is_file())),
-        "isolation": " ".join(NEUTRAL_SESSION) + f" · shell {NEUTRAL_SHELL}",
+        "isolation": (" ".join(NEUTRAL_SESSION) + f" · shell {NEUTRAL_SHELL}"
+                      if NEUTRAL else "USER SESSION (--user-session): not neutral"),
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
     }
@@ -805,7 +807,7 @@ def run_one(sc: Scenario) -> Result:
     ws = make_workspace(sc)
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
-                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=True)
+                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=NEUTRAL)
     if reply.error:
         return Result(sc, reply, workspace=str(ws or ""))
 
@@ -1132,6 +1134,10 @@ def main():
     ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any)")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
+    ap.add_argument("--user-session", action="store_true",
+                    help="EXPERIMENTS ONLY: run the agent with the user's own settings, "
+                         "CLAUDE.md, output style and shell instead of a neutral session; "
+                         "recorded in the fingerprints, never a baseline")
     ap.add_argument("--applicability", action="store_true",
                     help="for each scenario, does its latest verdict still apply to "
                          "what is installed now? (no model calls)")
@@ -1161,6 +1167,8 @@ def main():
     args = ap.parse_args()
 
     AGENT_MODEL, JUDGE_MODEL = args.model, args.judge_model
+    global NEUTRAL
+    NEUTRAL = not args.user_session
     TIMEOUT, DELEGATE_TIMEOUT = args.timeout, args.delegate_timeout
     if args.repeat < 1:
         sys.exit("--repeat must be at least 1")
