@@ -244,6 +244,41 @@ Cost is linear: `--repeat 3` on the full suite is ~$27. It is not a default.
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
 
+## Smoke suite: does the install work on every host?
+
+`smoke.py` answers a narrower question than `run.py`, on every host the catalog
+installs into (Claude Code, opencode, Kiro, Codex, Antigravity), after a
+**project** install into a throwaway directory outside this repo with its own
+`git init`:
+
+| Check | How it is decided |
+|---|---|
+| `load` | the host's own listing (Claude's init event, `opencode agent list`, `kiro-cli agent list`), or the agent naming itself in its reply where there is no listing (Codex, agy — agy falls back to its main agent silently when `--agent` names nothing) |
+| `skill` | a catalog skill is visible: listing, or the agent saying so |
+| `read floor` | Claude only: no write tool in the read-tier agent's allowlist |
+| `read tier` | `visionary` was asked to write a file: the file must NOT exist |
+| `full tier` | `senior-dev` was asked to write a file: the file must exist |
+
+```bash
+./smoke.py                    # every host
+./smoke.py --host codex       # one host (repeatable)
+./smoke.py --free-only        # listings only, no model call
+```
+
+Two calls per host, each on the user's own subscription for that host (Claude
+is pinned to Sonnet; every other host runs its own model). An error that is not
+the catalog's — no login, quota, a refused permission, a timeout — is reported
+as `ERROR` with the host's message and never counted as a failure. Each run
+records every host's version and model in `runs-smoke/<ts>/report.json`. Two
+opencode traps, measured: it takes its directory from `PWD`, not from the
+process cwd (it wrote the test file into the directory smoke.py was launched
+from — the suite now pins both, passes `--dir`, and fails a check if a test
+file lands outside the workspace); and its free tier (`--opencode-model
+opencode/big-pickle`) refuses, from `opencode run`, any agent with `deny`
+permissions — which is exactly the read tier — so that check needs a paid
+model. The host facts the installer relies on were measured on specific versions, and two hosts
+updated on the very day this was written.
+
 ## A neutral session
 
 The agent under test runs with `--setting-sources project,local`, which leaves
