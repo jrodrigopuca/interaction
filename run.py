@@ -584,6 +584,29 @@ def permission_denials(events: list) -> list:
     return out
 
 
+def lane_tools(events: list) -> tuple:
+    """(tool names in call order, skills loaded) in the main lane.
+
+    Only the lead trial keeps its event stream, so before this a passing sample
+    left no trace of HOW it got there. Measured 2026-10-11: in 14 of 15 stored
+    failing samples across five scenarios the agent loaded no skill at all —
+    comparing that with the samples that passed needs this on every trial."""
+    tools, skills = [], []
+    for ev in events or []:
+        if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                tools.append(b.get("name", ""))
+                if b.get("name") == "Skill":
+                    skills.append((b.get("input") or {}).get("skill", ""))
+    return tools, skills
+
+
 def written_files(ws: Path, globs: list) -> list:
     """Files in the workspace matching any glob, outside `.claude/` (the
     harness's own shadow copies and the agent's memory live there)."""
@@ -988,6 +1011,8 @@ def trial_record(r: Result) -> dict:
         "model": r.reply.model or None,
         "output_style": r.reply.output_style or None,
         "permission_denials": permission_denials(r.reply.events) or None,
+        "tools_used": lane_tools(r.reply.events)[0] or None,
+        "skills_loaded": lane_tools(r.reply.events)[1] or None,
     }
 
 
