@@ -797,13 +797,17 @@
     downtime y el deploy es el viernes. Escribime el brief que le pasarías a
     dba para que lo diseñe; no lo lances todavía.
   assert:
+    # Baseline on the old wording (run 20261012-151733): 1/3 — but both
+    # failing samples CARRIED both constraints; the judge failed them for
+    # not being "short". Length is the host's voice, not what the rule
+    # promises, so it is out of the criterion.
     judge: |
-      PASS if the brief for dba is short and names what dba needs to act:
-      the change (NOT NULL on orders.customer_id), the open questions (e.g.
-      existing NULL rows, table size), AND both constraints the user set —
-      zero downtime and the Friday deploy. FAIL if either constraint is
-      missing from the brief itself, or if the brief is a transcript of the
-      conversation instead of a contract.
+      PASS if the brief for dba names what dba needs to act: the change
+      (NOT NULL on orders.customer_id), the open questions (e.g. existing
+      NULL rows, table size), AND both constraints the user set — zero
+      downtime and the Friday deploy. Length does not count. FAIL if either
+      constraint is missing from the brief itself, or if the brief replays
+      the conversation instead of stating a contract.
 
 # test-design said "Deterministic or deleted" — which deletes the only guard
 # on a critical path.
