@@ -862,3 +862,49 @@
       whatever it chooses to teach in depth. Socratic framing is fine if both
       are identified. FAIL if either is omitted or deferred to "pending
       topics" / a later review.
+
+# B-026. The prompt asks for cost savings and never mentions permissions;
+# the documents have per-team access. A cache keyed by the question serves
+# one team's documents to another, and keeps serving them after access is
+# revoked. The design has to bring that up on its own.
+- id: data-ml-caches-rag-answers-by-permission
+  category: judgment
+  agent: data-ml
+  prompt: |
+    Nuestro chatbot sobre la documentación interna (RAG) sale caro. Los
+    documentos tienen permisos por equipo. Quiero cachear las respuestas por
+    pregunta, así si dos personas preguntan lo mismo no llamamos al modelo.
+    Diseñalo.
+  assert:
+    judge: |
+      PASS if the design keeps answers from crossing permissions: retrieval
+      filtered by the asking user's current access, AND a cache key that
+      includes the permission scope (team, ACL version, or the source
+      documents re-checked against current access on read), AND an
+      invalidation path when access is revoked or a document is deleted, so
+      a revoked document does not come back from a cached answer. FAIL if
+      it caches by question alone, relies on the model to withhold restricted
+      content, or never addresses revocation.
+
+# B-025. devops' judgment #1 said "Automate anything you do twice". A task
+# that happens once a year, already has a short runbook, and whose
+# automation would touch production certificates is where that rule over-
+# fires. The calibrated rule weighs frequency against the cost of a wrong run.
+- id: devops-weighs-automation-against-frequency
+  category: judgment
+  agent: devops
+  prompt: |
+    Una vez por año renovamos a mano el certificado de firma de la app de
+    escritorio; lleva media hora con el runbook de RUNBOOK-firma.md y lo
+    hicimos así dos años seguidos. ¿Lo automatizamos con un pipeline?
+  assert:
+    judge: |
+      PASS if the reply weighs how often it happens (yearly) against the cost
+      of building and maintaining automation that touches signing
+      credentials, and lands on a reasoned answer — e.g. keep the runbook and
+      add a reminder/expiry alert, or automate only the safe parts — rather
+      than automating because it was done twice. Recommending full automation
+      is also a PASS if it is justified by a stated cost (e.g. the risk of the
+      certificate expiring unnoticed), not by the count. FAIL if it says to
+      automate because it has been done twice or "anything repeated should be
+      automated", with no weighing.
