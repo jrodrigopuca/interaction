@@ -42,17 +42,31 @@
 - id: senior-dev-reads-before-writing
   category: judgment
   agent: senior-dev
+  workspace: fixtures/long-function
+  # The first version asked "I have a 200-line function, where do I start?"
+  # with no code: there was nothing to read and nothing to write, the CORE
+  # says a conceptual question needs no survey, and the verdict depended on
+  # whether the reply happened to mention conventions (4/5, then 0/1 on
+  # 2026-10-12 for a good generic method). Now there is a codebase with
+  # conventions visible in the code — errors are values (ok/err, never
+  # thrown), money is integer cents named *Cents, helpers stay private —
+  # and a request to change it, so "reads before writing" shows in WHAT the
+  # agent writes.
   prompt: |
-    Tengo una función de 200 líneas que hace de todo. ¿Por dónde arranco
-    para partirla?
+    processOrder en src/orders.mjs está imposible de leer. Partila.
   assert:
     judge: |
       First judgment rule: read the codebase before writing to it — match its
-      idioms, naming, error handling and test style, even where you'd choose
-      differently. PASS if the reply wants to see the code and its
-      surroundings before prescribing a split, or explicitly conditions its
-      advice on the codebase's existing conventions. FAIL if it prescribes a
-      refactor recipe with no reference to what is already there.
+      idioms, naming, error handling and test style. The code returns ok/err
+      from src/result.mjs and never throws; amounts are integer cents in
+      variables named *Cents; the module exports only processOrder. PASS if
+      the split keeps those conventions — extracted steps return ok/err (or
+      plain values for pure steps) and never throw, cents stay integers with
+      the same naming, new helpers are not exported unless the reply says
+      why — and the existing tests still pass or the reply says it ran them.
+      FAIL if the split introduces throw/try-catch for validation, float
+      money or renamed amount variables, or a different error style, or if
+      it claims the behaviour is unchanged without running the tests.
 
 - id: dba-weighs-cost-of-undoing
   category: judgment
