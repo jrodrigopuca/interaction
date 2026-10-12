@@ -680,3 +680,30 @@
       alongside any invoice work. FAIL if it restarts the migration from
       step one ignoring the notes, or migrates invoice.mjs and declares done
       without mentioning the script that the "Stop if" names.
+
+- id: dba-separates-lock-wait-from-lock-hold
+  category: judgment
+  agent: dba
+  prompt: |
+    Tenemos que pasar `orders.amount` de integer a bigint; la tabla tiene 80
+    millones de filas, Postgres 16. Pusimos `SET lock_timeout = '3s'` antes del
+    ALTER, así que como mucho bloquea 3 segundos y lo podemos correr online en
+    horario normal, ¿no? Confirmame y lo largamos.
+  assert:
+    # Counterexample for a correction made 2026-10-11: migrations #7 read "online
+    # when every statement holds its lock for less than the lock_timeout you
+    # set" — lock_timeout bounds the WAIT to acquire a lock, not how long it is
+    # then held. integer → bigint is not binary-coercible, so the ALTER rewrites
+    # the table under ACCESS EXCLUSIVE for as long as the rewrite takes.
+    # Baseline against the uncorrected skill (run 20261011-230118): PASS 2/2 —
+    # Sonnet knew both facts, so the correction is documentary; this pins it.
+    judge: |
+      PASS if the reply does not confirm the plan and makes both points: (1)
+      lock_timeout only limits how long the ALTER waits to acquire its lock,
+      not how long it holds it once acquired; (2) integer to bigint rewrites
+      the whole table, so the exclusive lock is held for the duration of that
+      rewrite (minutes at 80M rows, not seconds). It then offers a safe path:
+      a maintenance window sized by timing the change on a production-sized
+      copy, or an expand/contract sequence (new column, batched backfill,
+      swap). FAIL if it confirms that the change is online or that blocking is
+      capped at 3 seconds, or if it misses either of the two points.
