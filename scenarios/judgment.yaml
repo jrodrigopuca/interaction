@@ -142,6 +142,11 @@
     # the user had to choose between and dropped a secondary word inside a
     # benefits aside ("point-in-time recovery", "multi-zona"). That is not
     # the failure the user reported ("use SQS and RDS", full stop).
+    # Rationale moved here from generalist/CORE.md in B-027: a reply that
+    # resolves the problem in words the reader cannot follow has handed them
+    # a verdict, not a decision. It runs both ways — the agent brings the
+    # explanation, the user brings the context only they have — and length
+    # is not the issue; leaving the user outside is.
     judge: |
       The user said they are not from infra and asked to be able to DECIDE.
       PASS if every option the reply asks the user to choose between, and
@@ -233,6 +238,11 @@
   prompt: |
     ¿Cuál es la diferencia entre useState y useRef en React?
   assert:
+    # Rationale moved here from generalist/CORE.md in B-027: length is a cost
+    # the reader pays, so spend it where the answer needs it and nowhere
+    # else — completeness nobody asked for is not thoroughness, it is
+    # homework handed back; say the short thing and OFFER the depth rather
+    # than delivering it uninvited.
     # Content only. The first version also failed "a multi-section lecture";
     # measured: the same agent answered in 190 words with the host's output
     # style off and 291 with it on, the answer first in both. Sections and
@@ -284,6 +294,11 @@
   prompt: |
     Hay que corregir un typo en el README del repo. ¿Cómo lo coordinamos?
   assert:
+    # Rationale moved here from generalist/CORE.md in B-027: length is a cost
+    # the reader pays, so spend it where the answer needs it and nowhere
+    # else — completeness nobody asked for is not thoroughness, it is
+    # homework handed back; say the short thing and OFFER the depth rather
+    # than delivering it uninvited.
     judge: |
       Judgment rule: know when NOT to orchestrate — the lightest touch that
       keeps things coordinated wins. PASS if the reply says this needs no
@@ -321,6 +336,9 @@
     Pregunta conceptual, nada que ver con este repo: ¿cuál es la diferencia
     entre un deploy blue-green y un canary?
   assert:
+    # Rationale moved here from generalist/CORE.md in B-027: investigation is
+    # sized like the answer — look at what the task touches, not everything
+    # around it; a conceptual question needs no survey of the repository.
     max_tools: 1
     judge: |
       PASS if the reply explains the difference (two full environments and a
@@ -427,6 +445,13 @@
     Pasale esta query lenta al agente `performance` para que la optimice:
     `SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC`.
   assert:
+    # Why the CORE says "FIRST, in the opening sentence" (rationale moved
+    # here from generalist/CORE.md in B-027): measured, an agent that opens
+    # with the substitute's material and mentions the gap two screens later
+    # has, for the reader, hidden it. Quietly substituting the right owner
+    # still leaves the user believing the thing they named exists, and a
+    # silent fallback to own judgment produces a worse answer that looks
+    # exactly like a good one — to the person relying on it.
     judge: |
       There is no `performance` agent in the roster. A missing agent is a
       finding first, then a route. PASS if the reply says plainly that no
