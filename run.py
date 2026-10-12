@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -68,12 +69,25 @@ INSTALLED_AGENTS = Path.home() / ".claude" / "agents"
 # floor that keeps secrets unread — minus anyone's personal CLI tools, which
 # the catalog cannot assume (root rule 15).
 NEUTRAL_SESSION = ["--setting-sources", "project,local"]
+# The Bash tool runs a snapshot of the user's login shell, aliases included —
+# a leak no setting source covers. Measured 2026-10-11: `ls -la` in a scenario
+# ran the user's `alias ls='eza --color=auto --icons'` and returned nothing.
+# bash's startup files here define no alias that shadows a command.
+NEUTRAL_SHELL = "/bin/bash"
 HARNESS_PERMISSIONS = {
     "allow": ["Read", "Edit", "Write", "Glob", "Grep",
               "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)",
               "Bash(git checkout:*)", "Bash(git branch:*)", "Bash(git log:*)",
               "Bash(git stash:*)", "Bash(git fetch:*)", "Bash(git pull:*)",
-              "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)", "Bash(rg:*)"],
+              "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)", "Bash(rg:*)",
+              # Plain read-only utilities. Claude Code 2.1.296 ships no Glob or
+              # Grep tool, so these are how an agent looks around; without them
+              # `head`/`echo` in a pipeline were refused ("requires approval").
+              "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)",
+              "Bash(wc:*)", "Bash(echo:*)", "Bash(pwd:*)", "Bash(find:*)",
+              # How an agent finds out whether a tool exists before using it.
+              # Dropped once as if it were a personal tool; it is POSIX.
+              "Bash(which:*)", "Bash(command -v:*)"],
     "deny": ["Read(.env)", "Read(.env.*)", "Read(**/.env)", "Read(**/.env.*)",
              "Read(**/secrets/**)", "Read(**/credentials.json)"],
 }
@@ -194,7 +208,7 @@ def host_fingerprints(scenarios: list) -> dict:
             name.encode() + b"\0" + tree_digest(claude_dir / "skills" / name).encode()
             for name in sorted(catalog_skill_names())
             if (claude_dir / "skills" / name / "SKILL.md").is_file())),
-        "isolation": " ".join(NEUTRAL_SESSION),
+        "isolation": " ".join(NEUTRAL_SESSION) + f" · shell {NEUTRAL_SHELL}",
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
     }
@@ -307,9 +321,11 @@ def ask(prompt: str, agent: str = "", model: str = "",
     # indistinguishable, at a glance, from an agent that ran and said nothing.
     cmd += ["--", prompt]
     limit = timeout or TIMEOUT
+    env = dict(os.environ, CLAUDE_CODE_SHELL=NEUTRAL_SHELL) if neutral else None
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=limit,
-                              cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL)
+                              cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL,
+                              env=env)
     except subprocess.TimeoutExpired:
         return Reply(text="", error=f"timed out after {limit}s")
     if proc.returncode != 0:
@@ -557,7 +573,11 @@ def permission_denials(events: list) -> list:
             if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
                 text = b.get("content")
                 text = text if isinstance(text, str) else json.dumps(text)
-                if "permission" in text.lower():
+                low = text.lower()
+                # Two wordings: "...requested permissions to write..." and
+                # "This command requires approval" — the first detector knew
+                # only the first and missed every refused Bash command.
+                if "permission" in low or "requires approval" in low:
                     out.append(text[:160])
     return out
 
