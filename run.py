@@ -214,7 +214,8 @@ def host_fingerprints(scenarios: list) -> dict:
             for name in sorted(catalog_skill_names())
             if (claude_dir / "skills" / name / "SKILL.md").is_file())),
         "isolation": (" ".join(NEUTRAL_SESSION) + f" · shell {NEUTRAL_SHELL}"
-                      if NEUTRAL else "USER SESSION (--user-session): not neutral"),
+                      if NEUTRAL else "USER SESSION (--user-session): not neutral")
+                     + " · git root per workspace",
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
     }
@@ -880,9 +881,36 @@ def make_workspace(sc: Scenario) -> Path:
     ws = Path(tempfile.mkdtemp(prefix=f"{sc.id}-", dir=WS_ROOT))
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
+    git_root(ws)
     shadow_agents(ws)
     shadow_skills(ws)
     return ws
+
+
+def git_root(ws: Path) -> None:
+    """Make the workspace its own git repository, with the fixture as its one
+    commit (B-020).
+
+    Workspaces live inside this repo (runs/ is gitignored), and git finds its
+    repository by walking UP. Without a root here, `git status`, `git show
+    HEAD` or `rev-parse --show-toplevel` answered about the HARNESS — measured
+    on 2026-10-12, senior-dev read the harness's HEAD while fixing a fixture
+    bug — and every fixture file looked ignored, which tells an agent checking
+    "is this edit reversible?" (generalist CORE) that nothing is. A real
+    project is a repo whose files are tracked; this makes the workspace one.
+
+    `.claude/` holds the harness's shadow agents, skills and agent memory: it
+    is excluded, never committed. The user's git config is kept out of the
+    commit (no hooks, no signing) so a host setting cannot fail a sample."""
+    def git(*args):
+        subprocess.run(["git", "-C", str(ws), "-c", "core.hooksPath=/dev/null",
+                        "-c", "commit.gpgsign=false", "-c", "user.name=fixture",
+                        "-c", "user.email=fixture@harness.invalid", *args],
+                       check=True, capture_output=True)
+    git("init", "-q", "-b", "main")
+    (ws / ".git" / "info" / "exclude").write_text(".claude/\n")
+    git("add", "-A")
+    git("commit", "-q", "--allow-empty", "-m", "fixture")
 
 
 def catalog_skill_names() -> set:

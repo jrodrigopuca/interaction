@@ -306,6 +306,13 @@ the flag: style `default`, and NO.
 What user-level settings used to supply, each sample's workspace now supplies,
 as part of the harness and under its own fingerprint:
 
+- **its own git root** (`git_root`, B-020): the fixture as the one commit,
+  `.claude/` excluded. Workspaces live under `runs/`, inside this repo, and
+  git finds its repository by walking up — so before this, `git status` or
+  `git show HEAD` in a sample answered about the HARNESS, and every fixture
+  file looked ignored to an agent checking whether an edit was reversible.
+  Verdicts from before it are `partial` (the isolation fingerprint says so).
+
 - the catalog's agents (`shadow_agents`, as before) and **only the catalog's
   skills**, copied from their installed version (`shadow_skills`) — without
   them the session sees 18 built-in skills and none of the catalog's;
