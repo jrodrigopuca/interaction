@@ -740,3 +740,121 @@
       copy, or an expand/contract sequence (new column, batched backfill,
       swap). FAIL if it confirms that the change is online or that blocking is
       capped at 3 seconds, or if it misses either of the two points.
+
+# B-022: five rules reworded from absolutes. Each scenario puts the absolute
+# where it gives the wrong answer; rule 17 says run it against the previous
+# wording first. Four of the five live in SKILLS, which agents load about 1 in
+# 15 samples (2026-10-11) — read `skills_loaded` in the trace before crediting
+# or blaming the skill text for a verdict.
+
+# CORE said "No fix for a bug you haven't observed"; `verification` said "if
+# you can't reproduce, the fix is a hypothesis and must be labeled as one".
+# Here production is out of reach, the cause is readable in the code.
+- id: senior-dev-fixes-unreproducible-bug-as-hypothesis
+  category: judgment
+  agent: senior-dev
+  workspace: fixtures/webhook-dup
+  prompt: |
+    Algunos clientes dicen que les cobramos dos veces el mismo pedido. No
+    tenemos los logs de producción. Arreglalo.
+  assert:
+    judge: |
+      The handler inserts a charge with no check on event.id, and the comment
+      says delivery is at-least-once; production logs are unavailable. PASS
+      if the reply delivers a fix (idempotency on the provider event id, or a
+      uniqueness constraint, applied or concretely written) AND labels it as
+      a hypothesis not observed in production, naming what would confirm it
+      (duplicate event ids in the logs, a test that delivers the same event
+      twice). Writing such a test counts as reproducing the mechanism. FAIL if
+      it refuses to fix until the bug is observed in production, or claims
+      the production double charge is verified fixed.
+
+# next-step said "the file wins" with no test of whether the file is current.
+- id: generalist-detects-stale-state-file
+  category: judgment
+  agent: generalist
+  workspace: fixtures/state-file-stale
+  prompt: |
+    Seguimos con lo de la migración a centavos. Retomá desde donde quedó.
+  assert:
+    judge: |
+      NOTES.md (updated 2026-10-01) says the next step is migrating
+      src/invoice.mjs and removing parseMoneyLegacy. The code shows both done,
+      and CHANGELOG.md (2026-10-03) records it. PASS if the reply finds that
+      the notes are stale, does not redo the invoice migration, reports that
+      the migration is already finished (or what, if anything, actually
+      remains), and updates the notes or proposes the update. FAIL if it
+      re-migrates invoice.mjs or reintroduces/re-removes parseMoneyLegacy,
+      or reports the notes' "Next" as pending work without noticing it is done.
+
+# orchestration said a handoff carries the path, the decision, the unknowns
+# "and nothing else" — which drops a constraint the user set.
+- id: eng-manager-handoff-carries-user-constraint
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    Hay que agregar NOT NULL a orders.customer_id. El cliente exige cero
+    downtime y el deploy es el viernes. Escribime el brief que le pasarías a
+    dba para que lo diseñe; no lo lances todavía.
+  assert:
+    judge: |
+      PASS if the brief for dba is short and names what dba needs to act:
+      the change (NOT NULL on orders.customer_id), the open questions (e.g.
+      existing NULL rows, table size), AND both constraints the user set —
+      zero downtime and the Friday deploy. FAIL if either constraint is
+      missing from the brief itself, or if the brief is a transcript of the
+      conversation instead of a contract.
+
+# test-design said "Deterministic or deleted" — which deletes the only guard
+# on a critical path.
+- id: qa-does-not-delete-critical-flaky-test
+  category: judgment
+  agent: qa
+  prompt: |
+    El único test del cobro idempotente (que no se cobre dos veces el mismo
+    pedido) es flaky: falla más o menos 1 de cada 10 corridas porque usa un
+    sleep de 200 ms esperando al worker. ¿Lo borramos así deja de molestar?
+  assert:
+    judge: |
+      PASS if the reply does not recommend deleting the test without a
+      replacement (it is the only guard on double charging), proposes
+      quarantining it with an owner and a date or fixing it now, and names
+      the fix for the stated cause (wait on a condition or a fake clock
+      instead of the sleep). FAIL if it recommends deleting it outright, or
+      keeps it as is with a retry.
+
+# apple-dev/code-review said "One concept per review", which moves the second
+# blocker to "pending topics".
+- id: apple-dev-reports-every-blocker
+  category: judgment
+  agent: apple-dev
+  prompt: |
+    Revisame esto antes de mandarlo a TestFlight:
+
+    ```swift
+    final class ProfileViewModel: ObservableObject {
+        @Published var user: User?
+        private var timer: Timer?
+
+        func load(id: String) {
+            let url = URL(string: "https://api.example.com/users/\(id)")!
+            URLSession.shared.dataTask(with: url) { data, _, _ in
+                let user = try! JSONDecoder().decode(User.self, from: data!)
+                DispatchQueue.main.async { self.user = user }
+            }.resume()
+            timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                self.load(id: id)
+            }
+        }
+    }
+    ```
+  assert:
+    judge: |
+      There are two shipping blockers: the force-unwraps/try! on network data
+      (a crash on any network error or unexpected payload) and the repeating
+      Timer capturing self strongly (a retain cycle: the view model never
+      deallocates and keeps polling; each load also schedules another timer).
+      PASS if the reply names BOTH as problems to fix before TestFlight,
+      whatever it chooses to teach in depth. Socratic framing is fine if both
+      are identified. FAIL if either is omitted or deferred to "pending
+      topics" / a later review.
