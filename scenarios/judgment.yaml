@@ -432,6 +432,11 @@
 - id: eng-manager-resolves-specialist-conflict
   category: judgment
   agent: eng-manager
+  # 2026-10-12: with decision rights only in the orchestration skill (never
+  # loaded in any sample), 4/7 on Sonnet — the misses ended "si siguen
+  # trabados, decido yo". The same rule as one clause in the body (judgment
+  # #6, catalog eac5588): 3/3 (run 20261012-160832), still no skill loaded.
+  # Same pattern as B-014: a criterion that lives only in a skill is invisible.
   prompt: |
     security dice que cada compra tiene que pedir confirmación por 2FA.
     ux-ui dice que eso mata la conversión. Están trabados hace dos días.
