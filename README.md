@@ -307,6 +307,25 @@ as part of the harness and under its own fingerprint:
 The judge was already neutral (`--safe-mode`). Runs from before the switch read
 as `partial` in `--applicability`, with the reason spelled out.
 
+## Experiments
+
+An experiment is not part of the suite and does not move the catalog's
+evidence: it exists to answer one question, for as long as that takes.
+
+- **A run** is an experiment when it says so at creation —
+  `./run.py --experiment "what this tests" …` — or was made with
+  `--user-session` (the experiments from before the flag). Its verdicts never
+  feed `--applicability` or a baseline: they describe the experiment.
+- **A scenario** is experimental when it declares `experiment: "<what it
+  tests>"`. A bare run leaves it out; it runs only by name (`--only`), and a run
+  that includes it is an experiment by definition. Mixing experimental and
+  suite scenarios in one run is refused, so an experiment's results can never
+  stand in for the suite's.
+- **It expires.** An experimental scenario declares `until: B-NNN`, the item in
+  the catalog's `BACKLOG.es.md` it serves. Once that item is closed, every run
+  prints `experiment expired: …` — promote the scenario to the suite (drop
+  `experiment:`) or delete it.
+
 ## Is that verdict still evidence?
 
 A run tests what is **installed** under `~/.claude`, with the host as it is that

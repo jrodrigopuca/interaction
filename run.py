@@ -149,6 +149,8 @@ class Scenario:
     execute: dict = field(default_factory=dict)   # {suite, symbol} → real tests
     timeout: int = 0         # per-scenario override; 0 → the ceiling below
     manual: bool = False     # excluded from a bare run; see load_scenarios
+    experiment: str = ""     # what this experimental scenario tests; see EXPERIMENTS
+    until: str = ""          # the backlog item (B-NNN) whose closing ends the experiment
     workspace: str = ""      # fixture dir seeded into a fresh cwd per sample
     allow: str = ""          # --allowedTools, comma-separated
     deny: str = ""           # --disallowedTools, comma-separated
@@ -238,6 +240,8 @@ def load_scenarios() -> list:
                 execute=raw.get("exec", {}) or {},
                 timeout=int(raw.get("timeout", 0)),
                 manual=bool(raw.get("manual", False)),
+                experiment=raw.get("experiment", "") or "",
+                until=raw.get("until", "") or "",
                 workspace=raw.get("workspace", ""),
                 allow=raw.get("allow", ""),
                 deny=raw.get("deny", ""),
@@ -686,6 +690,50 @@ def check(sc: Scenario, reply: str) -> list:
     return fails
 
 
+REPLY_CHECKS = ("matches", "contains", "not_contains", "max_words")
+# Deterministic checks decided in run_one, keyed by the prefix of the failure
+# message each one writes. A new check must add its prefix here, or its result
+# reads as "pass" even when it failed — check_results says so if one is missing.
+ACTION_CHECKS = {
+    "max_tools": "used ", "expect_files": "no file matching",
+    "forbidden_tools": "invoked forbidden tool", "memory_forbid_types": "persisted memory",
+    "forbid_commands": "attempted a forbidden command",
+    "unchanged_files": "modified or deleted fixture files", "forbid_text": "leaked ",
+}
+
+
+def check_results(sc: Scenario, reply: "Reply", fails: list) -> list:
+    """One {check, result, detail} per deterministic assertion: pass, fail, or
+    vacuous — it passed without being exercised (`forbid_commands` when the
+    agent never ran a command). The trace used to keep only failures, so a
+    report could not tell "held" from "never tested"."""
+    out = []
+    if sc.is_routing:
+        bad = check(sc, reply.graded)
+        return [{"check": "routing", "result": "fail" if bad else "pass",
+                 "detail": bad[0] if bad else f"routed to {sc.expect}"}]
+    for key in REPLY_CHECKS:
+        if key in sc.assertions:
+            one = Scenario(id=sc.id, category=sc.category, prompt=sc.prompt,
+                           assertions={key: sc.assertions[key]})
+            bad = check(one, reply.graded)
+            out.append({"check": key, "result": "fail" if bad else "pass",
+                        "detail": "; ".join(bad)})
+    for key, prefix in ACTION_CHECKS.items():
+        if key not in sc.assertions:
+            continue
+        bad = [f for f in fails if f.startswith(prefix)]
+        result = "fail" if bad else "pass"
+        if not bad and key == "forbid_commands" and not bash_commands(reply.events):
+            result = "vacuous"
+        out.append({"check": key, "result": result, "detail": "; ".join(bad)})
+    known = set(REPLY_CHECKS) | set(ACTION_CHECKS) | {"judge"}
+    for key in sorted(set(sc.assertions) - known):
+        out.append({"check": key, "result": "unrecorded",
+                    "detail": "no result mapping in check_results"})
+    return out
+
+
 def memory_types(ws: Path, agent: str) -> set:
     """The `type:` of every memory file the agent wrote in this workspace."""
     found = set()
@@ -754,6 +802,7 @@ class Result:
     reply: Reply
     fails: list = field(default_factory=list)
     judged: object = None      # True / False / None(error) / "skipped"
+    checks: list = field(default_factory=list)   # one entry per assertion; see check_results
     judge_why: str = ""
     judge_cost: float = 0.0
     score: dict = field(default_factory=dict)     # executed suite, if any
@@ -943,6 +992,7 @@ def run_one(sc: Scenario) -> Result:
                               sc.execute["symbol"])
         res.score["source"] = origin
         res.fails += check_score(sc, res.score)
+    res.checks = check_results(sc, reply, res.fails)
     criterion = sc.assertions.get("judge")
     if criterion:
         # Judge even when a deterministic assertion already failed: two
@@ -999,13 +1049,48 @@ class Aggregate:
 # --------------------------------------------------------------------------- #
 # Applicability: is an old verdict still evidence about today's install?
 # --------------------------------------------------------------------------- #
-def applicability(scenarios: list, model: str) -> int:
+# EXPERIMENTS. An experiment is not part of the suite and does not move the
+# catalog's evidence: it exists to answer one question, for as long as that
+# takes. Three rules follow, decided by the user on 2026-10-12:
+#   - a run declared with `--experiment` (or made with `--user-session`, which
+#     were experiments before the flag existed) never feeds applicability or a
+#     baseline — its verdicts describe the experiment, not the catalog;
+#   - a scenario declared `experiment: "<what it tests>"` is left out of a bare
+#     run and runs only by name, and a run that includes one IS an experiment;
+#   - it declares `until: B-NNN`, and once that backlog item is closed the
+#     experiment has expired: promote the scenario to the suite (drop
+#     `experiment:`) or delete it.
+def is_experiment_run(meta: dict) -> bool:
+    iso = ((meta or {}).get("fingerprints") or {}).get("isolation") or ""
+    return bool((meta or {}).get("experiment")) or iso.startswith("USER SESSION")
+
+
+def expired_experiments(scenarios: list) -> list:
+    """(scenario, B-ID) for experimental scenarios whose backlog item is closed.
+    The backlog lives in the catalog, found through the installer's stamp; when
+    it cannot be read nothing is reported expired."""
+    try:
+        catalog = Path(json.loads((INSTALLED_AGENTS.parent / ".local-agents.json")
+                                  .read_text())["catalog_path"])
+        text = (catalog / "BACKLOG.es.md").read_text(encoding="utf-8")
+        closed = text.split("## Cerrados", 1)[1]
+    except (OSError, ValueError, KeyError, IndexError):
+        return []
+    return [(sc, sc.until) for sc in scenarios
+            if sc.experiment and sc.until and re.search(rf"^\| {re.escape(sc.until)} \|", closed, re.M)]
+
+
+def applicability_data(scenarios: list, model: str) -> list:
     """For each scenario, its latest verdict and whether it still applies.
 
     current   same scenario, same installed agent(s) and skills, same model,
               same session isolation and permissions
     partial   same scenario, but the agent, the skills or the model changed
     historic  the scenario itself changed, or the run predates fingerprints
+
+    One dict per scenario, in the order given: {id, class, status, run, why,
+    passes, repeat}; `run` is None when it never ran. Data, not output, so
+    --applicability and the report (viz.py) classify with the same code.
 
     Costs nothing: it compares hashes, it never calls a model."""
     now = host_fingerprints(scenarios)
@@ -1018,17 +1103,19 @@ def applicability(scenarios: list, model: str) -> int:
             meta = json.loads((d / "run.json").read_text())
         except (OSError, ValueError):
             meta = {}
+        if is_experiment_run(meta):
+            continue   # an experiment's verdicts describe the experiment, not the catalog
         for line in trace.read_text().splitlines():
             try:
                 rec = json.loads(line)
             except ValueError:
                 continue
             latest.setdefault(rec.get("id"), (d.name, rec, meta))
-    counts = {"current": 0, "partial": 0, "historic": 0, "never run": 0}
+    out = []
     for sc in scenarios:
         if sc.id not in latest:
-            counts["never run"] += 1
-            print(f"  {'never run':9}  {sc.id}")
+            out.append({"id": sc.id, "class": "never run", "status": None, "run": None,
+                        "why": [], "passes": 0, "repeat": 0})
             continue
         run, rec, meta = latest[sc.id]
         then = meta.get("fingerprints") or {}
@@ -1050,8 +1137,22 @@ def applicability(scenarios: list, model: str) -> int:
             if meta.get("model") != model:
                 why.append(f"model {meta.get('model')} → {model}")
             cls = "partial" if why else "current"
-        counts[cls] += 1
-        print(f"  {cls:9}  {sc.id:44} {rec.get('status', '?'):6} {run}"
+        out.append({"id": sc.id, "class": cls, "status": rec.get("status", "?"),
+                    "run": run, "why": why, "passes": rec.get("passes", 0),
+                    "repeat": rec.get("repeat") or 1})
+    return out
+
+
+def applicability(scenarios: list, model: str) -> int:
+    """--applicability: applicability_data as a table, then a count per class."""
+    counts = {"current": 0, "partial": 0, "historic": 0, "never run": 0}
+    for row in applicability_data(scenarios, model):
+        counts[row["class"]] += 1
+        if row["run"] is None:
+            print(f"  {'never run':9}  {row['id']}")
+            continue
+        why = row["why"]
+        print(f"  {row['class']:9}  {row['id']:44} {row['status']:6} {row['run']}"
               f"{'  (' + ', '.join(why) + ')' if why else ''}")
     print("\n" + " · ".join(f"{n} {k}" for k, n in counts.items() if n))
     return 0
@@ -1080,6 +1181,7 @@ def trial_record(r: Result) -> dict:
         "permission_denials": permission_denials(r.reply.events) or None,
         "tools_used": lane_tools(r.reply.events)[0] or None,
         "skills_loaded": lane_tools(r.reply.events)[1] or None,
+        "checks": r.checks or None,
     }
 
 
@@ -1124,6 +1226,11 @@ def persist(aggs: list, outdir: Path):
                 "category": a.sc.category,
                 "agent": a.sc.agent or "(routing)",
                 "prompt": a.sc.prompt,
+                # What the verdict was measured against, verbatim: when the
+                # scenario changes later, a report can still show the criterion
+                # this run used instead of today's (fingerprint says WHETHER it
+                # changed, this says to WHAT).
+                "assert": a.sc.assertions,
                 "status": a.status,
                 "repeat": len(a.trials),
                 "passes": a.passes,
@@ -1226,6 +1333,9 @@ def main():
     ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any)")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
+    ap.add_argument("--experiment", metavar="WHAT", default=None,
+                    help="declare this run an experiment and say what it tests; "
+                         "recorded in run.json and shown as such in reports")
     ap.add_argument("--user-session", action="store_true",
                     help="EXPERIMENTS ONLY: run the agent with the user's own settings, "
                          "CLAUDE.md, output style and shell instead of a neutral session; "
@@ -1278,9 +1388,21 @@ def main():
         # would throw away the scaffolding and the record; leaving them in the
         # default suite would tax every future run for no signal. Ask for them
         # by name when the question comes back.
-        scenarios = [s for s in scenarios if not s.manual]
+        scenarios = [s for s in scenarios if not s.manual and not s.experiment]
     if not scenarios:
         sys.exit("no scenarios matched")
+    for sc, item in expired_experiments(load_scenarios()):
+        print(f"experiment expired: {sc.id} — {item} is closed. Promote it to the "
+              f"suite (drop `experiment:`) or delete it.", file=sys.stderr)
+    experimental = [s for s in scenarios if s.experiment]
+    if experimental and len(experimental) < len(scenarios):
+        sys.exit("this selection mixes experimental and suite scenarios; run them "
+                 "separately — an experiment's results must not stand in for the suite's")
+    if experimental and not args.experiment and not (args.list or args.dry_run
+                                                     or args.applicability):
+        args.experiment = "; ".join(f"{s.id}: {s.experiment}" for s in experimental)
+        print(f"experimental scenarios selected — this run is an experiment: "
+              f"{args.experiment}")
 
     if args.applicability:
         return applicability(scenarios, args.model)
@@ -1317,6 +1439,9 @@ def main():
     except (OSError, ValueError):
         stamp["catalog"] = None
     stamp["fingerprints"] = host_fingerprints(scenarios)
+    # An experiment is declared when it is created — what makes a run unusual is
+    # its author's intent, not a rule the report could infer.
+    stamp["experiment"] = args.experiment
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     cat = stamp["catalog"] or {}
     print(f"catalog {cat.get('catalog_commit', '?')[:7]}"
