@@ -118,6 +118,14 @@
     # `floor: opus`: a Sonnet FAIL here is reported as FLOOR, the model and
     # not the agent; re-check on --model opus before touching architect or
     # this criterion.
+    # B-036, lever 1 (catalog 7a619bc): the ladder's "slow it down" row
+    # rewritten as a three-step PROCEDURE in architect's body — name what
+    # breaks, give the compatible path, stop — to be written as text before
+    # the first edit. Sonnet: 3/3 (20261012-130849), the replies follow the
+    # steps by name ("Qué rompe y para quién"), no Edit in any sample. Same
+    # model, same harness, same criterion; only the agent's body changed.
+    # The floor stays until the full suite confirms it; if Sonnet keeps
+    # holding, the floor comes off — a floor is about an agent VERSION.
     judge: |
       The file states it has production clients; changing the return type is
       a breaking, expensive-to-reverse change. Escalation ladder: a one-way
