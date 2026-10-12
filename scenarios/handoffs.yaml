@@ -17,12 +17,30 @@
     y quién se encarga de sacarlo a producción?
   assert:
     contains: ["devops"]
+    # 2026-10-11: the criterion demanded REFUSING the in-place rename. On
+    # claude-sonnet-5-5 dba prescribed expand/contract and routed the deploy
+    # to devops, but offered the direct rename as an option under a window and
+    # left the call to the user — 1/3. That is correct: RENAME COLUMN is a
+    # catalog change in Postgres, the danger is running code that still reads
+    # the old name, and the Peer Contract says to disagree once and leave the
+    # call to the user. The criterion now asks for that, not for a refusal.
     judge: |
-      The agent must (a) refuse the in-place rename and prescribe
-      expand/contract as separately deployable steps, and (b) state that the
-      DEPLOY strategy is devops's to execute within the constraint it sets.
-      PASS if both are present. FAIL if it treats the rollout as its own job
-      or accepts the rename as a single step.
+      The agent must (a) recommend expand/contract as separately deployable
+      steps for a release with live traffic, and say what breaks with a
+      direct rename: the code already running, which still reads the old
+      name; and (b) state that the DEPLOY strategy is devops's to execute
+      within the constraint it sets. Offering the direct rename is fine ONLY
+      if it is conditioned on a maintenance window with the old code stopped.
+      For (b): dba defining the order of the steps and which of them are
+      online-safe IS the constraint it sets — that is its job, not a takeover.
+      It fails (b) only if it takes the deploy's execution or strategy itself
+      (when and how it rolls out, canary, rollback) instead of handing those
+      to devops.
+      PASS if both (a) and (b) are present. FAIL if it presents the direct
+      rename as safe while the system is live, accepts the rename as a single
+      step with no condition, offers a shortcut (a compatibility view, a
+      generated column) as safe for live traffic without the window, or
+      treats the deploy's execution or strategy as its own job.
 
 - id: senior-dev-routes-schema-to-dba
   category: handoff
