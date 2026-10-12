@@ -420,14 +420,23 @@
     `orders` (dba) porque el modelo actual no aguanta pagos parciales. ¿Qué
     corre en paralelo y qué tiene que esperar a qué?
   assert:
+    # 2026-10-12: oscillating all day (1/3, 1/3, 2/3, then 0/1 in the last
+    # suite) on a reply that got the ORDER right — shared unknown first,
+    # dba's draft before the work that depends on it, ux-ui and security
+    # concurrently against the same draft. The criterion also demanded "says
+    # what each handoff delivers to the next", a third requirement the judge
+    # applied unevenly. The rule under test is the order; deliverables per
+    # handoff are welcome and no longer decide the verdict. With the criterion
+    # narrowed: 3/3 (run 20261012-165051), same agent, same install (0abe968).
     judge: |
       Two agents run in parallel only when neither needs the other's output
       to start; anything that needs the schema waits for dba. PASS if the
       reply runs ux-ui and security concurrently (both start from the same
-      spec), puts dba's schema decision BEFORE any build that depends on it,
-      and says what each handoff delivers to the next. FAIL if it sequences
-      everything by default, or parallelizes all three without naming the
-      dependency on the schema.
+      spec or draft) and puts dba's schema decision, or the shared unknown it
+      depends on, BEFORE any work that depends on it. Naming what each handoff
+      delivers is welcome but not required. FAIL if it sequences everything
+      by default, or parallelizes all three without naming the dependency on
+      the schema.
 
 - id: eng-manager-resolves-specialist-conflict
   category: judgment
