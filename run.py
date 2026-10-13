@@ -1545,7 +1545,10 @@ def main():
     manifest = INSTALLED_AGENTS.parent / ".local-agents.json"
     stamp = {"started": started, "model": args.model or "(cli default)",
              "judge_model": args.judge_model}
-    stamp["catalog"] = read_stamp(manifest)
+    # The stamp also records a hash per installed skill and agent (B-058); a
+    # run needs the version, not 63 hashes in every report.
+    stamp["catalog"] = {k: v for k, v in (read_stamp(manifest) or {}).items()
+                        if k not in ("skills", "agents")} or None
     stamp["fingerprints"] = host_fingerprints(scenarios)
     # An experiment is declared when it is created — what makes a run unusual is
     # its author's intent, not a rule the report could infer.
