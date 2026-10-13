@@ -381,6 +381,18 @@ scenario's latest verdict, without calling a model:
 Runs before 2026-10-11 have no fingerprints and read as `historic`; they are
 not rebuilt, because the install they ran against is gone.
 
+**A reinstall mid-run voids the run.** Fingerprints are taken at the start, so
+a catalog reinstalled while a run is going — `update.py update` makes that one
+command, and a manual `install.py --refresh` always could — would leave samples
+from two versions under one stamp. The run re-reads the install stamp
+(`~/.claude/.local-agents.json`) when it ends; if the commit, the dirty flag or
+the install time moved, `run.json` records `catalog_changed: true` with both
+stamps (`catalog`, `catalog_end`), the last line of the output says
+`INVALID RUN`, and the run never counts: not as a baseline in the report, not
+as a verdict in `--applicability`. Run it again.
+
+The checks for that make no model call (`python3 -m unittest discover -s tests`).
+
 ## Watching the work
 
 `run.py` tells you whether a contract held. It cannot show you the WORK — which

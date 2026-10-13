@@ -197,10 +197,12 @@ def run_warnings(meta: dict) -> list:
     An experiment is NOT one of these: it is declared (`--experiment`), and
     shown as its own tag. A user session predates that flag and keeps its own
     warning — it is what it is, whatever its author meant by it."""
+    # A reinstall mid-run mixes two catalog versions (B-052); it disqualifies
+    # the run whatever else it recorded.
+    out = ["Catalog changed during the run · invalid"] if meta.get("catalog_changed") else []
     fp = meta.get("fingerprints")
     if not fp:
-        return []
-    out = []
+        return out
     iso = fp.get("isolation")
     if not iso:
         out.append("Isolation not recorded")

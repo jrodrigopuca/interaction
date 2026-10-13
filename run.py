@@ -1132,6 +1132,38 @@ def is_experiment_run(meta: dict) -> bool:
     return bool((meta or {}).get("experiment")) or iso.startswith("USER SESSION")
 
 
+# The install a run started on is the one its verdicts describe. If the catalog
+# is reinstalled while it runs — `update.py update`, a manual `--refresh` — the
+# samples straddle two versions and describe neither (B-052).
+STAMP_KEYS = ("catalog_commit", "catalog_dirty", "installed_at")
+
+
+def read_stamp(manifest: Path):
+    try:
+        return json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def catalog_changed(before, after) -> bool:
+    """Same install = same commit, same dirty flag, same install time. A
+    reinstall of the same commit still counts: it rewrote the files while
+    samples were reading them."""
+    b, a = before or {}, after or {}
+    return any(b.get(k) != a.get(k) for k in STAMP_KEYS)
+
+
+def close_stamp(stamp: dict, manifest: Path) -> bool:
+    """Re-read the install stamp at the end of a run; record both stamps when
+    it moved. Returns whether it did."""
+    end = read_stamp(manifest)
+    if not catalog_changed(stamp.get("catalog"), end):
+        return False
+    stamp["catalog_changed"] = True
+    stamp["catalog_end"] = end
+    return True
+
+
 def expired_experiments(scenarios: list) -> list:
     """(scenario, B-ID) for experimental scenarios whose backlog item is closed.
     The backlog lives in the catalog, found through the installer's stamp; when
@@ -1172,6 +1204,8 @@ def applicability_data(scenarios: list, model: str) -> list:
             meta = {}
         if is_experiment_run(meta):
             continue   # an experiment's verdicts describe the experiment, not the catalog
+        if meta.get("catalog_changed"):
+            continue   # verdicts from two catalog versions describe neither (B-052)
         for line in trace.read_text().splitlines():
             try:
                 rec = json.loads(line)
@@ -1511,10 +1545,7 @@ def main():
     manifest = INSTALLED_AGENTS.parent / ".local-agents.json"
     stamp = {"started": started, "model": args.model or "(cli default)",
              "judge_model": args.judge_model}
-    try:
-        stamp["catalog"] = json.loads(manifest.read_text())
-    except (OSError, ValueError):
-        stamp["catalog"] = None
+    stamp["catalog"] = read_stamp(manifest)
     stamp["fingerprints"] = host_fingerprints(scenarios)
     # An experiment is declared when it is created — what makes a run unusual is
     # its author's intent, not a rule the report could infer.
@@ -1551,8 +1582,16 @@ def main():
         "judge_models": sorted(JUDGE_SEEN),
         "output_styles": sorted({r.reply.output_style for r in flat if r.reply.output_style}),
     }
+    changed = close_stamp(stamp, manifest)
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
-    return report(aggs, outdir, time.time() - t0)
+    code = report(aggs, outdir, time.time() - t0)
+    if changed:
+        end = stamp["catalog_end"] or {}
+        print(f"\nINVALID RUN: the catalog was reinstalled while it ran "
+              f"({(stamp['catalog'] or {}).get('catalog_commit', '?')[:7]} → "
+              f"{end.get('catalog_commit', '?')[:7]}, installed {end.get('installed_at', '?')}). "
+              f"Its verdicts mix two versions: never a baseline, never current. Run it again.")
+    return code
 
 
 if __name__ == "__main__":
