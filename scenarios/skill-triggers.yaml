@@ -11,8 +11,9 @@
 # SHAPE
 #
 #   one skill per agent, all 15 agents          15 skills
-#   4 triggers  → expect_skills: [skill]        60 scenarios
-#   4 near-misses → forbid_skills: [skill]      60 scenarios
+#   + visionary/lh-brutal-critique              16 skills
+#   4 triggers  → expect_skills: [skill]        65 scenarios (focus has 5)
+#   4 near-misses → forbid_skills: [skill]      64 scenarios
 #
 # Six skills were fixed by the backlog because B-023 already measured them:
 # dba/lh-migrations, architect/lh-tradeoffs, security/lh-threat-modeling,
@@ -35,7 +36,7 @@
 #
 # WHY `manual: true`
 #
-# 120 single-turn samples at the harness estimate of $0.15 each is ~$18 per
+# 129 single-turn samples at the harness estimate of $0.15 each is ~$19 per
 # pass, every time the full suite runs, to re-measure descriptions that change
 # rarely. Run it on demand when a description changes:
 #
@@ -1345,8 +1346,10 @@
 # visionary / lh-focus
 # The verdict (lh-brutal-critique) is the agent's deliverable and is all over
 # the body; lh-focus has concrete triggers (bloated roadmap, "everything is
-# priority", scope vs. date). Neighbours: lh-brutal-critique — whose trigger
-# also names "roadmap", the fine line — and lh-inspire.
+# priority", scope vs. date). Neighbours: lh-brutal-critique and lh-inspire.
+# The line with lh-brutal-critique, as both descriptions now draw it: a PLAN
+# of future work (roadmap, backlog, feature list) is lh-focus even when only
+# an opinion is asked; something a user can EXPERIENCE, judged, is critique.
 # --------------------------------------------------------------------------- #
 - id: skill-focus-trigger-1
   category: skill-trigger
@@ -1389,6 +1392,21 @@
   assert:
     expect_skills: [lh-focus]
 
+- id: skill-focus-trigger-5
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # Was skill-focus-near-4, filed as the ambiguous border with critique. In
+  # one run visionary loaded BOTH skills here, and the descriptions were
+  # sharpened so this is focus: a roadmap is a plan, and an opinion on one
+  # is still a question of what to keep. Three items and nothing obviously
+  # bloated makes it the hardest trigger of the five.
+  prompt: |
+    Opiná sobre nuestro roadmap: Q1 app mobile, Q2 integración con Slack, Q3
+    modo offline.
+  assert:
+    expect_skills: [lh-focus]
+
 - id: skill-focus-near-1
   category: skill-trigger
   agent: visionary
@@ -1423,10 +1441,113 @@
   category: skill-trigger
   agent: visionary
   manual: true
-  # A roadmap, but three items one per quarter: nothing to cut, an opinion
-  # asked — lh-brutal-critique, whose trigger names roadmaps too.
+  # Replaces the roadmap opinion (now trigger-5). A flow with too much in it,
+  # which tempts "cut", but it is a prototype a user can click through and
+  # the ask is a verdict on it, not on a plan — lh-brutal-critique.
   prompt: |
-    Opiná sobre nuestro roadmap: Q1 app mobile, Q2 integración con Slack, Q3
-    modo offline.
+    Armamos un prototipo clickeable del checkout: carrito, datos de envío,
+    cupones, pago y confirmación, todo en una sola pantalla larga. ¿Qué te
+    parece?
   assert:
     forbid_skills: [lh-focus]
+
+# --------------------------------------------------------------------------- #
+# visionary / lh-brutal-critique
+# The agent's main deliverable, so recall may be low for a reason B-023 knows:
+# the body already carries the verdict. Trigger: judging something a user can
+# EXPERIENCE — product, feature, screen, demo, prototype, pitch. Neighbours:
+# lh-focus (a plan of future work, even as an opinion — the fine line) and
+# lh-inspire (momentum, vision, product history). The near-misses that land
+# in lh-focus are correct answers: the scenario forbids critique only.
+# --------------------------------------------------------------------------- #
+- id: skill-brutal-critique-trigger-1
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # A demo, no plan word anywhere.
+  prompt: |
+    Te paso el link a la demo del asistente de viajes: le escribís a dónde
+    querés ir y te arma el itinerario día por día. Decime sin vueltas si
+    vale la pena.
+  assert:
+    expect_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-trigger-2
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # A screen with too much in it: "cut" is tempting, but what is judged is a
+  # screen, not a plan.
+  prompt: |
+    Esta es la pantalla de configuración: 40 opciones en una sola lista,
+    ordenadas alfabéticamente, con un buscador arriba. ¿La lanzamos así?
+  assert:
+    expect_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-trigger-3
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Sumamos una feature: cuando cerrás la cuenta te aparece un popup con
+    cinco preguntas sobre por qué te vas. Sé brutal, ¿está bien?
+  assert:
+    expect_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-trigger-4
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # A pitch to judge, not to write — the write-it version is lh-inspire.
+  prompt: |
+    Este es el pitch de una línea que vamos a usar en la landing: "La
+    plataforma todo-en-uno que potencia la productividad de tu equipo con
+    IA". ¿Funciona o no?
+  assert:
+    expect_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-near-1
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # "Opiná" on a roadmap: an opinion asked, but on a plan — lh-focus.
+  prompt: |
+    Opiná de nuestro roadmap del año: rediseño del dashboard, exportar a
+    PDF, modo oscuro, API pública, app de escritorio y marketplace de
+    plantillas.
+  assert:
+    forbid_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-near-2
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # Names a demo, but asks what to leave out against a date — lh-focus.
+  prompt: |
+    La demo con el cliente es en tres semanas y todavía faltan login, pagos,
+    notificaciones y reportes. ¿Qué dejamos afuera?
+  assert:
+    forbid_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-near-3
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # An opinion on a backlog — a plan, so lh-focus.
+  prompt: |
+    ¿Qué te parece nuestro backlog? Son 80 tickets y la mitad son pedidos
+    de un solo cliente grande.
+  assert:
+    forbid_skills: [lh-brutal-critique]
+
+- id: skill-brutal-critique-near-4
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # Talks about a product users like, but asks where to go next, not whether
+  # it is good — lh-inspire (or lh-focus), never a verdict.
+  prompt: |
+    La app ya anda y los usuarios la quieren. ¿Hacia dónde la llevamos en
+    los próximos cinco años?
+  assert:
+    forbid_skills: [lh-brutal-critique]
