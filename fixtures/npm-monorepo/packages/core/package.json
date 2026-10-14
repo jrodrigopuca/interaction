@@ -1,0 +1,12 @@
+{
+  "name": "@acme/core",
+  "version": "3.0.1",
+  "type": "module",
+  "exports": "./dist/index.mjs",
+  "dependencies": {
+    "@acme/utils": "^1.2.0"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs"
+  }
+}

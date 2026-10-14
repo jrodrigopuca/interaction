@@ -1,0 +1,19 @@
+{
+  "name": "acme-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/utils",
+    "packages/core",
+    "packages/api"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "start": "npm -w @acme/api start",
+    "clean": "rm -rf packages/*/dist"
+  }
+}

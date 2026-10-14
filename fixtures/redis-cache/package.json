@@ -1,0 +1,14 @@
+{
+  "name": "catalogo-api",
+  "version": "1.9.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "worker": "node src/worker.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "redis": "^4.7.0"
+  }
+}

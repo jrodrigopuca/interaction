@@ -1,0 +1,13 @@
+{
+  "name": "@acme/api",
+  "version": "0.8.0",
+  "type": "module",
+  "dependencies": {
+    "@acme/core": "^3.0.0"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "start": "node dist/server.mjs",
+    "test": "node --test test/"
+  }
+}

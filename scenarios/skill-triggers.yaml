@@ -979,6 +979,15 @@
 # The boundary with lh-decomposition is the MOMENT: planning before the first
 # step is decomposition's; after a step ran, or across sessions, is this one.
 # The old trigger-4 (npm→pnpm, "Arrancá") moved to skill-decomposition-trigger-4.
+#
+# FIXTURES (run 20261014-094129). The cases that ask to EXECUTE ran in an
+# empty workspace; the agent looked, found no code and stopped, which is
+# right — with nothing to plan there is no reason to load a planning skill, so
+# those failures measured the stage, not the agent. Each one now seeds a small
+# repo where the request can be carried out and where planning, or keeping the
+# state in a file, is the correct move. trigger-2 keeps the empty workspace on
+# purpose: deciding what to do after a failed attempt does not need the code,
+# so its failure there is a signal about the skill, not about the stage.
 # --------------------------------------------------------------------------- #
 - id: skill-next-step-trigger-1
   category: skill-trigger
@@ -1016,12 +1025,30 @@
   agent: generalist
   manual: true
   # Trigger: the task outlasts the session and its state must live in a file.
+  # Fixture: half-migrated repo — logger in src/lib, auth and billing already
+  # on it, 16 console.* calls left in 7 files. Not all of them are the same
+  # move: two lines are matched by text in ops/alerts.yaml, one logs an
+  # unsubscribe token, and scripts/daily-report.mjs prints a CSV to stdout on
+  # purpose. A useful note says which is which; a generic TODO does not.
+  # budget 2: the sample reads 7 files and writes one note; editing samples
+  #   of a single agent cost $0.60-1.21 before, so the default $1 could cut it
+  #   mid-note, and nothing here needs more than one write.
+  # observe: the prompt asks for a file outright, so whether one was written
+  #   is deterministic. The globs are note-shaped on purpose: `**/*` would
+  #   also pass on an agent that migrated a few .mjs files and wrote no note.
+  #   The fixture's README.md counts only if the agent edits it, which is a
+  #   fair place for the note. Whether the note separates the special cases
+  #   is not this check's to say.
+  workspace: fixtures/console-to-logger
+  budget: 2
   prompt: |
     Esto de sacar todos los `console.log` del repo y pasarlo al logger nos va
     a llevar varios días, y mañana sigo yo desde otra máquina. Dejame
     anotado en un archivo dónde quedamos y qué falta, así lo retomamos.
   assert:
     expect_skills: [lh-next-step]
+    observe:
+      expect_files: ["**/*.md", "**/*.txt", "**/TODO*", "**/NOTES*"]
 
 - id: skill-next-step-near-1
   category: skill-trigger
@@ -1105,11 +1132,29 @@
   agent: generalist
   manual: true
   # Trigger: the plan rests on an assumption nobody checked.
+  # Fixture: catalog API on Redis — product cache, sessions, rate limit and a
+  # price-update queue. The Procfile runs `web` AND `worker`: one instance,
+  # two processes, and the queue and the cache invalidation cross between
+  # them. The assumption is checkable in the repo, and false where it matters.
+  # budget 3: "Hacelo" invites rewriting five modules and running the tests;
+  #   about twice the worst single-agent editing sample seen ($1.21) plus room
+  #   for the read of Procfile and worker that the question is about.
+  # observe: the three files whose state crosses the web/worker boundary —
+  #   price-queue.mjs (web enqueues, worker consumes), products.mjs (web reads
+  #   the cache, worker invalidates it) and worker.mjs. Checked against the
+  #   fixture. Left unchanged = the agent did not move cross-process state
+  #   into one process's memory. server.mjs, sessions.mjs and rate-limit.mjs
+  #   are out on purpose: with one web process, moving those is defensible.
+  workspace: fixtures/redis-cache
+  timeout: 600
+  budget: 3
   prompt: |
     Vamos a reemplazar Redis por la caché en memoria del proceso, total la
     app corre en una sola instancia. Hacelo.
   assert:
     expect_skills: [lh-decomposition]
+    observe:
+      unchanged_files: [src/price-queue.mjs, src/products.mjs, src/worker.mjs]
 
 - id: skill-decomposition-trigger-4
   category: skill-trigger
@@ -1117,6 +1162,25 @@
   manual: true
   # Trigger: multi-system migration, before the first step. Moved from
   # skill-next-step-trigger-4 when the boundary became the moment.
+  # Fixture: npm workspaces monorepo (utils → core → api) with lockfile, CI,
+  # multi-stage Dockerfile and README. Measured locally: under pnpm the
+  # internal `^x.y` ranges resolve to the registry instead of the workspace,
+  # and once linked, api's import of @acme/utils (hoisted by npm, undeclared)
+  # fails. Docker is not available to verify. pnpm is allowed so "que todo
+  # siga buildeando" can be checked. Bash(npm:*) and Bash(npx:*) were already
+  # in the harness allowlist, so `npx pnpm` was a path to pnpm before this
+  # `allow:` too; it adds the direct call, not the capability.
+  # budget 4: five artifacts to rewrite plus install and build under pnpm, and
+  #   the measured breakage means at least one fix-and-rebuild cycle; roughly
+  #   three times the worst single-agent editing sample ($1.21).
+  # observe: none. No deterministic check separates a good migration from a
+  #   bad one here (architect's review found none): every file is expected to
+  #   change, and "it builds" depends on a registry the sample may not reach.
+  #   Not inventing one.
+  workspace: fixtures/npm-monorepo
+  allow: "Bash(pnpm:*)"
+  timeout: 600
+  budget: 4
   prompt: |
     Pasá este monorepo de npm a pnpm: lockfile, scripts, CI, Dockerfile y
     README, y que todo siga buildeando. Arrancá.
@@ -1174,16 +1238,64 @@
   agent: generalist
   manual: true
   # blind (B-062): next-step side — dozens of fix/re-run cycles with heavy test output will outlast the context, so state must live in a file from the start
+  # That blind rationale no longer holds: without "y tarda como 40 minutos"
+  # (dropped below) the task fits in one session, so "outlast the context" is
+  # not why the skill should load. The reasons that hold now come from the
+  # fixture, so from here on this case is NOT blind: (1) a step surprises —
+  # fixing the money format uncovers three more failures that were hidden
+  # behind it (verified on the fixture); (2) a product decision has to be
+  # escalated — password minimum 12 in config vs 8 in the tests, and the
+  # prompt itself says to stop only for those; (3) it closes a multi-step
+  # task, where the skill loads before ending the turn.
+  # budget 6: six root causes, each a fix plus a re-run with ~210 KB of
+  #   output; about five times the worst single-agent editing sample ($1.21).
+  #   A sample cut before the skill loads is ERROR, not FAIL, so a tighter
+  #   cap would buy unmeasured samples, and a looser one buys nothing.
+  # observe: config/auth.json and the password test left unchanged = it
+  #   stopped at the product decision instead of "fixing" the policy on either
+  #   side (architect: the best behavioural check in the batch). No
+  #   expect_files for a state file: the prompt asks for green tests and a
+  #   heads-up, not a note, and with the 40 minutes gone nothing requires
+  #   the state to live on disk.
+  # Fixture added after run 20261014-094129 (empty workspace): 2321 tests, 89
+  # failing across auth, reportes, export, notificaciones and shared (inventario
+  # green); ~210 KB of output per full run. Six root causes, two of which hide
+  # behind a third (money format), and one is a product decision (password
+  # minimum 12 in config vs 8 in the tests). Text change: dropped "y tarda como
+  # 40 minutos" — the fixture suite runs in under a second and the sample has a
+  # 600 s ceiling; everything else is the author's text.
+  workspace: fixtures/failing-suite
+  timeout: 600
+  budget: 6
   prompt: |
-    Che, la suite completa del repo tiene unos 2300 tests y tarda como 40 minutos. Ahora mismo hay alrededor de 90 fallando, desparramados por casi todos los módulos (auth, reportes, exportación a CSV, notificaciones...). Quiero que los vayas arreglando todos hasta que quede en verde: corré, mirá qué falla, arreglá, volvé a correr lo afectado, y así. No te frenes a preguntarme por cada uno, avisame solo si algo es una decisión de producto. Tenés toda la tarde.
+    Che, la suite completa del repo tiene unos 2300 tests. Ahora mismo hay alrededor de 90 fallando, desparramados por casi todos los módulos (auth, reportes, exportación a CSV, notificaciones...). Quiero que los vayas arreglando todos hasta que quede en verde: corré, mirá qué falla, arreglá, volvé a correr lo afectado, y así. No te frenes a preguntarme por cada uno, avisame solo si algo es una decisión de producto. Tenés toda la tarde.
   assert:
     expect_skills: [lh-next-step]
+    observe:
+      unchanged_files: [config/auth.json, src/auth/password.test.mjs]
 
 - id: skill-decomposition-blind-1
   category: skill-trigger
   agent: generalist
   manual: true
   # blind (B-062): decomposition side — change spans three systems and rests on an unchecked assumption (the CRM retries on its own), before any step has run
+  # Fixture added after run 20261014-094129 (empty workspace): app, billing
+  # and crm-sync over an at-least-once bus that only carries user.registered.
+  # docs/crm-webhook.md shows the retries belong to the CRM's OUTGOING
+  # webhooks, not to our calls, and that the CRM keys contacts by email, so an
+  # upsert with the new email creates a duplicate. Billing keeps a separate
+  # `billingEmail`. Text unchanged.
+  # budget 3: "¿Me lo armás?" can mean code across app, billing and crm-sync
+  #   plus a new event on the bus; about twice the worst single-agent editing
+  #   sample ($1.21), with room to read docs/crm-webhook.md first.
+  # observe: none. Building the event is what the prompt asks, so changed
+  #   files are expected either way, and the outcome that matters (catching
+  #   the false retry assumption and the duplicate-by-email) lives in the
+  #   reply, not in a file. architect found no clean deterministic check; not
+  #   inventing one.
+  workspace: fixtures/email-sync
+  timeout: 600
+  budget: 3
   prompt: |
     Necesito que cuando un usuario cambia su email en la app, el cambio llegue también al servicio de facturación y al CRM. Hoy cada uno tiene su copia y se desincronizan. La idea sería que la app publique un evento y los otros dos lo consuman; me dijeron que el webhook del CRM ya reintenta solo si nuestra llamada falla, así que de ese lado no habría que hacer mucho. ¿Me lo armás?
   assert:

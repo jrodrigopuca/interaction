@@ -222,6 +222,12 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     max_tools: 3                    # tope de herramientas invocadas por el agente (del trace)
     forbidden_tools: [Edit, Write]  # herramientas que no debe haber invocado (del trace)
     memory_forbid_types: [user, project]  # tipos de memoria que el agente no debe haber persistido (de <ws>/.claude/agent-memory-local/<agente>/)
+    expect_files: ["**/*.md"]       # algún archivo que el agente CREÓ o MODIFICÓ (uno del fixture que no tocó no cuenta)
+    unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
+    expect_skills: [lh-x]           # skill que el agente debe haber cargado
+    forbid_skills: [lh-x]           # skill que no debe haber cargado
+    observe:                        # los mismos chequeos, registrados y NUNCA contados en el veredicto
+      unchanged_files: [config/auth.json]
   exec:                             # build-quality: corre el código de la respuesta
     suite: fixtures/parse-csv-line.test.mjs
     symbol: parseCSVLine
@@ -230,6 +236,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   deny: "Bash(brew:*)"              # --disallowedTools
   delegate: true                    # graba el árbol de subagentes
   timeout: 600                      # tope propio en segundos
+  budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
   manual: true                      # excluido de ./run.py a secas; correr con --category
 ```
 
@@ -248,6 +255,23 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   es correcto?", eso es `exec` con una suite, no una opinión del juez.
 - **Un `id` nuevo, un comentario arriba** con qué cambio del catálogo lo
   motivó. Es la trazabilidad que después te salva.
+- **El escenario prueba, no se ajusta para pasar.** Si falla por algo que no es
+  culpa del agente (una carpeta vacía, un link que no llegó), se le da lo que
+  le falta para que la pregunta se pueda contestar, sin acercar el prompt a lo
+  que se espera. Un fallo que apunta a qué corregir del agente o de la skill es
+  un buen resultado.
+- **Una pregunta por veredicto; lo demás, a `observe:`.** Un escenario de
+  disparo pregunta si la skill cargó. Si además querés ver qué HIZO el agente
+  (no tocar un archivo, dejar una nota), ponelo en `observe:`: queda en la traza
+  y no cambia el veredicto. Juntos dan cuatro casos por muestra: cargó y lo hizo
+  bien; cargó y no (la skill no aporta su método); no cargó y lo hizo bien (la
+  descripción no dispara, o el cuerpo ya lo cubre); ni una cosa ni la otra (el
+  agente).
+- **Un escenario que trabaja de verdad necesita `budget:`.** Con el tope por
+  defecto (USD 1) una muestra que edita y corre tests puede cortarse antes de
+  lo que se mide. Una muestra cortada igual dice qué skill cargó: si cargó la
+  esperada es PASS, si cargó una prohibida es FAIL, y si todavía no había
+  cargado es ERROR, nunca FAIL.
 
 ---
 

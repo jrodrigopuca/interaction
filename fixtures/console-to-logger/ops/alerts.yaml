@@ -1,0 +1,13 @@
+# Alertas del agregador de logs. Matchean el TEXTO de la línea, no campos.
+- name: pago-rechazado-en-rafaga
+  match: 'charge declined'
+  threshold: 20/5m
+  notify: '#oncall-pagos'
+- name: pedido-sin-stock
+  match: 'ORDER_FAILED out_of_stock'
+  threshold: 10/5m
+  notify: '#oncall-pedidos'
+- name: sync-nocturno-caido
+  match: 'nightly-sync aborted'
+  threshold: 1/1h
+  notify: '#oncall-pedidos'
