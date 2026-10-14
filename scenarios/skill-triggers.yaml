@@ -12,8 +12,9 @@
 #
 #   one skill per agent, all 15 agents          15 skills
 #   + visionary/lh-brutal-critique              16 skills
-#   4 triggers  → expect_skills: [skill]        67 scenarios (focus 5, zero-to-one 6)
-#   4 near-misses → forbid_skills: [skill]      66 scenarios (zero-to-one 6)
+#   + generalist/lh-decomposition               17 skills
+#   4 triggers  → expect_skills: [skill]        71 scenarios (focus 5, zero-to-one 6)
+#   4 near-misses → forbid_skills: [skill]      70 scenarios (zero-to-one 6)
 #
 # Six skills were fixed by the backlog because B-023 already measured them:
 # dba/lh-migrations, architect/lh-tradeoffs, security/lh-threat-modeling,
@@ -36,7 +37,7 @@
 #
 # WHY `manual: true`
 #
-# 133 single-turn samples at the harness estimate of $0.15 each is ~$20 per
+# 141 single-turn samples at the harness estimate of $0.15 each is ~$21 per
 # pass, every time the full suite runs, to re-measure descriptions that change
 # rarely. Run it on demand when a description changes:
 #
@@ -972,11 +973,12 @@
 # generalist / lh-next-step
 # All three generalist skills are stages of the Operating Loop in the body.
 # lh-next-step has the most concrete trigger (a step failed or surprised,
-# resuming "lo de ayer") AND an explicit exclusion in its description ("not
-# needed when the next action is obvious and reversible"), so its near-misses
-# are defined by the description itself.
-# Overlap: "before a task of more than a handful of steps" is shared with
-# lh-decomposition; trigger-4 sits on that line on purpose.
+# resuming "lo de ayer", a task outlasting the session) AND an explicit
+# exclusion in its description ("not needed when the next action is obvious
+# and reversible"), so its near-misses are defined by the description itself.
+# The boundary with lh-decomposition is the MOMENT: planning before the first
+# step is decomposition's; after a step ran, or across sessions, is this one.
+# The old trigger-4 (npm→pnpm, "Arrancá") moved to skill-decomposition-trigger-4.
 # --------------------------------------------------------------------------- #
 - id: skill-next-step-trigger-1
   category: skill-trigger
@@ -1013,11 +1015,11 @@
   category: skill-trigger
   agent: generalist
   manual: true
-  # The workspace is empty, so the first step will surprise it. Also a fair
-  # lh-decomposition trigger; see the block header.
+  # Trigger: the task outlasts the session and its state must live in a file.
   prompt: |
-    Pasá este monorepo de npm a pnpm: lockfile, scripts, CI, Dockerfile y
-    README, y que todo siga buildeando. Arrancá.
+    Esto de sacar todos los `console.log` del repo y pasarlo al logger nos va
+    a llevar varios días, y mañana sigo yo desde otra máquina. Dejame
+    anotado en un archivo dónde quedamos y qué falta, así lo retomamos.
   assert:
     expect_skills: [lh-next-step]
 
@@ -1065,6 +1067,137 @@
     ¿Por qué puede ser?
   assert:
     forbid_skills: [lh-next-step]
+
+# --------------------------------------------------------------------------- #
+# generalist / lh-decomposition
+# Trigger: BEFORE acting, on work whose plan can fail expensively — changes
+# across several files or systems, an ordered migration or upgrade, a plan
+# resting on an unchecked assumption. Exclusions in the description itself:
+# obvious, reversible steps; and a step that already ran and failed or
+# surprised, which is lh-next-step (the neighbour on the other side of the
+# moment). A conceptual question about planning executes nothing.
+# --------------------------------------------------------------------------- #
+- id: skill-decomposition-trigger-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Trigger: change spanning several systems, before the first step.
+  prompt: |
+    Quiero cambiar el nombre del campo `userId` a `accountId` en la API, el
+    frontend y los eventos que mandamos a la cola. ¿Cómo lo encaramos sin
+    romper nada?
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-trigger-2
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Trigger: ordered upgrade, nothing run yet.
+  prompt: |
+    Tenemos que subir este proyecto de Python 3.8 a 3.12; hay dependencias
+    viejas y un par de extensiones en C. Armá el plan antes de tocar nada.
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-trigger-3
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Trigger: the plan rests on an assumption nobody checked.
+  prompt: |
+    Vamos a reemplazar Redis por la caché en memoria del proceso, total la
+    app corre en una sola instancia. Hacelo.
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-trigger-4
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Trigger: multi-system migration, before the first step. Moved from
+  # skill-next-step-trigger-4 when the boundary became the moment.
+  prompt: |
+    Pasá este monorepo de npm a pnpm: lockfile, scripts, CI, Dockerfile y
+    README, y que todo siga buildeando. Arrancá.
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-near-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Near-miss: several steps, but obvious and each reversible.
+  prompt: |
+    En `README.md` cambiá "Instalacion" por "Instalación", agregá un badge
+    de licencia MIT arriba de todo y corregí el link roto a CONTRIBUTING.md.
+  assert:
+    forbid_skills: [lh-decomposition]
+
+- id: skill-decomposition-near-2
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Near-miss: a step already ran and failed — that is lh-next-step.
+  prompt: |
+    Arranqué la migración de Webpack a Vite como habíamos planeado y el
+    primer paso, `vite build`, explota con `Could not resolve "fs"` desde
+    una dependencia. ¿Qué hacemos?
+  assert:
+    forbid_skills: [lh-decomposition]
+
+- id: skill-decomposition-near-3
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Near-miss: conceptual question about planning; nothing to execute.
+  prompt: |
+    ¿Por qué se dice que conviene atacar primero la parte más incierta de
+    un proyecto en vez de lo más fácil?
+  assert:
+    forbid_skills: [lh-decomposition]
+
+- id: skill-decomposition-near-4
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # Near-miss: one obvious, reversible action.
+  prompt: |
+    Agregá `node_modules/` y `.env` al `.gitignore`.
+  assert:
+    forbid_skills: [lh-decomposition]
+
+# Blind cases (B-062): written from the two descriptions alone, without the
+# analysis that proposed them or the scenarios above.
+- id: skill-next-step-blind-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # blind (B-062): next-step side — dozens of fix/re-run cycles with heavy test output will outlast the context, so state must live in a file from the start
+  prompt: |
+    Che, la suite completa del repo tiene unos 2300 tests y tarda como 40 minutos. Ahora mismo hay alrededor de 90 fallando, desparramados por casi todos los módulos (auth, reportes, exportación a CSV, notificaciones...). Quiero que los vayas arreglando todos hasta que quede en verde: corré, mirá qué falla, arreglá, volvé a correr lo afectado, y así. No te frenes a preguntarme por cada uno, avisame solo si algo es una decisión de producto. Tenés toda la tarde.
+  assert:
+    expect_skills: [lh-next-step]
+
+- id: skill-decomposition-blind-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # blind (B-062): decomposition side — change spans three systems and rests on an unchecked assumption (the CRM retries on its own), before any step has run
+  prompt: |
+    Necesito que cuando un usuario cambia su email en la app, el cambio llegue también al servicio de facturación y al CRM. Hoy cada uno tiene su copia y se desincronizan. La idea sería que la app publique un evento y los otros dos lo consuman; me dijeron que el webhook del CRM ya reintenta solo si nuestra llamada falla, así que de ese lado no habría que hacer mucho. ¿Me lo armás?
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-blind-2
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # blind (B-062): near-miss — phrased as "how would you approach it" but the steps are obvious, local and each reversible, so no decomposition
+  prompt: |
+    ¿Cómo lo encararías? En el formulario de perfil el botón dice "Enviar" y tiene que decir "Guardar". Está en `src/profile/ProfileForm.tsx` y hay un snapshot test al lado que seguro se rompe. Cambialo y dejá el test pasando.
+  assert:
+    forbid_skills: [lh-decomposition]
 
 # --------------------------------------------------------------------------- #
 # senior-dev / lh-react-next
