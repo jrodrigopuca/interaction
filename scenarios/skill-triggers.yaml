@@ -12,8 +12,8 @@
 #
 #   one skill per agent, all 15 agents          15 skills
 #   + visionary/lh-brutal-critique              16 skills
-#   4 triggers  → expect_skills: [skill]        65 scenarios (focus has 5)
-#   4 near-misses → forbid_skills: [skill]      64 scenarios
+#   4 triggers  → expect_skills: [skill]        67 scenarios (focus 5, zero-to-one 6)
+#   4 near-misses → forbid_skills: [skill]      66 scenarios (zero-to-one 6)
 #
 # Six skills were fixed by the backlog because B-023 already measured them:
 # dba/lh-migrations, architect/lh-tradeoffs, security/lh-threat-modeling,
@@ -36,7 +36,7 @@
 #
 # WHY `manual: true`
 #
-# 129 single-turn samples at the harness estimate of $0.15 each is ~$19 per
+# 133 single-turn samples at the harness estimate of $0.15 each is ~$20 per
 # pass, every time the full suite runs, to re-measure descriptions that change
 # rarely. Run it on demand when a description changes:
 #
@@ -1166,8 +1166,11 @@
 # lh-crisis-mode is already in the body's stance (judgment.yaml asserts
 # "stabilize first" without any skill) and lh-first-principles restates rule
 # #1; lh-zero-to-one has the sharpest boundary in the roster, written into
-# its own description: "a new feature inside an existing codebase is not
-# this". Neighbours: lh-first-principles, lh-crisis-mode.
+# its own description. The deciding variable is whether anyone depends on the
+# thing yet — not whether a codebase exists. near-4 was used to write that
+# description, so trigger-5/6 and near-5/6 were added afterwards, blind to the
+# analysis, to measure the boundary without circularity.
+# Neighbours: lh-first-principles, lh-crisis-mode.
 # --------------------------------------------------------------------------- #
 - id: skill-zero-to-one-trigger-1
   category: skill-trigger
@@ -1250,6 +1253,55 @@
   prompt: |
     El producto ya tiene 2.000 usuarios pagos y queremos sumarle un módulo de
     reportes nuevo, desde cero, separado del resto. ¿Cómo lo arranco?
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-trigger-5
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # Trigger side: existing codebase and login are reused, but nobody depends on the new product yet.
+  prompt: |
+    Vamos a reusar el monorepo y el login de nuestra plataforma de turnos
+    médicos para armar algo que no tiene nada que ver: una app para que los
+    paseadores de perros organicen su agenda. Ningún paseador la usa todavía.
+    ¿Cómo la encaramos?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-trigger-6
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # Trigger side: it sounds like an existing product, but it was shut down and has no users left.
+  prompt: |
+    Teníamos una app de reservas para canchas de pádel que cerramos hace un
+    año; no queda ni un usuario activo. Queremos volver a intentarlo con otro
+    enfoque y rescatar algo del código viejo. ¿Qué hacemos primero?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-5
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # Near-miss side: "from scratch" is the bait; 400 merchants depend on the system being rewritten.
+  prompt: |
+    Nuestro sistema de facturación es un PHP de 2014 que usan 400 comercios
+    todos los días. Queremos tirarlo y hacerlo de nuevo desde cero en Go.
+    ¿Cómo lo encaramos?
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-6
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # Near-miss side: "MVP", new repo and new team are the bait; the app is for 15.000 users who already use the web product.
+  prompt: |
+    Producto nos pidió un "MVP" de la app mobile: repo nuevo, equipo nuevo,
+    arrancamos de cero. Es para los 15.000 usuarios que hoy usan nuestra web
+    todos los días. ¿Qué construimos primero?
   assert:
     forbid_skills: [lh-zero-to-one]
 
