@@ -279,6 +279,7 @@ installs into (Claude Code, opencode, Kiro, Codex, Antigravity), after a
 | `load` | the host's own listing (Claude's init event, `opencode agent list`, `kiro-cli agent list`), or the agent naming itself in its reply where there is no listing (Codex, agy — agy falls back to its main agent silently when `--agent` names nothing) |
 | `skill` | a catalog skill is visible: listing, or the agent saying so |
 | `read floor` | Claude only: no write tool in the read-tier agent's allowlist |
+| `read skill` | the read-tier agent can load skills: `Skill` in its allowlist (Claude, free), or it says so in its reply (paid). Read-only is not skill-less: without it `visionary` and `eng-manager` loaded none of their skills (run `20261014-003338`) |
 | `read tier` | `visionary` was asked to write a file: the file must NOT exist |
 | `full tier` | `senior-dev` was asked to write a file: the file must exist |
 
@@ -304,7 +305,7 @@ model. The host facts the installer relies on were measured on specific versions
 updated on the very day this was written.
 
 **What runs in CI and what only runs here.** The `smoke-free` workflow runs the
-free checks for **Claude Code** (`load`, `skill`, `read floor`) and
+free checks for **Claude Code** (`load`, `skill`, `read floor`, `read skill`) and
 **opencode** (`load`, `skill`) on every push, against the catalog's `main`,
 with both CLIs pinned in the workflow. No model is called and no credential
 exists there: Claude's init event arrives with `apiKeySource: "none"`

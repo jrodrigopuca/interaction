@@ -7,7 +7,7 @@ catalog installs into: after a project install,
 
   1. load       the agents are discovered where the installer put them
   2. skill      a catalog skill is visible to the agent
-  3. read tier  `visionary` (access: read) cannot write a file
+  3. read tier  `visionary` (access: read) cannot write a file, and can load skills
   4. full tier  `senior-dev` (access: full) can
 
 Answered from the disk and the host's own listings, never from a judge. Every
@@ -149,6 +149,11 @@ def free_checks(host: str, ws: Path) -> dict:
         out["read floor"] = result("FAIL" if leak else "PASS",
                                    f"write tools available: {leak}" if leak
                                    else "no write tool in the allowlist")
+        # Read-only is not skill-less: without `Skill` in the allowlist the
+        # agent cannot load its own skills (harness run 20261014-003338: 0 of 8).
+        out["read skill"] = result("PASS" if "Skill" in tools else "FAIL",
+                                   "Skill in the read-tier allowlist" if "Skill" in tools
+                                   else "no Skill tool: the read tier cannot load skills")
     elif host == "opencode":
         r = sh(["opencode", "agent", "list"], ws, 120)
         if r["rc"] != 0:
@@ -265,10 +270,13 @@ def paid_checks(host: str, ws: Path, out: dict) -> dict:
         if seen:
             out["load"] = result("PASS" if len(named) == len(seen) else "FAIL",
                                  f"named itself: {named or 'none'} of {seen}")
-    if "skill" not in out and replies[FULL_AGENT]:
-        yes = re.search(r"SKILL:\s*`?yes", replies[FULL_AGENT], re.I)
-        out["skill"] = result("PASS" if yes else "FAIL",
-                              f"{FULL_AGENT} reports the skill "
+    # Both agents are asked; the read tier's answer used to be paid for and
+    # dropped, which is how a read tier with no skill access went unseen.
+    for key, agent in (("skill", FULL_AGENT), ("read skill", READ_AGENT)):
+        if key not in out and replies[agent]:
+            yes = re.search(r"SKILL:\s*`?yes", replies[agent], re.I)
+            out[key] = result("PASS" if yes else "FAIL",
+                              f"{agent} reports the skill "
                               f"{'available' if yes else 'missing'}")
     return out
 
