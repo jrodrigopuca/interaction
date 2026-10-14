@@ -1,0 +1,1432 @@
+# Does each agent LOAD its skill when it should, and leave it alone when it
+# shouldn't? (B-041 in the catalog's backlog.)
+#
+# A skill's `description:` is a classifier with two faces, and B-023 only
+# measured one of them. Recall: the skill loads on the queries its trigger
+# names. Precision: it does NOT load on a near-miss — a query from the same
+# domain, sent to the same owning agent, that a hurried reader would confuse
+# with the trigger. A description that said "load always" would ace recall and
+# nobody would notice; only the near-misses can catch it.
+#
+# SHAPE
+#
+#   one skill per agent, all 15 agents          15 skills
+#   4 triggers  → expect_skills: [skill]        60 scenarios
+#   4 near-misses → forbid_skills: [skill]      60 scenarios
+#
+# Six skills were fixed by the backlog because B-023 already measured them:
+# dba/lh-migrations, architect/lh-tradeoffs, security/lh-threat-modeling,
+# product-manager/lh-discovery, qa/lh-flow-hunting, data-ml/lh-llm-integration.
+# The other nine were chosen as the skill with the most concrete trigger and the
+# LEAST cover in the agent's body — a skill whose method is already restated in
+# the judgment section is one the model reasonably skips, which measures the
+# body, not the description.
+#
+# A near-miss that lands in ANOTHER skill of the same agent is fine and often
+# the best kind: `forbid_skills` only forbids the skill under test, so loading
+# the neighbour is a correct answer, not a failure.
+#
+# WHY NO JUDGE
+#
+# The verdict is a fact in the trace — which `Skill` calls the sample made —
+# not an opinion about the reply. A judge would add cost and noise to a
+# question it cannot answer better than the event stream. No `contains` /
+# `matches` either: what the agent SAYS is not under test here.
+#
+# WHY `manual: true`
+#
+# 120 single-turn samples at the harness estimate of $0.15 each is ~$18 per
+# pass, every time the full suite runs, to re-measure descriptions that change
+# rarely. Run it on demand when a description changes:
+#
+#   ./run.py --category skill-trigger [--only skill-migrations]
+#
+# READ THE NUMBERS AS A BASELINE, NOT A TARGET. B-023 measured that the model
+# often does not load what the agent's body already gives it, and the reply is
+# fine anyway: low recall alone is not a defect. What gets fixed is precision —
+# a skill loading where it does not belong. If a description is rewritten
+# because of this file, pick it with queries OTHER than these and cite the run.
+#
+# Prompts are what a real user would type, in the user's register, and never
+# name the skill or ask to "use a skill" — that would measure obedience, not
+# the description.
+
+# --------------------------------------------------------------------------- #
+# dba / lh-migrations — fixed (B-023)
+# Trigger: altering a table that holds real data, renames/drops, backfills,
+# release coupled to a schema change. Neighbours: lh-data-modeling (new
+# schema), lh-query-performance (slow reads).
+# --------------------------------------------------------------------------- #
+- id: skill-migrations-trigger-1
+  category: skill-trigger
+  agent: dba
+  manual: true
+  prompt: |
+    Tenemos que renombrar la columna `email` a `email_address` en `users`,
+    que tiene 40M de filas, y no podemos tener downtime. ¿Cómo lo hacemos?
+  assert:
+    expect_skills: [lh-migrations]
+
+- id: skill-migrations-trigger-2
+  category: skill-trigger
+  agent: dba
+  manual: true
+  prompt: |
+    En el release del viernes va una migración que agrega `status` NOT NULL
+    con default 'pending' a `orders` (12M de filas), y el código nuevo ya
+    lo lee. ¿Algún problema?
+  assert:
+    expect_skills: [lh-migrations]
+
+- id: skill-migrations-trigger-3
+  category: skill-trigger
+  agent: dba
+  manual: true
+  prompt: |
+    Hay que llenar la columna nueva `country_code` de `customers` a partir de
+    `address` para todas las filas existentes, son unos 25M. ¿Cómo lo corro
+    sin bloquear la tabla?
+  assert:
+    expect_skills: [lh-migrations]
+
+- id: skill-migrations-trigger-4
+  category: skill-trigger
+  agent: dba
+  manual: true
+  prompt: |
+    Queremos dropear la tabla `legacy_invoices`. El código nuevo ya no la lee,
+    pero durante el rollout conviven pods con la versión vieja. ¿En qué orden
+    lo hacemos?
+  assert:
+    expect_skills: [lh-migrations]
+
+- id: skill-migrations-near-1
+  category: skill-trigger
+  agent: dba
+  manual: true
+  # New schema, no data yet: lh-data-modeling.
+  prompt: |
+    Diseñá la tabla nueva para preferencias de notificación por usuario:
+    canal, tipo de evento y si está activada o no.
+  assert:
+    forbid_skills: [lh-migrations]
+
+- id: skill-migrations-near-2
+  category: skill-trigger
+  agent: dba
+  manual: true
+  # Says "migración" but it is the FIRST one, on an empty schema: the bait is
+  # lexical. Reviewing a proposed model is lh-data-modeling.
+  prompt: |
+    Antes de generar la primera migración de Prisma, revisame este modelo:
+
+    model Order {
+      id         Int      @id @default(autoincrement())
+      customer   String
+      total      Float
+      status     String
+      createdAt  DateTime @default(now())
+    }
+  assert:
+    forbid_skills: [lh-migrations]
+
+- id: skill-migrations-near-3
+  category: skill-trigger
+  agent: dba
+  manual: true
+  # Slow read against real data: lh-query-performance. The likely fix is an
+  # index, which is DDL on a populated table — the finest pair in this block.
+  prompt: |
+    El listado de pedidos tarda 4 segundos desde que tenemos datos reales.
+    La query es:
+
+    SELECT * FROM orders WHERE customer_id = $1
+    ORDER BY created_at DESC LIMIT 50;
+
+    ¿Qué está pasando?
+  assert:
+    forbid_skills: [lh-migrations]
+
+- id: skill-migrations-near-4
+  category: skill-trigger
+  agent: dba
+  manual: true
+  # Integrity under concurrency: no schema change at all.
+  prompt: |
+    Dos requests que descuentan stock del mismo producto al mismo tiempo nos
+    están haciendo vender de más. ¿Qué nivel de aislamiento o qué lock
+    necesitamos?
+  assert:
+    forbid_skills: [lh-migrations]
+
+# --------------------------------------------------------------------------- #
+# architect / lh-tradeoffs — fixed (B-023)
+# Trigger: costly-to-reverse decision, "X or Y", recording or reopening a
+# decision. Neighbours: lh-design-review, lh-mentoring.
+# --------------------------------------------------------------------------- #
+- id: skill-tradeoffs-trigger-1
+  category: skill-trigger
+  agent: architect
+  manual: true
+  prompt: |
+    ¿Usamos Postgres o MongoDB para el servicio nuevo de catálogo? Lo va a
+    mantener un equipo de 4 y va a vivir años.
+  assert:
+    expect_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-trigger-2
+  category: skill-trigger
+  agent: architect
+  manual: true
+  prompt: |
+    Estamos pensando en sacar facturación del monolito y hacerlo un servicio
+    aparte. ¿Lo hacemos?
+  assert:
+    expect_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-trigger-3
+  category: skill-trigger
+  agent: architect
+  manual: true
+  prompt: |
+    Para los emails transaccionales: ¿armamos nuestro propio sistema de colas
+    y templates, o pagamos un servicio tipo Postmark o SendGrid?
+  assert:
+    expect_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-trigger-4
+  category: skill-trigger
+  agent: architect
+  manual: true
+  prompt: |
+    Hace un año decidimos procesar los pagos sincrónicamente dentro del
+    request. Ahora alguien del equipo propone pasarlos a una cola. ¿Reabrimos
+    esa decisión?
+  assert:
+    expect_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-near-1
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Literally "X or Y", but trivially reversible: the trigger's threshold is
+  # the cost of changing it later, not the shape of the question.
+  prompt: |
+    ¿Uso `map` o un `for` para recorrer este array en JavaScript?
+  assert:
+    forbid_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-near-2
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Conceptual question, no decision on the table.
+  prompt: |
+    ¿Cuál es la diferencia entre un monolito modular y microservicios?
+  assert:
+    forbid_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-near-3
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Reviewing an existing structure: lh-design-review.
+  prompt: |
+    En nuestro repo los controllers importan directo del ORM y el módulo de
+    dominio importa cosas de los controllers. ¿Está bien así?
+  assert:
+    forbid_skills: [lh-tradeoffs]
+
+- id: skill-tradeoffs-near-4
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Learning path, not a project decision: lh-mentoring territory.
+  prompt: |
+    Me dijeron que tengo que aprender patrones de diseño. ¿Por cuál empiezo?
+  assert:
+    forbid_skills: [lh-tradeoffs]
+
+# --------------------------------------------------------------------------- #
+# security / lh-threat-modeling — fixed (B-023)
+# Trigger: starting an assessment, designing something securely, "where are we
+# exposed?". Neighbours: lh-code-audit (a specific class in code),
+# lh-remediation (findings → fixes, verification).
+# --------------------------------------------------------------------------- #
+- id: skill-threat-modeling-trigger-1
+  category: skill-trigger
+  agent: security
+  manual: true
+  prompt: |
+    Antes de la ronda de inversión nos piden una evaluación de seguridad de la
+    plataforma. Nunca se hizo ninguna. ¿Cómo arrancamos?
+  assert:
+    expect_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-trigger-2
+  category: skill-trigger
+  agent: security
+  manual: true
+  prompt: |
+    Vamos a agregar login con magic link por email y un webhook de Stripe para
+    cobrar suscripciones. Quiero diseñarlo seguro desde el principio.
+  assert:
+    expect_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-trigger-3
+  category: skill-trigger
+  agent: security
+  manual: true
+  prompt: |
+    Tenemos un endpoint que recibe PDFs, los procesa con un worker y después
+    los sirve desde S3. ¿Por dónde nos pueden atacar?
+  assert:
+    expect_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-trigger-4
+  category: skill-trigger
+  agent: security
+  manual: true
+  prompt: |
+    Vamos a abrir una API pública para que partners se integren con nuestro
+    sistema de reservas. ¿Dónde quedamos expuestos?
+  assert:
+    expect_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-near-1
+  category: skill-trigger
+  agent: security
+  manual: true
+  # One known class in one line of code: lh-code-audit.
+  prompt: |
+    ¿Esto tiene inyección SQL?
+
+    db.query("SELECT * FROM users WHERE name = '" + req.query.name + "'")
+  assert:
+    forbid_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-near-2
+  category: skill-trigger
+  agent: security
+  manual: true
+  # The assessment already happened; ranking findings is lh-remediation.
+  prompt: |
+    El pentest nos dejó 23 hallazgos. ¿En qué orden los arreglamos?
+  assert:
+    forbid_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-near-3
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Verifying a fix: lh-remediation.
+  prompt: |
+    Arreglamos el IDOR de /invoices/:id agregando un chequeo de que la factura
+    sea del usuario logueado. ¿Cómo verifico que quedó bien cerrado?
+  assert:
+    forbid_skills: [lh-threat-modeling]
+
+- id: skill-threat-modeling-near-4
+  category: skill-trigger
+  agent: security
+  manual: true
+  # A narrow crypto choice, no surface to map.
+  prompt: |
+    ¿bcrypt con cost 10 sigue alcanzando hoy para guardar contraseñas, o
+    paso a argon2id?
+  assert:
+    forbid_skills: [lh-threat-modeling]
+
+# --------------------------------------------------------------------------- #
+# product-manager / lh-discovery — fixed (B-023)
+# Trigger: evaluating an idea, deciding whether to build, a request that
+# arrives as a solution. Neighbours: lh-backlog (validated → stories,
+# priorities, roadmap), lh-stakeholders.
+# --------------------------------------------------------------------------- #
+- id: skill-discovery-trigger-1
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Ventas dice que tenemos que agregar exportación a Excel porque un cliente
+    la pidió. ¿La metemos en el próximo sprint?
+  assert:
+    expect_skills: [lh-discovery]
+
+- id: skill-discovery-trigger-2
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Tengo la idea de sumar un chat entre compradores y vendedores en el
+    marketplace. ¿Vale la pena construirlo?
+  assert:
+    expect_skills: [lh-discovery]
+
+- id: skill-discovery-trigger-3
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Los gerentes pidieron un dashboard con 15 gráficos. ¿Arrancamos?
+  assert:
+    expect_skills: [lh-discovery]
+
+- id: skill-discovery-trigger-4
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Estamos evaluando lanzar un plan para equipos además del individual.
+    ¿Cómo sabemos si hay demanda real antes de construirlo?
+  assert:
+    expect_skills: [lh-discovery]
+
+- id: skill-discovery-near-1
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  # The problem is already validated, with evidence: lh-backlog.
+  prompt: |
+    Ya validamos con 12 entrevistas que los usuarios se olvidan de pagar a
+    tiempo. Escribime las historias de usuario con criterios de aceptación
+    para los recordatorios de pago por email.
+  assert:
+    forbid_skills: [lh-discovery]
+
+- id: skill-discovery-near-2
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Tenemos 40 ítems en el backlog y todos dicen prioridad alta. Ayudame a
+    ordenarlos.
+  assert:
+    forbid_skills: [lh-discovery]
+
+- id: skill-discovery-near-3
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  # A pushed-in request: lh-stakeholders. It also arrives as a solution,
+  # which makes this the hardest near-miss of the block.
+  prompt: |
+    El CEO quiere meter una feature a último momento en el release del mes
+    que viene. ¿Cómo le digo que no sin quemarme?
+  assert:
+    forbid_skills: [lh-discovery]
+
+- id: skill-discovery-near-4
+  category: skill-trigger
+  agent: product-manager
+  manual: true
+  prompt: |
+    Armame el roadmap del trimestre con estas tres iniciativas, ya validadas:
+    onboarding nuevo, facturación anual y app mobile.
+  assert:
+    forbid_skills: [lh-discovery]
+
+# --------------------------------------------------------------------------- #
+# qa / lh-flow-hunting — fixed (B-023)
+# Trigger: exploring a feature for bugs, reviewing a spec for gaps, "what could
+# break here?". Neighbours: lh-bug-reporting (a found issue, verifying a fix),
+# lh-test-design (writing/auditing test code).
+# --------------------------------------------------------------------------- #
+- id: skill-flow-hunting-trigger-1
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    El checkout ya funciona. ¿Qué lo puede romper?
+  assert:
+    expect_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-trigger-2
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    Te paso la spec del reseteo de contraseña: el usuario pide el link, le
+    llega un mail, hace click y pone la contraseña nueva. ¿Qué casos no
+    estamos considerando?
+  assert:
+    expect_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-trigger-3
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    Mañana sale el editor de perfil con subida de avatar. Quiero darle una
+    pasada destructiva antes. ¿Por dónde lo atacarías?
+  assert:
+    expect_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-trigger-4
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    Tenemos un formulario para reservar turnos: elegís fecha, hora y pagás
+    una seña. ¿Qué edge cases habría que probar?
+  assert:
+    expect_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-near-1
+  category: skill-trigger
+  agent: qa
+  manual: true
+  # The bug is already found; reporting it is lh-bug-reporting.
+  prompt: |
+    Encontré que el carrito duplica el ítem si hacés doble click en
+    "Agregar". ¿Cómo lo reporto para que el dev lo pueda agarrar?
+  assert:
+    forbid_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-near-2
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    El dev dice que arregló el bug del doble cobro. ¿Cómo confirmo que
+    realmente quedó arreglado?
+  assert:
+    forbid_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-near-3
+  category: skill-trigger
+  agent: qa
+  manual: true
+  # Writing test code for a stated contract: lh-test-design. Enumerating the
+  # cases is adjacent to hunting — the fine edge of this block.
+  prompt: |
+    Escribime los tests en pytest para `apply_coupon(cart, code)`: devuelve
+    el carrito con el descuento aplicado, rechaza cupones vencidos con
+    `CouponExpired` y no permite dos cupones en el mismo carrito.
+  assert:
+    forbid_skills: [lh-flow-hunting]
+
+- id: skill-flow-hunting-near-4
+  category: skill-trigger
+  agent: qa
+  manual: true
+  prompt: |
+    Nuestra suite E2E tarda 40 minutos y falla una de cada cinco corridas sin
+    que nadie haya cambiado nada. ¿Qué hacemos?
+  assert:
+    forbid_skills: [lh-flow-hunting]
+
+# --------------------------------------------------------------------------- #
+# data-ml / lh-llm-integration — fixed (B-041)
+# Trigger: integrating an LLM into a product — chat, extraction, RAG, agents,
+# "add AI to this". Neighbours: lh-ml-modeling, lh-data-pipelines.
+# --------------------------------------------------------------------------- #
+- id: skill-llm-integration-trigger-1
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  prompt: |
+    Queremos un chatbot que responda preguntas sobre nuestra documentación
+    interna, unas 2.000 páginas en Confluence. ¿Cómo lo armamos?
+  assert:
+    expect_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-trigger-2
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  prompt: |
+    Tenemos que sacar monto, fecha y CUIT de las facturas en PDF que suben
+    los clientes. ¿Lo hacemos con un LLM?
+  assert:
+    expect_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-trigger-3
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  prompt: |
+    Producto quiere "agregarle IA" al buscador de recetas. ¿Por dónde
+    empezamos?
+  assert:
+    expect_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-trigger-4
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  prompt: |
+    La feature de resúmenes automáticos con un LLM nos cuesta USD 9.000 por
+    mes y tarda 8 segundos por pedido. ¿Cómo la abaratamos sin romperla?
+  assert:
+    expect_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-near-1
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  # Classic prediction on tabular history: lh-ml-modeling.
+  prompt: |
+    Queremos predecir qué clientes van a cancelar la suscripción el mes que
+    viene. Tenemos dos años de historial de uso.
+  assert:
+    forbid_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-near-2
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  prompt: |
+    Los números del dashboard de ventas no coinciden con los de facturación.
+    Algo se rompe en el ETL nocturno.
+  assert:
+    forbid_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-near-3
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  # 50k labelled examples point at a supervised classifier (lh-ml-modeling);
+  # a reply that weighs an LLM against it is reasonable, so a load here is a
+  # judgement call, not a clear miss. Read the reply before calling it.
+  prompt: |
+    Necesitamos clasificar los tickets de soporte en 8 categorías. Tenemos
+    50.000 tickets ya etiquetados a mano. ¿Qué modelo usamos?
+  assert:
+    forbid_skills: [lh-llm-integration]
+
+- id: skill-llm-integration-near-4
+  category: skill-trigger
+  agent: data-ml
+  manual: true
+  # "Embeddings" is the lexical bait; the problem is a pipeline that leaves
+  # half-written data: lh-data-pipelines.
+  prompt: |
+    Todas las noches cargamos los embeddings de productos en una tabla de
+    Postgres desde el catálogo. El job a veces falla a mitad de camino y
+    quedan datos a medias. ¿Cómo lo hacemos confiable?
+  assert:
+    forbid_skills: [lh-llm-integration]
+
+# --------------------------------------------------------------------------- #
+# apple-dev / lh-shipping
+# Chosen because its trigger is the most concrete of the four (certificates,
+# profiles, TestFlight, App Review, notarization) and the body only points at
+# it — the Mentorship Contract and Stack Defaults cover code, state and
+# review, not distribution. Neighbours: lh-debugging, lh-state-architecture,
+# lh-code-review.
+# --------------------------------------------------------------------------- #
+- id: skill-shipping-trigger-1
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Subí el build a App Store Connect pero no les aparece a los testers
+    externos en TestFlight. ¿Qué me falta?
+  assert:
+    expect_skills: [lh-shipping]
+
+- id: skill-shipping-trigger-2
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Me rechazaron la app en App Review por la guideline 4.2, minimum
+    functionality. ¿Qué hago?
+  assert:
+    expect_skills: [lh-shipping]
+
+- id: skill-shipping-trigger-3
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Quiero distribuir mi app de macOS por fuera de la Mac App Store, para
+    bajarla desde mi web. ¿Qué necesito para que Gatekeeper no la bloquee?
+  assert:
+    expect_skills: [lh-shipping]
+
+- id: skill-shipping-trigger-4
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Agregué un widget a la app y ahora al archivar Xcode me dice "No profiles
+    for 'com.miapp.widget' were found". ¿Qué pasa?
+  assert:
+    expect_skills: [lh-shipping]
+
+- id: skill-shipping-near-1
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  # "App Store" and "review" are both bait: asking for an in-app RATING is a
+  # SwiftUI API question, not App Review.
+  prompt: |
+    Quiero pedirle al usuario que califique la app en la App Store después de
+    completar 3 tareas, sin ser pesado. ¿Cómo lo hago en SwiftUI?
+  assert:
+    forbid_skills: [lh-shipping]
+
+- id: skill-shipping-near-2
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  # StoreKit code at runtime, not store configuration.
+  prompt: |
+    Estoy armando un paywall con StoreKit 2 para una suscripción mensual.
+    ¿Cómo chequeo al abrir la app si el usuario tiene la suscripción activa?
+  assert:
+    forbid_skills: [lh-shipping]
+
+- id: skill-shipping-near-3
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  # Sounds like packaging; it is project structure: lh-state-architecture.
+  prompt: |
+    Quiero compartir los modelos entre mi app de iOS y la de macOS. ¿Armo un
+    Swift Package o un framework?
+  assert:
+    forbid_skills: [lh-shipping]
+
+- id: skill-shipping-near-4
+  category: skill-trigger
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Mi app crashea con EXC_BAD_ACCESS cuando vuelve de background, y solo en
+    el simulador. ¿Por qué puede ser?
+  assert:
+    forbid_skills: [lh-shipping]
+
+# --------------------------------------------------------------------------- #
+# devops / lh-ci-cd
+# Every devops skill has a judgment rule behind it (#2 observability, #4 IaC,
+# #5 deploys), so none is uncovered; lh-ci-cd has the most concrete trigger
+# (pipelines, deploy strategy by name) and the cleanest neighbours to bait:
+# lh-infrastructure (containers, secrets, IaC) and lh-observability.
+# --------------------------------------------------------------------------- #
+- id: skill-ci-cd-trigger-1
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    Hoy deployamos copiando archivos por SSH al servidor, a mano. Quiero
+    automatizarlo con GitHub Actions.
+  assert:
+    expect_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-trigger-2
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    Los deploys a producción nos dan miedo: cada vez que sale algo roto
+    tardamos una hora en volver atrás. ¿Qué estrategia de deploy nos conviene?
+  assert:
+    expect_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-trigger-3
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    El pipeline de CI tarda 35 minutos y los devs ya mergean sin esperar a
+    que termine. ¿Cómo lo acelero?
+  assert:
+    expect_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-trigger-4
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    ¿Blue-green o canary para la API de pagos? Tenemos 3 réplicas en
+    Kubernetes.
+  assert:
+    expect_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-near-1
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    Me piden dockerizar la app de Node que hoy corre con pm2 en una VM.
+  assert:
+    forbid_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-near-2
+  category: skill-trigger
+  agent: devops
+  manual: true
+  prompt: |
+    Nos enteramos de que se cayó la API porque nos avisan los usuarios.
+    ¿Qué alertas ponemos?
+  assert:
+    forbid_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-near-3
+  category: skill-trigger
+  agent: devops
+  manual: true
+  # Secrets across environments: lh-infrastructure. CI secrets may come up in
+  # passing, which is why it is a near-miss and not an obvious one.
+  prompt: |
+    Las credenciales de la base están en un `.env` commiteado en el repo.
+    ¿Cómo las manejamos bien en staging y producción?
+  assert:
+    forbid_skills: [lh-ci-cd]
+
+- id: skill-ci-cd-near-4
+  category: skill-trigger
+  agent: devops
+  manual: true
+  # "After each deploy" is the bait; the problem is seeing production blind:
+  # lh-observability.
+  prompt: |
+    Después de cada deploy la latencia p99 sube un rato y no sabemos por qué;
+    no tenemos métricas separadas por versión.
+  assert:
+    forbid_skills: [lh-ci-cd]
+
+# --------------------------------------------------------------------------- #
+# eng-manager / lh-team-health
+# lh-orchestration IS the body (routing is the role) and lh-delivery leans on
+# generalist's decomposition the body already inlines; retros and process
+# tuning have no rule in the body. Neighbours: lh-delivery, lh-orchestration.
+# --------------------------------------------------------------------------- #
+- id: skill-team-health-trigger-1
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    Cerramos el sprint y salió mal: dos features a medias y un incidente.
+    Quiero hacer una retro que sirva de algo. ¿Cómo la armo?
+  assert:
+    expect_skills: [lh-team-health]
+
+- id: skill-team-health-trigger-2
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    Cada PR espera tres días por una review y el equipo está frustrado. Pasa
+    todos los sprints. ¿Qué cambiamos en el proceso?
+  assert:
+    expect_skills: [lh-team-health]
+
+- id: skill-team-health-trigger-3
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    Tenemos daily, refinamiento, planning, review, retro y una sync semanal
+    con producto. Somos 4 devs. ¿Es demasiado?
+  assert:
+    expect_skills: [lh-team-health]
+
+- id: skill-team-health-trigger-4
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    El equipo lleva tres meses haciendo horas extra para llegar a las fechas
+    y ya se nota el desgaste. ¿Qué hago?
+  assert:
+    expect_skills: [lh-team-health]
+
+- id: skill-team-health-near-1
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    ¿Cuánto nos puede llevar migrar el login a OAuth? Las tareas son: elegir
+    proveedor, adaptar el backend, cambiar las pantallas de login y migrar
+    las sesiones existentes.
+  assert:
+    forbid_skills: [lh-team-health]
+
+- id: skill-team-health-near-2
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  # Twin of trigger-4: same pressure (dates), but the question is the project
+  # slipping, not the team wearing out — lh-delivery.
+  prompt: |
+    El proyecto de facturación tenía que salir el 1 de noviembre y vamos con
+    dos semanas de atraso. ¿Qué hacemos?
+  assert:
+    forbid_skills: [lh-team-health]
+
+- id: skill-team-health-near-3
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    Tenemos que construir un feature de pagos seguro, testeado y con buena
+    experiencia de checkout. ¿Quién del equipo se encarga de cada parte?
+  assert:
+    forbid_skills: [lh-team-health]
+
+- id: skill-team-health-near-4
+  category: skill-trigger
+  agent: eng-manager
+  manual: true
+  prompt: |
+    Partime la épica de "notificaciones push" en entregables de una semana.
+  assert:
+    forbid_skills: [lh-team-health]
+
+# --------------------------------------------------------------------------- #
+# gamification / lh-engagement
+# lh-flow-analysis is the agent's default method (its trigger says "any flow,
+# always before mechanics"), so it is the one the body leans on hardest;
+# lh-engagement has the concrete nouns (retention, churn, onboarding,
+# activation). Neighbours: lh-flow-analysis, lh-game-mechanics.
+# --------------------------------------------------------------------------- #
+- id: skill-engagement-trigger-1
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    La gente se registra pero el 70% no vuelve después del primer día. ¿Cómo
+    hacemos que vuelvan?
+  assert:
+    expect_skills: [lh-engagement]
+
+- id: skill-engagement-trigger-2
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    El onboarding de nuestra app de finanzas personales son 6 pantallas antes
+    de ver algo útil. Quiero rehacerlo.
+  assert:
+    expect_skills: [lh-engagement]
+
+- id: skill-engagement-trigger-3
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    Tenemos 9% de churn mensual en una app para aprender idiomas. ¿Qué
+    podríamos hacer para crear hábito sin volvernos manipuladores?
+  assert:
+    expect_skills: [lh-engagement]
+
+- id: skill-engagement-trigger-4
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    ¿Qué métricas tendríamos que mirar para saber si la gente realmente
+    adoptó el producto y no solo entró una vez?
+  assert:
+    expect_skills: [lh-engagement]
+
+- id: skill-engagement-near-1
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  # Abandonment, but inside one session's funnel: lh-flow-analysis.
+  prompt: |
+    En el checkout de la tienda la gente abandona en el paso de envío.
+    Analizá el flujo.
+  assert:
+    forbid_skills: [lh-engagement]
+
+- id: skill-engagement-near-2
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  # Progression inside the core loop: lh-game-mechanics.
+  prompt: |
+    Queremos sumar niveles y XP a los entrenamientos de la app de ejercicio.
+    ¿Cómo lo calibramos para que subir de nivel no se vuelva trivial?
+  assert:
+    forbid_skills: [lh-engagement]
+
+- id: skill-engagement-near-3
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    ¿Badges o un leaderboard semanal para el equipo de ventas en nuestro CRM
+    interno?
+  assert:
+    forbid_skills: [lh-engagement]
+
+- id: skill-engagement-near-4
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    Mapeá paso a paso, desde el lado del usuario, el flujo de publicar un
+    aviso en nuestro marketplace.
+  assert:
+    forbid_skills: [lh-engagement]
+
+# --------------------------------------------------------------------------- #
+# generalist / lh-next-step
+# All three generalist skills are stages of the Operating Loop in the body.
+# lh-next-step has the most concrete trigger (a step failed or surprised,
+# resuming "lo de ayer") AND an explicit exclusion in its description ("not
+# needed when the next action is obvious and reversible"), so its near-misses
+# are defined by the description itself.
+# Overlap: "before a task of more than a handful of steps" is shared with
+# lh-decomposition; trigger-4 sits on that line on purpose.
+# --------------------------------------------------------------------------- #
+- id: skill-next-step-trigger-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    Seguimos con lo de ayer: estábamos pasando los tests de Jest a Vitest y
+    quedó por la mitad.
+  assert:
+    expect_skills: [lh-next-step]
+
+- id: skill-next-step-trigger-2
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    Probé lo que me sugeriste, subir el timeout del cliente HTTP a 30s, y
+    sigue fallando igual con ECONNRESET. ¿Y ahora?
+  assert:
+    expect_skills: [lh-next-step]
+
+- id: skill-next-step-trigger-3
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    Del plan de upgrade de Postgres 14 a 16, los pasos 1 a 3 salieron bien,
+    pero el 4 (`pg_upgrade --check`) dice que la versión de `postgis` no es
+    compatible. ¿Seguimos, cambiamos el plan o paramos?
+  assert:
+    expect_skills: [lh-next-step]
+
+- id: skill-next-step-trigger-4
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # The workspace is empty, so the first step will surprise it. Also a fair
+  # lh-decomposition trigger; see the block header.
+  prompt: |
+    Pasá este monorepo de npm a pnpm: lockfile, scripts, CI, Dockerfile y
+    README, y que todo siga buildeando. Arrancá.
+  assert:
+    expect_skills: [lh-next-step]
+
+- id: skill-next-step-near-1
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    ¿Qué diferencia hay entre `git stash` y hacer un commit WIP?
+  assert:
+    forbid_skills: [lh-next-step]
+
+- id: skill-next-step-near-2
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # "Ayer" is the bait; nothing is being resumed.
+  prompt: |
+    Ayer me quedé pensando: ¿qué diferencia hay entre un timeout de conexión
+    y un timeout de lectura?
+  assert:
+    forbid_skills: [lh-next-step]
+
+- id: skill-next-step-near-3
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # One obvious, reversible action — the description's own exclusion.
+  prompt: |
+    Pasame esto a YAML: {"name": "api", "replicas": 3, "ports": [80, 443]}
+  assert:
+    forbid_skills: [lh-next-step]
+
+- id: skill-next-step-near-4
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  # A failure, but the USER's, reported before the agent took any step: the
+  # trigger is about the agent's own step failing. lh-verification is fair.
+  prompt: |
+    Este test me falla con `AssertionError: 3 != 4`:
+
+    assert len(parse("a,b,,c")) == 4
+
+    ¿Por qué puede ser?
+  assert:
+    forbid_skills: [lh-next-step]
+
+# --------------------------------------------------------------------------- #
+# senior-dev / lh-react-next
+# The body is stack-agnostic by rule (catalog rule 5), so this is the one
+# senior-dev skill nothing in the body covers. Near-misses keep the frontend
+# context and remove React, or keep React and remove component work.
+# Neighbours: lh-fullstack-boundaries, lh-pairing, lh-code-health.
+# --------------------------------------------------------------------------- #
+- id: skill-react-next-trigger-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  prompt: |
+    Tengo una página de productos en Next.js (App Router) que hace el fetch
+    en un useEffect y muestra un spinner. ¿Cómo la paso a server component?
+  assert:
+    expect_skills: [lh-react-next]
+
+- id: skill-react-next-trigger-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  prompt: |
+    Armame un componente React de búsqueda con filtro debounced contra
+    `/api/products?q=`.
+  assert:
+    expect_skills: [lh-react-next]
+
+- id: skill-react-next-trigger-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  prompt: |
+    En nuestra app React el estado del carrito vive en un Context arriba de
+    todo y cada cambio re-renderiza la página entera. ¿Dónde debería vivir?
+  assert:
+    expect_skills: [lh-react-next]
+
+- id: skill-react-next-trigger-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  prompt: |
+    El componente React `Dashboard.tsx` tiene 600 líneas: hace el fetch,
+    maneja filtros, un modal y la tabla. ¿Cómo lo parto?
+  assert:
+    expect_skills: [lh-react-next]
+
+- id: skill-react-next-near-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # The React front is context; the work is server-side validation:
+  # lh-fullstack-boundaries.
+  prompt: |
+    El endpoint POST /api/orders de Express que consume nuestro front en
+    React acepta cualquier body. Agregale validación del lado del servidor.
+  assert:
+    forbid_skills: [lh-react-next]
+
+- id: skill-react-next-near-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Lexical twin of trigger-4 in Vue.
+  prompt: |
+    Tengo un componente de Vue 3 de 400 líneas que mezcla el fetch con la
+    presentación. ¿Cómo lo parto?
+  assert:
+    forbid_skills: [lh-react-next]
+
+- id: skill-react-next-near-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # A React project, but test tooling, not components or data flow.
+  prompt: |
+    Migremos los tests del proyecto React de Jest a Vitest. ¿Qué cambia en la
+    configuración?
+  assert:
+    forbid_skills: [lh-react-next]
+
+- id: skill-react-next-near-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Plain function living in a React repo: lh-pairing.
+  prompt: |
+    Revisame este helper que está en `src/utils/` de nuestra app React:
+
+    export function formatPrice(cents) {
+      return "$" + (cents / 100).toFixed(2)
+    }
+  assert:
+    forbid_skills: [lh-react-next]
+
+# --------------------------------------------------------------------------- #
+# stark / lh-zero-to-one
+# lh-crisis-mode is already in the body's stance (judgment.yaml asserts
+# "stabilize first" without any skill) and lh-first-principles restates rule
+# #1; lh-zero-to-one has the sharpest boundary in the roster, written into
+# its own description: "a new feature inside an existing codebase is not
+# this". Neighbours: lh-first-principles, lh-crisis-mode.
+# --------------------------------------------------------------------------- #
+- id: skill-zero-to-one-trigger-1
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Quiero armar desde cero una app para que los clubes de barrio gestionen
+    las cuotas de los socios. No hay nada todavía. ¿Por dónde arranco?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-trigger-2
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Tenemos un prototipo en Streamlit que usan 5 personas del equipo y ahora
+    lo quieren usar 200 clientes. ¿Cómo lo pasamos a producción?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-trigger-3
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Tengo 6 semanas para sacar el MVP de un marketplace de alquiler de
+    herramientas entre vecinos. ¿Qué construyo primero?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-trigger-4
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Idea: un servicio que lee los extractos bancarios de una PyME y le avisa
+    cuando se le viene un problema de caja. No hay una línea de código.
+    ¿Cómo lo llevo a una v1?
+  assert:
+    expect_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-1
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # The description's own exclusion.
+  prompt: |
+    Hay que agregar exportación a CSV al panel de administración de nuestra
+    app de Django, que lleva tres años en producción.
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-2
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Llevamos dos semanas trabados sincronizando tres sistemas que no
+    comparten IDs. Nada de lo obvio funcionó.
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-3
+  category: skill-trigger
+  agent: stark
+  manual: true
+  prompt: |
+    Se cayó producción hace diez minutos y mañana tenemos la demo con el
+    inversor.
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+- id: skill-zero-to-one-near-4
+  category: skill-trigger
+  agent: stark
+  manual: true
+  # "Desde cero" is the bait; the module lives inside a product with paying
+  # users, so the exclusion applies.
+  prompt: |
+    El producto ya tiene 2.000 usuarios pagos y queremos sumarle un módulo de
+    reportes nuevo, desde cero, separado del resto. ¿Cómo lo arranco?
+  assert:
+    forbid_skills: [lh-zero-to-one]
+
+# --------------------------------------------------------------------------- #
+# ux-ui / lh-dev-handoff
+# Design Judgment covers hierarchy (#2), states (#3) and system (#4) — the
+# ground of lh-visual-craft and lh-ux-flows — while the design-tool-to-code
+# translation is only in this skill. Neighbours: lh-visual-craft (choosing
+# values vs. naming them as tokens is the fine line), lh-ux-flows, lh-mockups.
+# --------------------------------------------------------------------------- #
+- id: skill-dev-handoff-trigger-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Terminé el diseño del checkout en Figma. ¿Qué le paso al dev para que lo
+    implemente sin tener que adivinar?
+  assert:
+    expect_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-trigger-2
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    En Figma tenemos 14 grises distintos y los devs usan hex sueltos en el
+    código. Quiero definir tokens de color que sirvan de los dos lados.
+  assert:
+    expect_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-trigger-3
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Escribí los criterios de aceptación de UI para la tarjeta de producto:
+    cuándo la damos por terminada.
+  assert:
+    expect_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-trigger-4
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    El dev me pregunta cómo se traduce a CSS el auto layout de Figma con
+    "fill container". ¿Qué le digo?
+  assert:
+    expect_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-near-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    La pantalla de configuración se ve apretada y poco profesional, pero no
+    sé por qué. ¿Qué le pasa?
+  assert:
+    forbid_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-near-2
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  # Twin of trigger-2: a colour, but CHOOSING it (lh-visual-craft), not
+  # naming it for code.
+  prompt: |
+    ¿Qué color uso para el botón primario sobre este fondo azul oscuro
+    (#0B1F3A) para que contraste bien?
+  assert:
+    forbid_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-near-3
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Diseñá el flujo de alta de una cuenta empresa: datos fiscales, invitar
+    miembros y elegir plan.
+  assert:
+    forbid_skills: [lh-dev-handoff]
+
+- id: skill-dev-handoff-near-4
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Haceme un wireframe del dashboard para un usuario que todavía no tiene
+    ningún proyecto.
+  assert:
+    forbid_skills: [lh-dev-handoff]
+
+# --------------------------------------------------------------------------- #
+# visionary / lh-focus
+# The verdict (lh-brutal-critique) is the agent's deliverable and is all over
+# the body; lh-focus has concrete triggers (bloated roadmap, "everything is
+# priority", scope vs. date). Neighbours: lh-brutal-critique — whose trigger
+# also names "roadmap", the fine line — and lh-inspire.
+# --------------------------------------------------------------------------- #
+- id: skill-focus-trigger-1
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Tenemos 15 features planeadas para este trimestre y somos 5. ¿Qué
+    hacemos?
+  assert:
+    expect_skills: [lh-focus]
+
+- id: skill-focus-trigger-2
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Todo el backlog está marcado como prioridad máxima y lanzamos en seis
+    semanas.
+  assert:
+    expect_skills: [lh-focus]
+
+- id: skill-focus-trigger-3
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Nuestra app hace facturación, CRM, inventario y chat interno, y ahora
+    queremos sumar sueldos. ¿Está bien?
+  assert:
+    expect_skills: [lh-focus]
+
+- id: skill-focus-trigger-4
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Nuestro producto es un editor de notas con IA, colaboración en tiempo
+    real, plantillas y publicación como blog. Si tuvieras que quedarte con
+    una sola cosa, ¿cuál sería?
+  assert:
+    expect_skills: [lh-focus]
+
+- id: skill-focus-near-1
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Te muestro la pantalla de inicio nueva: un feed con 6 tarjetas de
+    métricas, un banner promocional y accesos rápidos. Sé honesto, ¿está
+    buena?
+  assert:
+    forbid_skills: [lh-focus]
+
+- id: skill-focus-near-2
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Lanzamos y nadie usó la app. El equipo está bajoneado. ¿Seguimos?
+  assert:
+    forbid_skills: [lh-focus]
+
+- id: skill-focus-near-3
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  prompt: |
+    Mañana le presento la visión del producto a los inversores. ¿Cómo la
+    cuento?
+  assert:
+    forbid_skills: [lh-focus]
+
+- id: skill-focus-near-4
+  category: skill-trigger
+  agent: visionary
+  manual: true
+  # A roadmap, but three items one per quarter: nothing to cut, an opinion
+  # asked — lh-brutal-critique, whose trigger names roadmaps too.
+  prompt: |
+    Opiná sobre nuestro roadmap: Q1 app mobile, Q2 integración con Slack, Q3
+    modo offline.
+  assert:
+    forbid_skills: [lh-focus]
