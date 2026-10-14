@@ -72,7 +72,10 @@ class NeverBaselineNeverCurrent(unittest.TestCase):
                 d.mkdir()
                 (d / "run.json").write_text(json.dumps({"catalog": STAMP, **extra}))
                 (d / "trace.jsonl").write_text(json.dumps({"id": sc.id, "status": verdict}) + "\n")
-            with mock.patch.object(run, "RUNS", runs):
+            # The host fingerprint reads the machine's install stamp; which
+            # run is picked does not depend on it, and a clean CI runner has none.
+            with mock.patch.object(run, "RUNS", runs), \
+                    mock.patch.object(run, "catalog_skill_names", return_value=[]):
                 row = run.applicability_data([sc], run.AGENT_MODEL)[0]
         self.assertEqual(row["run"], "20261013-100000")
 
