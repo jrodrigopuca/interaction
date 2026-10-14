@@ -179,9 +179,9 @@ Each subagent still pays its own system-prompt cache, and the orchestrator's
 session is added on top. Resuming one session instead would be cheaper but
 destroys test isolation — scenario 5 would see scenarios 1-4.
 
-So: separate calls, run in parallel (`--jobs`). A full suite is 34 scenarios /
-~61 calls — more in wall-clock terms than that suggests, since the delegating
-ones spawn trees of their own (raise `--timeout` for those; 300s is tight when
+So: separate calls, run in parallel (`--jobs`). `./run.py --list` prints how
+many scenarios and calls a full suite is today — more in wall-clock terms than
+that suggests, since the delegating ones spawn trees of their own (raise `--timeout` for those; 300s is tight when
 a measured orchestrator run took 260s). Use `--category` and `--only` while iterating, and don't wire this
 into CI — run it when you change agents, not on every push.
 
@@ -252,7 +252,8 @@ Only the lead sample keeps its full event stream — five conversations nobody
 opens would be by far the largest thing in the file — and the lead is a
 *failing* sample whenever one exists, because that is the one you came to read.
 
-Cost is linear: `--repeat 3` on the full suite is ~$27. It is not a default.
+Cost is linear: `--repeat 3` on the full suite is three suites (the last one,
+`20261012-161940`, cost $11.83). It is not a default.
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
 

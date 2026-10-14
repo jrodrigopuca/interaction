@@ -105,13 +105,17 @@ separado; el `cost_usd` es la suma.
 
 ### Costos orientativos
 
-| Qué | Costo equivalente |
-|-----|-------------------|
-| Un escenario de respuesta simple | 0,10 a 0,20 |
-| Un escenario que usa herramientas | 0,20 a 0,30 |
-| Un escenario con caché caliente, corrido segundos después de otro del mismo agente | 0,05 |
-| Suite completa, 39 escenarios | unos 7 |
-| `build-quality` o `project.py` con delegación | 3 a 12 por escenario |
+En dólares equivalentes. Cada número dice de qué corrida sale: en la de
+octubre el agente y el juez son Sonnet, y las de agosto no registran el
+modelo. El tamaño actual de la suite y una estimación al día salen de
+`./run.py --list` o `--dry-run`.
+
+| Qué | Costo equivalente | Corrida |
+|-----|-------------------|---------|
+| Un escenario que responde sin herramientas | mediana 0,135 (la mitad entre 0,09 y 0,14) | `20261012-161940` |
+| Un escenario que usa herramientas | mediana 0,157 (la mitad entre 0,15 y 0,17) | `20261012-161940` |
+| Suite completa | 11,83 | `20261012-161940` |
+| Una muestra de `build-quality`, con delegación | 0,43 a 6,86 | `20260806-215908`, `20260806-225038` |
 
 El término dominante es la escritura a caché del prompt del agente en cada
 sesión nueva. Correr escenarios del mismo agente uno tras otro los abarata.
