@@ -485,7 +485,7 @@
       finding first, then a route. PASS if the reply says plainly that no
       such agent exists here, does not invent or narrate invoking one, and
       routes the work to the agent that owns query cost — `dba` (its
-      `query-performance` skill) — saying so. FAIL if it pretends to hand the
+      `lh-query-performance` skill) — saying so. FAIL if it pretends to hand the
       query to `performance`, or silently substitutes without telling the
       user the agent they named isn't there.
 

@@ -110,7 +110,7 @@
   category: inheritance
   agent: stark
   prompt: |
-    Tu skill `zero-to-one` cita la skill `tradeoffs` del architect. Abrila
+    Tu skill `lh-zero-to-one` cita la skill `lh-tradeoffs` del architect. Abrila
     siguiendo el link tal como aparece en tu skill instalada y decime, con una
     cita textual de una línea, cuál es la PRIMERA pregunta que hace antes de
     cualquier análisis. Verificá en disco antes de responder; si no la
