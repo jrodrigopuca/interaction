@@ -33,6 +33,8 @@ jobs:
           python-version: "3.11"
       - name: Install the host CLIs (pinned)
         run: npm install -g @anthropic-ai/claude-code@2.1.296 opencode-ai@1.19.0
+      - name: Install PyYAML (run.py reads the scenarios with it; smoke.py does not)
+        run: python3 -m pip install pyyaml==6.0.3
       - name: Unit tests
         run: python3 -m unittest discover -s tests
       - name: Free smoke checks
