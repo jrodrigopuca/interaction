@@ -36,14 +36,38 @@ esta guía es el "cómo se usa".
 ```bash
 ./run.py --list                    # qué escenarios hay, por categoría
 ./run.py --dry-run                 # qué correría y cuánto costaría, sin gastar
-./run.py                           # toda la suite (excluye los manual: true)
-./run.py --category handoff        # una categoría
-./run.py --only qa-never           # los escenarios cuyo id contiene ese texto
-./run.py --only a,b,c              # varios ids, separados por coma (cualquiera que matchee)
-./run.py --repeat 3                # 3 muestras por escenario; si discrepan → FLAKY
-./run.py --model opus              # el agente bajo prueba en otro modelo
-./run.py --jobs 2                  # menos llamadas en paralelo
+./run.py --dry-run --max-cost-usd 5   # ¿entra en USD 5?
+./run.py --max-cost-usd 13                       # toda la suite (excluye los manual: true)
+./run.py --category handoff --max-cost-usd 2     # una categoría
+./run.py --only qa-never --max-cost-usd 1        # los escenarios cuyo id contiene ese texto
+./run.py --only a,b,c --max-cost-usd 1           # varios ids, separados por coma
+./run.py --repeat 3 --max-cost-usd 40            # 3 muestras por escenario; si discrepan → FLAKY
+./run.py --model opus --max-cost-usd 30          # el agente bajo prueba en otro modelo
+./run.py --jobs 2 --max-cost-usd 13              # menos llamadas en paralelo
 ```
+
+### Presupuesto
+
+Toda corrida que llama al modelo necesita `--max-cost-usd`: el monto que se
+aprobó para ella. Hay tres frenos, y ninguno corta una muestra que ya
+arrancó salvo el tercero:
+
+- **La estimación.** Si lo que estima `--dry-run` no entra en el tope, la
+  corrida no arranca.
+- **Por corrida.** Antes de lanzar cada muestra se suma lo gastado; al llegar
+  al tope, o con la ventana de 5 horas de la suscripción al 90 %, no sale
+  ninguna más. Las que están en vuelo terminan con su juez, así que el exceso
+  es como mucho el de `--jobs` muestras.
+- **Por muestra.** Cada llamada al agente lleva `--max-budget-usd`: 1,00 para
+  un agente solo, 12,00 para uno que delega o ejecuta código, muy por encima
+  de lo medido (0,40 y 6,86). Ataja a un agente desbocado; si salta, la
+  muestra queda `ERROR` "budget" y nunca `FAIL`.
+
+Una corrida cortada queda **`CAPPED`**: se guarda y se reporta, `run.json`
+registra el tope, lo gastado, el exceso, cuántas muestras corrieron y la
+ventana de cuota, sale con código 2, y nunca es línea base. Sus escenarios
+completos cuentan para `--applicability`; los que quedaron con menos
+muestras que `--repeat`, no.
 
 ### Opciones
 
@@ -54,6 +78,7 @@ esta guía es el "cómo se usa".
 | `--list` | Lista escenarios y sale | |
 | `--dry-run` | Muestra qué correría y una estimación de costo | |
 | `--jobs N` | Llamadas en paralelo | 4 |
+| `--max-cost-usd USD` | Tope de gasto de la corrida; obligatorio salvo con `--list`, `--dry-run` y `--applicability` | |
 | `--repeat N` | Muestras por escenario. Con más de una, si los veredictos discrepan el escenario se reporta `FLAKY`, nunca verde por mayoría | 1 |
 | `--model M` | Modelo del agente bajo prueba | `sonnet` |
 | `--judge-model M` | Modelo del juez | `opus` |

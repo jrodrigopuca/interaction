@@ -200,6 +200,14 @@ def run_warnings(meta: dict) -> list:
     # A reinstall mid-run mixes two catalog versions (B-052); it disqualifies
     # the run whatever else it recorded.
     out = ["Catalog changed during the run · invalid"] if meta.get("catalog_changed") else []
+    # Stopped by its budget or the quota window (B-044): with --repeat the
+    # passes are whole-suite, so a run cut in its second pass covers every ID
+    # and would otherwise look complete.
+    budget = meta.get("budget") or {}
+    if budget.get("capped"):
+        out.append(f"Capped at ${budget.get('max_cost_usd', 0):.2f}"
+                   + (" · quota window" if budget.get("stopped_by") == "quota" else "")
+                   + " · not a baseline")
     fp = meta.get("fingerprints")
     if not fp:
         return out

@@ -10,9 +10,9 @@ this repo does.
 ```bash
 ./run.py --dry-run              # what would run, and what it costs
 ./run.py --applicability        # which past verdicts still apply to today's install (free)
-./run.py --category routing     # one category
-./run.py --only qa-never        # one scenario
-./run.py                        # everything
+./run.py --category routing --max-cost-usd 2   # one category
+./run.py --only qa-never --max-cost-usd 1       # one scenario
+./run.py --max-cost-usd 13                      # everything
 
 ./viz.py --index                # every run, one page → runs/index.html
 ./viz.py runs/<timestamp>       # one run → report.html
@@ -123,8 +123,8 @@ purpose), but a PASS next to one deserves a look at the trace.
 Two independent knobs, because they answer different questions:
 
 ```bash
-./run.py                                      # defaults: agent on sonnet, judge on opus
-./run.py --model opus --only dev-ratifies     # re-check one failure on a stronger agent
+./run.py --max-cost-usd 13                                     # defaults: agent on sonnet, judge on opus
+./run.py --model opus --only dev-ratifies --max-cost-usd 1     # re-check one failure on a stronger agent
 ```
 
 - `--model` — the agent under test. Defaults to **Sonnet**: a model in daily
@@ -238,8 +238,8 @@ edge, and **a single sample cannot tell you which ones are near it.** A
 scenario that passes 5-of-5 and one that passes 3-of-5 print the same ` ok `.
 
 ```bash
-./run.py --repeat 5                       # calibrate: which scenarios are solid?
-./run.py --only dev-ratifies --repeat 5   # is this failure real, or was it the run?
+./run.py --repeat 5 --max-cost-usd 65                      # calibrate: which scenarios are solid?
+./run.py --only dev-ratifies --repeat 5 --max-cost-usd 2   # is this failure real, or was it the run?
 ```
 
 Samples that disagree are reported **`FLAKY`, not green.** A majority vote would
@@ -254,6 +254,16 @@ opens would be by far the largest thing in the file — and the lead is a
 
 Cost is linear: `--repeat 3` on the full suite is three suites (the last one,
 `20261012-161940`, cost $11.83). It is not a default.
+
+**Every run that calls the model states its budget** (`--max-cost-usd`), the
+amount approved for it. A run whose estimate does not fit refuses to start; a
+running one launches no new sample once the budget is spent or the
+subscription's five-hour window is at 90% (each reply reports that window);
+and each agent call carries its own `--max-budget-usd` ceiling against a
+runaway. Samples in flight always finish with their judge — a sample cut
+short is money spent for no verdict. A run stopped that way is `CAPPED`:
+recorded in `run.json`, exit code 2, never a baseline. Details in
+[GUIA.md](GUIA.md#presupuesto).
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
 

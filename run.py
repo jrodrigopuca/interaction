@@ -7,12 +7,18 @@ installed agents and asserts the contracts they claim: hard rules, handoffs,
 inherited reasoning, language register, and routing.
 
 Usage:
-  ./run.py                          # every scenario
-  ./run.py --category hard-rule     # one category
-  ./run.py --only qa-no-product     # one scenario (substring match)
-  ./run.py --repeat 5               # five samples each; disagreement is a result
-  ./run.py --list                   # show scenarios without running
   ./run.py --dry-run                # show what would run, and the cost estimate
+  ./run.py --list                   # show scenarios without running
+  ./run.py --max-cost-usd 13        # every scenario, spending at most $13
+  ./run.py --category hard-rule --max-cost-usd 2
+  ./run.py --only qa-no-product --max-cost-usd 1
+  ./run.py --repeat 5 --max-cost-usd 65   # five samples each; disagreement is a result
+
+--max-cost-usd is required for anything that calls the model: the amount that
+was approved for the run. It does not start if its estimate exceeds that, it
+launches no new sample once that is spent or the subscription's five-hour
+window is at 90%, and every sample carries its own ceiling (--max-budget-usd).
+A run stopped that way is CAPPED: kept, reported, never a baseline.
 
 Each scenario costs a real API call (~$0.10-0.20, because every `claude -p`
 opens a fresh session and pays cache creation on the agent's whole prompt), so
@@ -35,7 +41,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -110,9 +116,24 @@ TIMEOUT = 300            # single-agent scenarios (--timeout)
 DELEGATE_TIMEOUT = 1800  # scenarios with delegate: true (--delegate-timeout)
 
 WS_ROOT = Path(tempfile.gettempdir())   # set to <run>/workspaces in main()
-COST_PER_CALL = 0.10    # --dry-run estimates only. Recalibrated 2026-09-04 with the
-                        # sonnet agent / safe-mode opus judge defaults: a cold agent
-                        # call ~$0.17, a judge ~$0.02-0.03, tool-heavy agents more.
+# What one sample costs, agent and judge together, by kind of scenario. For the
+# estimate --dry-run shows and the refusal to start a run that would not fit
+# its budget. Measured on run 20261012-161940 (83 scenarios, Sonnet): median
+# $0.135 without tools, $0.157 with them, $11.83 for the suite. A scenario that
+# delegates or executes code is another order: $0.43 to $6.86 per sample in the
+# build-quality runs 20260806-215908 and 20260806-225038.
+EST_SINGLE = 0.15
+EST_HEAVY = 3.00
+# The ceiling handed to `claude -p --max-budget-usd` for one sample: it stops a
+# runaway agent, and must never stop a normal one, because a sample cut short
+# is money spent for no verdict. Hence far above the worst seen — $0.40 for a
+# single agent over the last 25 runs, $6.86 for a heavy one.
+SAMPLE_BUDGET_SINGLE = 1.00
+SAMPLE_BUDGET_HEAVY = 12.00
+# No new sample is launched once the five-hour window of the subscription is
+# this used up (decided with the user on 2026-10-13). A full suite takes 15 to
+# 19 points of it: run 20261012-131428 ended at 97%.
+QUOTA_STOP = 0.90
 
 # Two independent model choices, because they answer different questions.
 #
@@ -160,6 +181,19 @@ class Scenario:
     @property
     def is_routing(self) -> bool:
         return self.category == "routing"
+
+    @property
+    def heavy(self) -> bool:
+        """Delegates or executes code: an order of magnitude dearer per sample."""
+        return self.delegate or bool(self.execute)
+
+    @property
+    def estimate(self) -> float:
+        return EST_HEAVY if self.heavy else EST_SINGLE
+
+    @property
+    def sample_budget(self) -> float:
+        return SAMPLE_BUDGET_HEAVY if self.heavy else SAMPLE_BUDGET_SINGLE
 
     @property
     def limit(self) -> int:
@@ -273,6 +307,7 @@ class Reply:
     transcript: str = ""      # every text turn the agent wrote, in order
     model: str = ""           # the model that ACTUALLY answered (init event)
     output_style: str = ""    # host output style in force (init event)
+    quota: dict = None        # subscription windows after this call; see quota_of
 
     @property
     def graded(self) -> str:
@@ -284,11 +319,29 @@ class Reply:
         return self.transcript or self.text
 
 
+def quota_of(events: list):
+    """The subscription's usage windows, as the last rate_limit_event of a
+    call reports them: {"five_hour": 0.11, "seven_day": 0.22, "resets": {...}}
+    with utilization as a fraction. None when the call reported none — an API
+    key, or a call that failed before any response."""
+    info = None
+    for ev in events:
+        if ev.get("type") == "rate_limit_event":
+            info = ev.get("rate_limit_info") or info
+    windows = (info or {}).get("unifiedWindows") or {}
+    if not windows:
+        return None
+    out = {k: w.get("utilization") for k, w in windows.items()
+           if isinstance(w, dict) and w.get("utilization") is not None}
+    out["resets"] = {k: w.get("resetsAt") for k, w in windows.items() if isinstance(w, dict)}
+    return out
+
+
 def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
         cwd: Path = None, allow: str = "", deny: str = "",
         safe_mode: bool = False, system: str = "", tools: str = None,
-        neutral: bool = False) -> Reply:
+        neutral: bool = False, max_budget: float = 0.0) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -323,6 +376,8 @@ def ask(prompt: str, agent: str = "", model: str = "",
         # REPLACES Claude Code's default system prompt (~37k tokens, paid as a
         # cache write on every fresh session). The judge needs a paragraph.
         cmd += ["--system-prompt", system]
+    if max_budget:
+        cmd += ["--max-budget-usd", f"{max_budget:.2f}"]
     if tools is not None:
         # "" disables every built-in tool. Variadic like the tool flags above,
         # so it must sit right before the `--` that ends flag parsing.
@@ -341,12 +396,16 @@ def ask(prompt: str, agent: str = "", model: str = "",
                               env=env)
     except subprocess.TimeoutExpired:
         return Reply(text="", error=f"timed out after {limit}s")
-    if proc.returncode != 0:
-        return Reply(text="", error=f"exit {proc.returncode}: {proc.stderr.strip()[:200]}")
+    return parse_stream(proc.stdout, proc.returncode, proc.stderr)
 
+
+def parse_stream(stdout: str, returncode: int = 0, stderr: str = "") -> Reply:
+    """The stream is read even when the CLI exits non-zero: a call stopped by
+    --max-budget-usd spent its money, and the run's own budget has to count it."""
     events, text, cost, ms = [], "", 0.0, 0
     model = style = ""
-    for line in proc.stdout.splitlines():
+    subtype = ""
+    for line in stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
             continue
@@ -362,12 +421,24 @@ def ask(prompt: str, agent: str = "", model: str = "",
             model, style = ev.get("model", "") or "", ev.get("output_style", "") or ""
         if ev.get("type") == "result":
             text = ev.get("result", "") or text
-            cost = ev.get("total_cost_usd", 0.0)
+            cost = ev.get("total_cost_usd", 0.0) or 0.0
             ms = ev.get("duration_ms", 0)
+            subtype = ev.get("subtype", "") or ""
+    quota = quota_of(events)
+    if subtype == "error_max_budget_usd":
+        # Not a verdict on the agent: the sample hit its own ceiling.
+        return Reply(text="", cost=cost, ms=ms, events=events, model=model,
+                     output_style=style, quota=quota,
+                     error=f"budget: the sample hit its --max-budget-usd ceiling (${cost:.2f} spent)")
+    if returncode != 0:
+        return Reply(text="", cost=cost, events=events, quota=quota,
+                     error=f"exit {returncode}: {stderr.strip()[:200]}")
     if not text:
-        return Reply(text="", events=events, error="no result event in stream")
+        return Reply(text="", cost=cost, events=events, quota=quota,
+                     error="no result event in stream")
     return Reply(text=text.strip(), cost=cost, ms=ms, events=events,
-                 transcript=transcript_of(events, text), model=model, output_style=style)
+                 transcript=transcript_of(events, text), model=model, output_style=style,
+                 quota=quota)
 
 
 def transcript_of(events: list, final: str) -> str:
@@ -869,6 +940,63 @@ class Result:
     def cost(self) -> float:
         return self.reply.cost + self.judge_cost
 
+    @property
+    def quota(self):
+        return self.reply.quota
+
+
+class Gate:
+    """Whether another sample may be launched (B-044).
+
+    Two stops, checked before every launch and never during one: the run's
+    budget (`--max-cost-usd`, what the user approved) and the subscription's
+    five-hour window (QUOTA_STOP). A sample already running always finishes,
+    judge included — cutting it would be money spent for no verdict — so the
+    overshoot is bounded by the samples in flight, at most --jobs of them."""
+
+    def __init__(self, max_cost: float, quota_stop: float = QUOTA_STOP):
+        self.max_cost, self.quota_stop = max_cost, quota_stop
+        self.spent = 0.0
+        self.quota = None
+        self.stopped = ""          # "", "budget" or "quota"
+
+    def record(self, cost: float, quota) -> None:
+        self.spent += cost or 0.0
+        if quota:
+            self.quota = quota
+
+    def allows(self) -> bool:
+        if self.spent >= self.max_cost:
+            self.stopped = "budget"
+        elif (self.quota or {}).get("five_hour", 0) >= self.quota_stop:
+            self.stopped = "quota"
+        return not self.stopped
+
+
+def dispatch(tasks: list, jobs: int, gate: Gate, run) -> list:
+    """Run `run(task)` over `tasks`, at most `jobs` at once, asking `gate`
+    before each launch. Returns the results in task order, only for the tasks
+    that were launched; once the gate closes, the rest never start."""
+    results = {}
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        pending, nxt = {}, 0
+
+        def fill():
+            nonlocal nxt
+            while len(pending) < jobs and nxt < len(tasks) and gate.allows():
+                pending[pool.submit(run, tasks[nxt])] = nxt
+                nxt += 1
+
+        fill()
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for f in done:
+                i = pending.pop(f)
+                results[i] = f.result()
+                gate.record(results[i].cost, results[i].quota)
+            fill()
+    return [results[i] for i in sorted(results)]
+
 
 def make_workspace(sc: Scenario) -> Path:
     """A fresh seeded directory for one sample, kept with the run.
@@ -988,7 +1116,8 @@ def run_one(sc: Scenario) -> Result:
     ws = make_workspace(sc)
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
-                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=NEUTRAL)
+                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=NEUTRAL,
+                max_budget=sc.sample_budget)
     if reply.error:
         return Result(sc, reply, workspace=str(ws or ""))
 
@@ -1206,10 +1335,16 @@ def applicability_data(scenarios: list, model: str) -> list:
             continue   # an experiment's verdicts describe the experiment, not the catalog
         if meta.get("catalog_changed"):
             continue   # verdicts from two catalog versions describe neither (B-052)
+        # A capped run (B-044) still holds whole verdicts, but a scenario its
+        # budget stopped short of --repeat samples was never measured as asked.
+        budget = meta.get("budget") or {}
+        short = budget.get("repeat", 1) if budget.get("capped") else 0
         for line in trace.read_text().splitlines():
             try:
                 rec = json.loads(line)
             except ValueError:
+                continue
+            if short and (rec.get("repeat") or 1) < short:
                 continue
             latest.setdefault(rec.get("id"), (d.name, rec, meta))
     out = []
@@ -1437,6 +1572,22 @@ def report(aggs: list, outdir: Path, elapsed: float):
     return 1 if bad else 0
 
 
+def estimate(scenarios: list, repeat: int) -> float:
+    return sum(s.estimate for s in scenarios) * repeat
+
+
+def budget_record(gate: Gate, planned: int, ran: int, repeat: int) -> dict:
+    """What run.json keeps of the budget. `capped` is its own word on purpose:
+    `partial` already means two other things in viz.py."""
+    capped = ran < planned
+    return {"max_cost_usd": gate.max_cost, "cost_usd": round(gate.spent, 4),
+            "overshoot_usd": round(max(0.0, gate.spent - gate.max_cost), 4),
+            "capped": capped, "stopped_by": gate.stopped if capped else None,
+            "samples_planned": planned, "samples_run": ran, "repeat": repeat,
+            "five_hour": (gate.quota or {}).get("five_hour"),
+            "seven_day": (gate.quota or {}).get("seven_day")}
+
+
 def main():
     global AGENT_MODEL, JUDGE_MODEL, TIMEOUT, DELEGATE_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -1455,6 +1606,11 @@ def main():
                     help="for each scenario, does its latest verdict still apply to "
                          "what is installed now? (no model calls)")
     ap.add_argument("--jobs", type=int, default=4, help="parallel calls (default 4)")
+    ap.add_argument("--max-cost-usd", type=float, metavar="USD", default=None,
+                    help="REQUIRED for a run that calls the model: the most it may spend. "
+                         "No new sample starts once it is reached; samples in flight "
+                         "finish, so the overshoot is at most --jobs samples. A run "
+                         "whose estimate exceeds it does not start")
     ap.add_argument("--repeat", type=int, default=1, metavar="N",
                     help="take N samples of each scenario (default 1). A "
                          "single sample cannot tell a stable pass from a lucky "
@@ -1525,9 +1681,23 @@ def main():
         calls = (len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
                  ) * args.repeat
         sampled = f" × {args.repeat} samples" if args.repeat > 1 else ""
-        print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · "
-              f"~${calls * COST_PER_CALL:.2f}")
+        est = estimate(scenarios, args.repeat)
+        print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · ~${est:.2f}")
+        if args.max_cost_usd is not None:
+            fits = "fits" if est <= args.max_cost_usd else "does NOT fit — the run would refuse to start"
+            print(f"budget ${args.max_cost_usd:.2f}: {fits}")
         return 0
+
+    if args.max_cost_usd is None:
+        sys.exit("a run that calls the model needs --max-cost-usd USD: the amount "
+                 "that was approved for it (see --dry-run for the estimate)")
+    if args.max_cost_usd <= 0:
+        sys.exit("--max-cost-usd must be above zero")
+    est = estimate(scenarios, args.repeat)
+    if est > args.max_cost_usd:
+        sys.exit(f"the estimate (${est:.2f}) exceeds --max-cost-usd "
+                 f"(${args.max_cost_usd:.2f}): this run would be cut short. Raise the "
+                 f"budget or select fewer scenarios")
 
     global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1571,12 +1741,14 @@ def main():
         log_partial(outdir, sc, r)
         return r
 
-    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        flat = list(pool.map(run_and_log, tasks))
+    gate = Gate(args.max_cost_usd)
+    flat = dispatch(tasks, args.jobs, gate, run_and_log)
     by_id = {}
     for r in flat:
         by_id.setdefault(r.sc.id, []).append(r)
-    aggs = [Aggregate(sc, by_id[sc.id]) for sc in scenarios]
+    # A scenario the gate never reached has no samples and no verdict.
+    aggs = [Aggregate(sc, by_id[sc.id]) for sc in scenarios if sc.id in by_id]
+    stamp["budget"] = budget_record(gate, len(tasks), len(flat), args.repeat)
     persist(aggs, outdir)
     (outdir / "partial.jsonl").unlink(missing_ok=True)
     # What actually ran, known only after the calls: aliases resolved, styles seen.
@@ -1588,6 +1760,16 @@ def main():
     changed = close_stamp(stamp, manifest)
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     code = report(aggs, outdir, time.time() - t0)
+    b = stamp["budget"]
+    print(f"spent ${b['cost_usd']:.2f} of ${b['max_cost_usd']:.2f}"
+          + (f" · five-hour window at {b['five_hour']:.0%}" if b.get("five_hour") is not None else ""))
+    if b["capped"]:
+        why = ("its budget" if b["stopped_by"] == "budget"
+               else f"the five-hour window reaching {QUOTA_STOP:.0%}")
+        print(f"\nCAPPED RUN: stopped by {why} after {b['samples_run']} of "
+              f"{b['samples_planned']} samples (overshoot ${b['overshoot_usd']:.2f}). "
+              f"It is never a baseline; {len(scenarios) - len(aggs)} scenario(s) did not run.")
+        code = code or 2
     if changed:
         end = stamp["catalog_end"] or {}
         print(f"\nINVALID RUN: the catalog was reinstalled while it ran "
