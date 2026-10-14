@@ -5,3 +5,6 @@ runs/
 runs-smoke/
 # Runs made with another harness version (old format; viz.py does not read them).
 runs-experiments/
+
+# Generated from labels/candidates.jsonl by ./labels.py page (and ~200 KB).
+labels/label.html

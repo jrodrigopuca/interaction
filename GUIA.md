@@ -200,6 +200,34 @@ por rutina.
 
 ---
 
+## `labels.py` — calibrar al juez (B-039)
+
+Todo veredicto con `judge:` depende de un LLM. `labels.py` mide cuánto le
+acierta contra una persona, sin volver a correr ningún agente: usa las
+muestras guardadas en `runs/`, que tienen el criterio y los eventos de los que
+se reconstruye lo que leyó el juez.
+
+```bash
+./labels.py pick                       # elige ~60 candidatas y fija la reserva (una sola vez)
+./labels.py page                       # escribe labels/label.html
+open labels/label.html                 # etiquetás: PASS, FAIL o AMBIGUA, sin ver al juez
+./labels.py import ~/Downloads/labels.json
+./labels.py rejudge --judge-model opus --max-cost-usd 1
+./labels.py rejudge --judge-model sonnet --max-cost-usd 1
+./labels.py report                     # TPR y TNR, desarrollo y reserva por separado
+```
+
+- **No abras `labels/judge-at-pick.jsonl` antes de etiquetar:** tiene los
+  veredictos originales. La página no los muestra a propósito.
+- **La reserva (40 %) se fija en `pick` y no se toca.** Los desacuerdos del 60 %
+  restante sirven para corregir criterios; TPR y TNR valen solo sobre la reserva.
+- **TNR es la que importa:** de lo que de verdad falla, cuánto reprueba el juez.
+  Una TNR baja pinta el catálogo de verde. El umbral de B-039 es 0,90.
+- Cada etiqueta queda atada al hash del criterio: si un criterio cambia
+  después, `report` avisa que esa etiqueta se hizo contra otro texto.
+- Las etiquetas viven en el navegador hasta que exportás. Si cerrás a mitad de
+  camino, al volver a abrir la página seguís donde quedaste.
+
 ## Anatomía de un escenario
 
 Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:

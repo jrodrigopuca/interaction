@@ -1502,6 +1502,12 @@ def applicability(scenarios: list, model: str) -> int:
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
+def criterion_sha(criterion) -> str:
+    """Short hash of a judge criterion, so a label and a verdict can be tied to
+    the exact text they were made against. None without a criterion."""
+    return hashlib.sha256(criterion.encode()).hexdigest()[:12] if criterion else None
+
+
 def trial_record(r: Result) -> dict:
     """One sample, without its event stream — see persist() for why."""
     return {
@@ -1529,6 +1535,10 @@ def trial_record(r: Result) -> dict:
         # verdict answers (see observe_results).
         "observed": r.observed or None,
         "cut_verdict": r.cut_verdict or None,
+        # What the judge read and against which criterion (B-039): re-judging
+        # needs the same input, and the reply alone is not it.
+        "graded": r.reply.graded if "judge" in r.sc.assertions else None,
+        "criterion_sha": criterion_sha(r.sc.assertions.get("judge")),
     }
 
 
