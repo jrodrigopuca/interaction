@@ -16,7 +16,7 @@ this repo does.
 
 ./viz.py --index                # every run, one page → runs/index.html
 ./viz.py runs/<timestamp>       # one run → report.html
-./project.py "task"             # give them real work, record the tree
+./project.py "task" --max-cost-usd 10   # give them real work, record the tree
 ```
 
 Three tools, three questions: `run.py` asks *did it honour its contract*,
@@ -483,8 +483,8 @@ is an anecdote. A scenario that flips was never passing — it was sampling.
 task to an orchestrator and records the whole tree.
 
 ```bash
-./project.py "Necesitamos checkout con pagos"              # does it delegate on its own?
-./project.py "Diseñá el plan de checkout" --delegate       # can it, when asked?
+./project.py "Necesitamos checkout con pagos" --max-cost-usd 10              # does it delegate on its own?
+./project.py "Diseñá el plan de checkout" --delegate --max-cost-usd 10       # can it, when asked?
 ./viz.py runs/<timestamp>                                  # watch it
 ```
 

@@ -174,11 +174,16 @@ mismos escenarios en varias corridas, veredicto contra veredicto.
 ## `project.py` — una tarea real, varios agentes
 
 ```bash
-./project.py "Necesito un checkout con pagos"        # se lo da a eng-manager, el enrutador
-./project.py "..." --agent stark                     # a otro agente
-./project.py "..." --delegate                        # le pide explícitamente que delegue
-./project.py "..." --model opus
+./project.py "Necesito un checkout con pagos" --max-cost-usd 10   # se lo da a eng-manager, el enrutador
+./project.py "..." --agent stark --max-cost-usd 10                # a otro agente
+./project.py "..." --delegate --max-cost-usd 10                   # le pide explícitamente que delegue
+./project.py "..." --model opus --max-cost-usd 20
 ```
+
+`--max-cost-usd` es obligatorio: va a la llamada como `--max-budget-usd`, y
+una tarea con delegación llegó a costar 6,86 en una muestra. Si la llamada se
+corta por ese tope, o falla por otro motivo, la traza se escribe igual, como
+`ERROR` y con lo que gastó.
 
 `run.py` prueba contratos de a un agente. Esto hace lo otro: entrega un trabajo
 multiespecialidad a un orquestador y graba el árbol completo, quién fue

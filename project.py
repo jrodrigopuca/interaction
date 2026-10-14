@@ -5,9 +5,14 @@
 hands a genuine, multi-specialty piece of work to an orchestrator and captures
 the whole tree — who got spawned, what each one did, what it cost.
 
-  ./project.py "Necesito un checkout con pagos"
-  ./project.py "..." --agent stark
-  ./project.py "..." --delegate           # ask explicitly for delegation
+  ./project.py "Necesito un checkout con pagos" --max-cost-usd 10
+  ./project.py "..." --agent stark --max-cost-usd 10
+  ./project.py "..." --delegate --max-cost-usd 10   # ask explicitly for delegation
+
+--max-cost-usd is required (B-060): one task with delegation cost up to $6.86
+when measured, and it is handed to the call as `claude -p --max-budget-usd`.
+A call stopped by it, or failed in any other way, is still recorded with what
+it spent.
 
 The `--delegate` flag exists because it separates two different questions, and
 conflating them would hide the answer to both:
@@ -44,6 +49,26 @@ DELEGATION_NUDGE = (
 
 
 
+def build_record(reply, agent: str, task: str, stamp: str, tree: dict) -> dict:
+    """The trace line, also for a failed call: its cost was spent all the same."""
+    return {
+        "id": f"project-{stamp}",
+        "category": "project",
+        "agent": agent,
+        "prompt": task,
+        # Nothing is asserted here; this is observation. A call that failed —
+        # its budget, a timeout — is the one thing that is not.
+        "status": "ERROR" if reply.error else "PASS",
+        "failures": [],
+        "judge": None,
+        "cost_usd": round(reply.cost, 4),
+        "duration_ms": reply.ms,
+        "reply": reply.text,
+        "error": reply.error,
+        "delegated_to": tree,
+        "events": reply.events,
+    }
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -54,7 +79,12 @@ def main():
                     help="explicitly ask for Task delegation instead of observing "
                          "whether it happens unprompted")
     ap.add_argument("--model", default="", help="model for the run")
+    ap.add_argument("--max-cost-usd", type=float, metavar="USD", required=True,
+                    help="the most this task may spend, approved beforehand; passed to "
+                         "the call as --max-budget-usd")
     args = ap.parse_args()
+    if args.max_cost_usd <= 0:
+        sys.exit("--max-cost-usd must be above zero")
 
     prompt = args.task + (DELEGATION_NUDGE if args.delegate else "")
     mode = "asked to delegate" if args.delegate else "observing"
@@ -62,35 +92,22 @@ def main():
 
     t0 = time.time()
     reply = harness.ask(prompt, agent=args.agent, model=args.model,
-                        forward_subagents=True)
+                        forward_subagents=True, max_budget=args.max_cost_usd)
     elapsed = time.time() - t0
-
-    if reply.error:
-        sys.exit(f"failed: {reply.error}")
 
     tree = harness.delegation_tree(reply.events)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     outdir = RUNS / stamp
     outdir.mkdir(parents=True, exist_ok=True)
-    record = {
-        "id": f"project-{stamp}",
-        "category": "project",
-        "agent": args.agent,
-        "prompt": args.task,
-        "status": "PASS",          # nothing is asserted here; this is observation
-        "failures": [],
-        "judge": None,
-        "cost_usd": round(reply.cost, 4),
-        "duration_ms": reply.ms,
-        "reply": reply.text,
-        "error": "",
-        "delegated_to": tree,
-        "events": reply.events,
-    }
+    record = build_record(reply, args.agent, args.task, stamp, tree)
     (outdir / "trace.jsonl").write_text(json.dumps(record, ensure_ascii=False) + "\n")
     (outdir / f"project-{stamp}.md").write_text(
         f"# {args.task}\n\n- agent: `{args.agent}`\n- mode: {mode}\n"
         f"- cost: ${reply.cost:.3f} · {reply.ms} ms\n\n## Reply\n\n{reply.text}\n")
+
+    if reply.error:
+        print(f"  failed: {reply.error}\n  ${reply.cost:.2f} spent · {elapsed:.0f}s → {outdir}")
+        return 2 if reply.error.startswith("budget") else 1
 
     if tree:
         print(f"  delegated to {len(tree)} subagent(s):")
