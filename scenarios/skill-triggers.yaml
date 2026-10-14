@@ -1297,6 +1297,10 @@
   category: skill-trigger
   agent: stark
   manual: true
+  # Known edge: loaded the skill in 20261014-092555 ("MVP" weighs), and the
+  # reply built around the loop those users already repeat. A mobile app is a
+  # new surface nobody uses yet, even with the users existing; read the reply
+  # before calling a load here a regression.
   # Near-miss side: "MVP", new repo and new team are the bait; the app is for 15.000 users who already use the web product.
   prompt: |
     Producto nos pidió un "MVP" de la app mobile: repo nuevo, equipo nuevo,
