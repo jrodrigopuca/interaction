@@ -265,6 +265,56 @@ Reglas para escribir uno bueno, sacadas de errores reales:
 
 No lo pongas en CI: se corre cuando cambian agentes, no en cada push.
 
+## Regresiones a pedido
+
+Algunas pruebas no entran en la suite completa (`manual: true`): son caras, o
+miden algo que cambia poco. Se corren a mano cuando hay motivo para sospechar
+que algo se rompió.
+
+| Categoría | Qué pregunta | Cuándo correrla | Costo (corrida) |
+|---|---|---|---|
+| `skill-trigger` | ¿Cada agente carga su skill cuando corresponde, y no en un casi-acierto? | Cambió la `description:` de una skill, el CORE, el instalador, o el host (versión de Claude Code) | USD 14,10, 120 escenarios (`20261014-003338`) |
+| `build-quality` | ¿Revisar o delegar mejora el código que se entrega? | Muy rara vez: la pregunta ya está respondida (README) | USD 14,71 las tres ramas |
+
+### Cómo se corre
+
+1. Instalá la versión que querés medir y confirmá que está al día, desde
+   `local-agents/`: `./install.py --refresh` y después `./install.py --status`
+   (tiene que decir `up to date with the catalog`). Una corrida mide lo
+   instalado, no el repo.
+2. Mirá cuánto cuesta y si entra en el tope, sin gastar:
+   ```bash
+   ./run.py --dry-run --category skill-trigger --max-cost-usd 16
+   ```
+3. Corré solo lo que puede haber cambiado. Una skill:
+   `--only migrations`; un agente: `--only team-health,focus` (los ids son
+   `skill-<skill>-<trigger|near>-<n>`). Todo:
+   ```bash
+   ./run.py --category skill-trigger --max-cost-usd 16
+   ```
+
+### Cómo se lee
+
+- **Contra la línea base, no contra el 100 %.** Línea base en Sonnet: los 15
+  agentes cargan **59 de 60** disparos y evitan **58 de 60** casi-aciertos
+  (`20261014-003338` y `20261014-005306`). Una regresión es una caída contra
+  eso, en la misma skill.
+- **Un disparo perdido no siempre es un error.** Si la respuesta aplica el
+  método de la skill sin cargarla, el cuerpo del agente ya lo traía (pasó con
+  `skill-next-step-trigger-3`). Abrí la respuesta antes de tocar nada.
+- **Varias fallas seguidas del mismo agente suelen ser del instalador, no de
+  la descripción.** Así se encontró que visionary y eng-manager no podían
+  cargar skills: 0 de 8, porque su lista de herramientas no tenía `Skill`. Mirá
+  `tools_used` en la traza: si el agente buscó el archivo con `Glob`/`Read`, no
+  tiene `Skill`.
+- **Hay fronteras ambiguas conocidas**, comentadas en
+  `scenarios/skill-triggers.yaml`: `lh-focus` y `lh-brutal-critique` sobre un
+  roadmap, `lh-next-step` y `lh-decomposition`, `lh-discovery` y
+  `lh-stakeholders`, y `lh-zero-to-one` para un módulo "desde cero" en un
+  producto con usuarios. Una carga de más ahí no es una regresión.
+- **Para comparar con la corrida anterior:**
+  `./viz.py runs/<base> runs/<nueva> --compare`.
+
 ---
 
 ## Cosas que ya pasaron y conviene saber

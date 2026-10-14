@@ -264,6 +264,13 @@ runaway. Samples in flight always finish with their judge — a sample cut
 short is money spent for no verdict. A run stopped that way is `CAPPED`:
 recorded in `run.json`, exit code 2, never a baseline. Details in
 [GUIA.md](GUIA.md#presupuesto).
+
+**On-demand regressions.** Some categories are `manual: true`: out of the full
+suite, run by hand when there is reason to suspect a break. `skill-trigger`
+(does each agent load its skill when it should, and stay out of a near-miss?)
+is the one to reach for after a skill's `description:`, the CORE, the
+installer or the host changes; its baseline, cost and how to read a failure
+are in [GUIA.md](GUIA.md#regresiones-a-pedido).
 Reach for it when you changed something shared (the CORE, a skill every agent
 inherits) or when you don't trust one result.
 
