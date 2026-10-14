@@ -308,10 +308,11 @@ que algo se rompió.
   `tools_used` en la traza: si el agente buscó el archivo con `Glob`/`Read`, no
   tiene `Skill`.
 - **Hay fronteras ambiguas conocidas**, comentadas en
-  `scenarios/skill-triggers.yaml`: `lh-focus` y `lh-brutal-critique` sobre un
-  roadmap, `lh-next-step` y `lh-decomposition`, `lh-discovery` y
-  `lh-stakeholders`, y `lh-zero-to-one` para un módulo "desde cero" en un
-  producto con usuarios. Una carga de más ahí no es una regresión.
+  `scenarios/skill-triggers.yaml`: `lh-next-step` y `lh-decomposition`, `lh-discovery` y
+  `lh-stakeholders`, `lh-zero-to-one` para un módulo "desde cero" en un
+  producto con usuarios, y `lh-focus` como segunda skill junto a `lh-inspire`
+  ante "lanzamos y nadie la usó, ¿seguimos?". Una carga de más ahí no es una
+  regresión.
 - **Para comparar con la corrida anterior:**
   `./viz.py runs/<base> runs/<nueva> --compare`.
 

@@ -1422,6 +1422,11 @@
   category: skill-trigger
   agent: visionary
   manual: true
+  # Doubt after a failure is lh-inspire, which loaded in every sample. A known
+  # edge: "¿Seguimos?" brushes keep-or-kill, and lh-focus came in as a second
+  # skill in 2 of 4 samples after its trigger became "what to keep and what to
+  # cut" (0 of 2 before; 1 of 3 in --repeat 3, 20261014-091911). Read the reply
+  # before calling a focus load here a regression.
   prompt: |
     Lanzamos y nadie usó la app. El equipo está bajoneado. ¿Seguimos?
   assert:
@@ -1464,11 +1469,16 @@
   category: skill-trigger
   agent: visionary
   manual: true
-  # A demo, no plan word anywhere.
+  # A demo, no plan word anywhere. The demo is described in the prompt: the
+  # first version said "te paso el link" with no link, and visionary rightly
+  # refused to judge what it could not see (20261014-091525) — a scenario
+  # defect, not a miss.
   prompt: |
-    Te paso el link a la demo del asistente de viajes: le escribís a dónde
-    querés ir y te arma el itinerario día por día. Decime sin vueltas si
-    vale la pena.
+    Hicimos la demo del asistente de viajes. Le escribís "5 días en Lisboa,
+    poca plata, me gusta caminar" y en unos 10 segundos te devuelve un
+    itinerario día por día: barrios, un museo gratis por día y dónde comer
+    barato. No reserva nada, solo arma el plan. Para editarlo le volvés a
+    escribir. Decime sin vueltas si vale la pena.
   assert:
     expect_skills: [lh-brutal-critique]
 
