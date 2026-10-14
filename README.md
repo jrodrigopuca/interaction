@@ -276,6 +276,7 @@ installs into (Claude Code, opencode, Kiro, Codex, Antigravity), after a
 ./smoke.py                    # every host
 ./smoke.py --host codex       # one host (repeatable)
 ./smoke.py --free-only        # listings only, no model call
+./smoke.py --free-only --strict   # as CI runs it: ERROR and SKIP fail too
 ```
 
 Two calls per host, each on the user's own subscription for that host (Claude
@@ -291,6 +292,24 @@ opencode/big-pickle`) refuses, from `opencode run`, any agent with `deny`
 permissions — which is exactly the read tier — so that check needs a paid
 model. The host facts the installer relies on were measured on specific versions, and two hosts
 updated on the very day this was written.
+
+**What runs in CI and what only runs here.** The `smoke-free` workflow runs the
+free checks for **Claude Code** (`load`, `skill`, `read floor`) and
+**opencode** (`load`, `skill`) on every push, against the catalog's `main`,
+with both CLIs pinned in the workflow. No model is called and no credential
+exists there: Claude's init event arrives with `apiKeySource: "none"`
+(measured 2026-10-13). Everything else is local only:
+
+- **Kiro**, even its free `load`, because `kiro-cli agent list` refuses to run
+  without a login (2.29.1).
+- **Codex and Antigravity**, which have no free check: their `load` is the
+  agent naming itself in a reply.
+- **Every paid check** (`read tier`, `full tier`, and the reply-based `skill`),
+  because each one is a call on someone's subscription.
+
+The opencode `skill` check in CI sees only the project copy, because the
+runner has no global skills. Locally, opencode can pick a global copy of the
+same name instead (the check says which copy it saw).
 
 ## A neutral session
 

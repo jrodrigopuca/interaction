@@ -1,0 +1,41 @@
+# The free half of smoke.py against the REAL host CLIs: does what install.py
+# writes still load where each host looks? validate.py cannot see this; it only
+# reads the catalog's own files.
+#
+# No model is called and no credential exists here. Measured on 2026-10-13:
+# `claude -p` emits its init event (tools and skills) with apiKeySource "none",
+# and opencode lists agents and skills without a login. kiro-cli refuses even
+# `agent list` without one ("You are not logged in"), so kiro stays a local
+# check. CLI versions are pinned: a host release that moves a path is exactly
+# what this job exists to notice, and it must surface as a version bump here,
+# not as a red build nobody changed.
+name: smoke-free
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke-free:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: jrodrigopuca/local-agents
+          path: local-agents
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the host CLIs (pinned)
+        run: npm install -g @anthropic-ai/claude-code@2.1.296 opencode-ai@1.19.0
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests
+      - name: Free smoke checks
+        # --strict: an ERROR (a host that did not answer) or a SKIP (a CLI
+        # missing) fails the job too, instead of passing as green.
+        run: python3 smoke.py --free-only --strict --host claude --host opencode --catalog local-agents

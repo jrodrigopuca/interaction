@@ -18,6 +18,7 @@ Usage:
   ./smoke.py                       # every host, free checks and paid ones
   ./smoke.py --host kiro           # one host (repeatable)
   ./smoke.py --free-only           # only checks that call no model
+  ./smoke.py --free-only --strict  # as CI runs it: ERROR and SKIP fail too
 
 Each paid check is one short call on the user's own subscription for that host.
 An error that is not the catalog's — no login, no quota, a refused permission,
@@ -39,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RUNS = ROOT / "runs-smoke"
-READ_AGENT, FULL_AGENT, SKILL = "visionary", "senior-dev", "tradeoffs"
+READ_AGENT, FULL_AGENT, SKILL = "visionary", "senior-dev", "lh-tradeoffs"
 TIMEOUT = 240
 # Per-host model override, set from the command line. None → the host's own
 # default. Recorded in the report: a different model is a different measurement.
@@ -150,6 +151,8 @@ def free_checks(host: str, ws: Path) -> dict:
                                    else "no write tool in the allowlist")
     elif host == "opencode":
         r = sh(["opencode", "agent", "list"], ws, 120)
+        if r["rc"] != 0:
+            return {"load": error_of(r)}
         names = set(re.findall(r"^([a-z][a-z0-9-]*) \(", r["out"], re.M))
         out["load"] = result("PASS" if {READ_AGENT, FULL_AGENT} <= names else "FAIL",
                              f"{len(names)} agents listed")
@@ -174,6 +177,10 @@ def free_checks(host: str, ws: Path) -> dict:
             out["skill"] = result("ERROR", "could not parse `opencode debug skill`")
     elif host == "kiro":
         r = sh(["kiro-cli", "agent", "list"], ws, 120)
+        # Without a login kiro-cli refuses even to list agents (measured on
+        # 2.29.1): the host's error, not an empty catalog.
+        if r["rc"] != 0:
+            return {"load": error_of(r)}
         # kiro-cli prints the listing on STDERR (measured on 2.29.1), after a
         # warning per agent that also exists globally ("Using workspace version").
         text = re.sub(r"\x1b\[[0-9;]*m", "", (r["out"] or "") + (r["err"] or ""))
@@ -292,6 +299,9 @@ def main() -> int:
                     help="host to check (repeatable; default: all)")
     ap.add_argument("--free-only", action="store_true",
                     help="only the checks that call no model")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit non-zero on ERROR and SKIP too, not only FAIL (for CI, "
+                         "where a host that did not answer must not pass as green)")
     ap.add_argument("--catalog", type=Path, default=None)
     ap.add_argument("--opencode-model", metavar="PROVIDER/MODEL",
                     help="model for opencode (e.g. opencode/big-pickle, free); "
@@ -347,7 +357,8 @@ def main() -> int:
     statuses = [c["status"] for h in report["hosts"].values() for c in h["checks"].values()]
     print(" · ".join(f"{statuses.count(s)} {s}" for s in ("PASS", "FAIL", "ERROR", "SKIP")
                      if s in statuses) + f"  → {outdir}")
-    return 1 if "FAIL" in statuses else 0
+    bad = {"FAIL", "ERROR", "SKIP"} if args.strict else {"FAIL"}
+    return 1 if bad & set(statuses) else 0
 
 
 if __name__ == "__main__":
