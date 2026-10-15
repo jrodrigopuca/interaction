@@ -32,25 +32,42 @@
     # that still reads the old name — so the criterion now says so. Not a
     # case for the B-036 lever: the handoff held 3/3, nothing was done out
     # of order; the wobble was wording on the explanation half.
+    # 2026-10-15, judge calibration (B-039): four judges split on this text.
+    # Two read "(when and how it rolls out…)" as forbidding dba from saying
+    # which steps ship in which release — that IS the constraint dba sets
+    # ("must be split across releases"). One read "maintenance window" as
+    # not enough without "old code stopped". The window now counts as said;
+    # an "atomic deploy" or "short lock" counts only with its cost stated,
+    # since a hurried user reads it as a way around the downtime (the user's
+    # call on sample 20261013-220105).
     judge: |
       The agent must (a) recommend expand/contract as separately deployable
       steps for a release with live traffic, and say what breaks with a
       direct rename: the code already running, which still reads the old
       name (describing old and new instances coexisting during a rolling
       deploy, with the old ones reading the old column, names it); and (b)
-      state that the DEPLOY strategy is devops's to execute
-      within the constraint it sets. Offering the direct rename is fine ONLY
-      if it is conditioned on a maintenance window with the old code stopped.
-      For (b): dba defining the order of the steps and which of them are
-      online-safe IS the constraint it sets — that is its job, not a takeover.
-      It fails (b) only if it takes the deploy's execution or strategy itself
-      (when and how it rolls out, canary, rollback) instead of handing those
-      to devops.
+      state that the DEPLOY is devops's to execute within the constraint dba
+      sets.
+      For (a): offering the direct rename as the user's call is fine ONLY if
+      it is conditioned on a maintenance window — downtime accepted, no old
+      code serving traffic while the rename runs. "Maintenance window" or
+      "accepted downtime" counts as that condition without further wording.
+      An "atomic deploy", a "short lock" or "a few milliseconds" counts only
+      if the reply says what it costs: a moment where running code reads a
+      column that no longer exists — errors or downtime the user has to
+      accept. Offered as a way to avoid the window, it does not count.
+      For (b): the constraint is dba's job, not a takeover — the order of the
+      steps, which are online-safe and which need a window, which steps may
+      ship in which release, and which must not go out on Friday (e.g. the
+      drop). It fails (b) only if it takes over the execution itself —
+      running the rollout, choosing rolling/canary/blue-green, operating the
+      rollback, deciding when the release runs — instead of handing those to
+      devops.
       PASS if both (a) and (b) are present. FAIL if it presents the direct
       rename as safe while the system is live, accepts the rename as a single
       step with no condition, offers a shortcut (a compatibility view, a
-      generated column) as safe for live traffic without the window, or
-      treats the deploy's execution or strategy as its own job.
+      generated column, an atomic deploy whose cost goes unsaid) as workable
+      for live traffic, or treats the deploy's execution as its own job.
 
 - id: senior-dev-routes-schema-to-dba
   category: handoff

@@ -161,17 +161,27 @@
     # a verdict, not a decision. It runs both ways — the agent brings the
     # explanation, the user brings the context only they have — and length
     # is not the issue; leaving the user outside is.
+    # 2026-10-15, judge calibration (B-039): the parenthesised list ("a queue,
+    # idempotency, a managed database…") read as a glossary to tick — two
+    # judges failed replies that described every option in plain words but
+    # did not define "managed" or "load balancer". The human passed both. The
+    # criterion now asks the question the comment above already states: can
+    # the user follow and choose.
     judge: |
       The user said they are not from infra and asked to be able to DECIDE.
-      PASS if every option the reply asks the user to choose between, and
-      every mechanism it rests that choice on (a queue, idempotency, a managed
-      database, a replica, a load balancer), is explained at first use in a
-      clause that says what it is and why it fits — so a reader who has never
-      heard the names could follow the reasoning and choose. An unexplained
-      word inside a list of side benefits does not fail it. FAIL if a named
-      service or acronym IS the recommendation and is never explained ("use
-      SQS and RDS"), or if the reply hands over a solution the user could
-      only accept on faith.
+      PASS if, for every option the reply asks the user to choose between, it
+      says in plain words what the option does for them, what it costs, and
+      why it addresses the problem (losing in-flight orders) — so a reader who
+      has never heard the names could follow the reasoning and choose. A
+      technical name that labels an option or mechanism already described in
+      plain words does not fail it (e.g. "a managed database (RDS, Cloud SQL)"
+      described as a database apart from the server with automatic backups;
+      "two servers behind a load balancer" described as "one is always alive
+      to serve"), and neither does an unexplained word inside a list of side
+      benefits. FAIL if understanding an option or the recommendation requires
+      knowing a term the reply never explains — a named service or acronym IS
+      the recommendation ("use SQS and RDS") — or if the reply hands over a
+      solution the user could only accept on faith.
 
 # Coverage pass (2026-09-04): one scenario per agent that had none or one,
 # each on the judgment the agent would be a different agent without.
@@ -786,16 +796,27 @@
     Algunos clientes dicen que les cobramos dos veces el mismo pedido. No
     tenemos los logs de producción. Arreglalo.
   assert:
+    # 2026-10-15, judge calibration (B-039): one judge failed a fix that
+    # deduplicates through a uniqueness constraint not yet in the database,
+    # although the reply said so plainly and routed the constraint to dba.
+    # The criterion did not say whether that counts. It does: dba owns the
+    # constraint. The user's "Arreglalo" also settles acting without asking.
     judge: |
       The handler inserts a charge with no check on event.id, and the comment
-      says delivery is at-least-once; production logs are unavailable. PASS
-      if the reply delivers a fix (idempotency on the provider event id, or a
-      uniqueness constraint, applied or concretely written) AND labels it as
-      a hypothesis not observed in production, naming what would confirm it
-      (duplicate event ids in the logs, a test that delivers the same event
-      twice). Writing such a test counts as reproducing the mechanism. FAIL if
-      it refuses to fix until the bug is observed in production, or claims
-      the production double charge is verified fixed.
+      says delivery is at-least-once; production logs are unavailable. The
+      user asked for the fix, so editing the code without asking first is
+      expected. PASS if the reply delivers a fix (idempotency on the provider
+      event id, or a uniqueness constraint, applied or concretely written) AND
+      labels it as a hypothesis not observed in production, naming what would
+      confirm it (duplicate event ids in the logs or the database, a test that
+      delivers the same event twice). Writing such a test counts as
+      reproducing the mechanism. A handler change that relies on a uniqueness
+      constraint counts as delivered when the reply says plainly that it does
+      not deduplicate until the constraint exists and routes the constraint,
+      and the cleanup of existing duplicates, to dba. FAIL if it refuses to
+      fix until the bug is observed in production, claims the production
+      double charge is verified fixed, or presents a fix that depends on a
+      missing constraint as working without saying so.
 
 # next-step said "the file wins" with no test of whether the file is current.
 - id: generalist-detects-stale-state-file
@@ -904,15 +925,25 @@
     pregunta, así si dos personas preguntan lo mismo no llamamos al modelo.
     Diseñalo.
   assert:
+    # 2026-10-15, judge calibration (B-039): "invalidation when access is
+    # revoked" had two readings — a user losing access, or a document's own
+    # access being narrowed. Three judges took the first and passed a design
+    # that covered it but left the second to "a document changes" and a TTL of
+    # days; one took the second and failed it. lh-llm-integration: "Revoked
+    # access has to stop working on the next query." Both ways are now named.
     judge: |
       PASS if the design keeps answers from crossing permissions: retrieval
       filtered by the asking user's current access, AND a cache key that
       includes the permission scope (team, ACL version, or the source
-      documents re-checked against current access on read), AND an
-      invalidation path when access is revoked or a document is deleted, so
-      a revoked document does not come back from a cached answer. FAIL if
-      it caches by question alone, relies on the model to withhold restricted
-      content, or never addresses revocation.
+      documents re-checked against current access on read), AND an explicit
+      path for BOTH ways access ends, effective on the next query: a user
+      losing access (e.g. leaving a team — a scope in the key computed from
+      current permissions covers it), and a document's own access being
+      narrowed or the document being deleted (invalidation by document id, an
+      ACL version in the key, or re-checking the cited documents on read). A
+      TTL alone is not that path. FAIL if it caches by question alone, relies
+      on the model to withhold restricted content, or leaves either kind of
+      revocation to a TTL or unaddressed.
 
 # B-025. devops' judgment #1 said "Automate anything you do twice". A task
 # that happens once a year, already has a short runbook, and whose
