@@ -209,20 +209,48 @@ se reconstruye lo que leyó el juez.
 
 ```bash
 ./labels.py pick                       # elige ~60 candidatas y fija la reserva (una sola vez)
+./labels.py resplit --pin-dev ID ...   # rehace la partición por escenario, conserva las etiquetas
+./labels.py add --n 20                 # suma candidatas, primero las que probablemente fallen
 ./labels.py page                       # escribe labels/label.html
 open labels/label.html                 # etiquetás: PASS, FAIL o AMBIGUA, sin ver al juez
 ./labels.py import ~/Downloads/labels.json
 ./labels.py rejudge --judge-model opus --max-cost-usd 1
 ./labels.py rejudge --judge-model sonnet --max-cost-usd 1
+./labels.py rejudge --judge-cli codex --judge-model gpt-6-astra --max-calls 80 [--ambiguous]
 ./labels.py report                     # TPR y TNR, desarrollo y reserva por separado
 ```
 
 - **No abras `labels/judge-at-pick.jsonl` antes de etiquetar:** tiene los
   veredictos originales. La página no los muestra a propósito.
-- **La reserva (40 %) se fija en `pick` y no se toca.** Los desacuerdos del 60 %
-  restante sirven para corregir criterios; TPR y TNR valen solo sobre la reserva.
+- **La reserva se parte por escenario, no por muestra.** Corregir un criterio
+  cambia todas las muestras de ese escenario. Si un escenario tuviera muestras
+  de los dos lados, el arreglo hecho mirando dev se filtraría a la reserva.
+  Cada escenario queda de un lado, anotado en `labels/pick.json`.
+- **Lo que ya se leyó contra el juez va a dev** (`resplit --pin-dev`), porque
+  dejó de ser ciego.
+- **Qué mide cada cosa.** Comparar modelos de juez sin tocar criterios
+  (`rejudge` sobre el mismo texto que etiquetaste) no ajusta nada, y vale
+  sobre todas las etiquetas. Un criterio corregido mirando dev se mide solo en
+  la reserva. `report` separa las dos y avisa si el criterio cambió.
+- **`add` toma juicios PASS.** Todos los FAIL del juez entran en `pick`.
+  Primero suma corridas de versiones anteriores del agente, después escenarios
+  que ya reprobaste: ahí se esconde un juez indulgente.
 - **TNR es la que importa:** de lo que de verdad falla, cuánto reprueba el juez.
   Una TNR baja pinta el catálogo de verde. El umbral de B-039 es 0,90.
+- **Un juez de otra familia (`--judge-cli codex`).** Un juez Claude que evalúa
+  agentes que corren en Claude puede compartir sus puntos ciegos. Codex lee
+  el mismo texto que `run.judge` (`judge_prompt`). Como Codex tiene instalado
+  el catálogo, cada llamada saca la lista de skills y los bloques de
+  plugins, apps y entorno; reemplaza las instrucciones base por las del
+  juez; y corre en un directorio vacío, en solo lectura y sin guardar la
+  sesión. Antes de la corrida, `codex debug prompt-input` muestra qué vería
+  el modelo, y si aparece algo del catálogo la corrida se rechaza. Si el
+  juez igual usa una herramienta, ese veredicto queda como ERROR.
+- **El tope de Codex es por llamadas** (`--max-calls`), porque la CLI informa
+  tokens y no USD.
+- **`--ambiguous` deja que Codex responda AMBIGUOUS.** `report` lo cuenta como
+  abstención y no lo puntúa: un juez que se abstiene en todo lo difícil
+  sacaría una TNR linda con lo que queda.
 - Cada etiqueta queda atada al hash del criterio: si un criterio cambia
   después, `report` avisa que esa etiqueta se hizo contra otro texto.
 - Las etiquetas viven en el navegador hasta que exportás. Si cerrás a mitad de

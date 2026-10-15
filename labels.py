@@ -12,9 +12,16 @@ they were judged against and the event stream the reply is rebuilt from.
   ./labels.py rejudge --judge-model opus --max-cost-usd 1
   ./labels.py report                # TPR / TNR, dev and holdout apart
 
-The holdout is drawn once, at `pick`, with a recorded seed. Disagreements on
-the dev split are for fixing criteria; TPR and TNR are reported on the holdout
-only, so a criterion is never tuned against the very samples that score it.
+The holdout is drawn by SCENARIO, never by sample: fixing a criterion on dev
+changes every sample of that scenario, so a scenario with samples on both
+sides would leak the fix into the score. Each scenario's side is fixed once
+and recorded in labels/pick.json; a scenario whose disagreements were already
+read goes to dev (`resplit --pin-dev`), since it is no longer blind.
+Disagreements on dev are for fixing criteria; TPR and TNR are reported on the
+holdout only, so a criterion is never tuned against the samples that score it.
+
+  ./labels.py resplit --pin-dev ID ...   # move to by-scenario splits, keep labels
+  ./labels.py add --n 20                 # more candidates, likely failures first
 """
 from __future__ import annotations
 
@@ -23,7 +30,10 @@ import hashlib
 import html
 import json
 import random
+import re
+import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +45,7 @@ LABELS = ROOT / "labels"
 CANDIDATES = LABELS / "candidates.jsonl"   # what the labeller sees: no verdicts
 VERDICTS = LABELS / "judge-at-pick.jsonl"  # the original verdicts, kept apart
 HUMAN = LABELS / "labels.jsonl"            # one human label per candidate
+PICK = LABELS / "pick.json"                # seed, and each scenario's split
 PAGE = LABELS / "label.html"
 HOLDOUT_SHARE = 0.4
 CHOICES = ("PASS", "FAIL", "AMBIGUA")
@@ -110,13 +121,47 @@ def pick(samples: list, n: int, seed: int) -> list:
     chosen_pass = old[: want_pass // 3] + new
     chosen_pass = chosen_pass[:want_pass]
     chosen = fails[:n] + chosen_pass
-    for group in (fails[:n], chosen_pass):
-        k = round(len(group) * HOLDOUT_SHARE)
-        held = set(id(s) for s in rng.sample(group, k)) if group else set()
-        for s in group:
-            s["split"] = "holdout" if id(s) in held else "dev"
+    has_fail = {}
+    for s in chosen:
+        has_fail[s["id"]] = has_fail.get(s["id"], False) or s["_verdict"] == "FAIL"
+    splits = split_scenarios(has_fail, rng, set())
+    for s in chosen:
+        s["split"] = splits[s["id"]]
     rng.shuffle(chosen)            # the labeller must not meet all FAILs first
     return chosen
+
+
+def split_scenarios(has_fail: dict, rng: random.Random, pinned: set) -> dict:
+    """Scenario id -> "dev" | "holdout". Pinned ids go to dev; the rest are
+    drawn per group (holds a failure or not) so the holdout gets both kinds."""
+    out = {sid: "dev" for sid in has_fail if sid in pinned}
+    for group in (True, False):
+        ids = sorted(sid for sid, f in has_fail.items() if f is group and sid not in pinned)
+        held = set(rng.sample(ids, round(len(ids) * HOLDOUT_SHARE)))
+        out.update({sid: "holdout" if sid in held else "dev" for sid in ids})
+    return out
+
+
+def more(pool: list, chosen: list, human: list, n: int, rng: random.Random) -> list:
+    """Up to n samples not chosen yet, likeliest failures first: runs of an
+    earlier agent version, then scenarios a human has already failed, then the
+    rest. Every judge-FAIL is already in at `pick`, so these are judge-PASSes —
+    exactly where a lenient judge would hide."""
+    taken = {c["key"] for c in chosen}
+    seen = {(c["id"], hashlib.sha256(c["graded"].encode()).hexdigest()) for c in chosen}
+    failed = {h["key"].split("/", 1)[1] for h in human if h["label"] == "FAIL"}
+    tiers = ([], [], [])
+    for s in pool:
+        sig = (s["id"], hashlib.sha256(s["graded"].encode()).hexdigest())
+        if s["key"] in taken or sig in seen:
+            continue
+        seen.add(sig)
+        tiers[0 if s["old_version"] else 1 if s["id"] in failed else 2].append(s)
+    out = []
+    for t in tiers:
+        rng.shuffle(t)
+        out += t
+    return out[:n]
 
 
 def public(s: dict) -> dict:
@@ -223,7 +268,10 @@ def rates(rows: list) -> dict:
     """TPR: of the samples the human passed, how many the judge passed.
     TNR: of those the human failed, how many the judge failed — the one that
     matters most, since a judge that passes failures paints the catalog green.
-    AMBIGUA labels and missing verdicts are counted apart, never scored."""
+    AMBIGUA labels and missing verdicts are counted apart, never scored, and
+    so is a judge that abstains: a judge that says AMBIGUA on everything hard
+    would score a fine TNR on what is left, so `report` shows the abstentions
+    next to it."""
     tp = sum(1 for r in rows if r["label"] == "PASS" and r["judge"] == "PASS")
     fn = sum(1 for r in rows if r["label"] == "PASS" and r["judge"] == "FAIL")
     tn = sum(1 for r in rows if r["label"] == "FAIL" and r["judge"] == "FAIL")
@@ -231,7 +279,9 @@ def rates(rows: list) -> dict:
     return {"tpr": tp / (tp + fn) if tp + fn else None, "tnr": tn / (tn + fp) if tn + fp else None,
             "tp": tp, "fn": fn, "tn": tn, "fp": fp,
             "ambiguous": sum(1 for r in rows if r["label"] == "AMBIGUA"),
-            "no_verdict": sum(1 for r in rows if r["label"] != "AMBIGUA" and r["judge"] not in ("PASS", "FAIL"))}
+            "abstained": sum(1 for r in rows if r["label"] != "AMBIGUA" and r["judge"] == "AMBIGUA"),
+            "no_verdict": sum(1 for r in rows if r["label"] != "AMBIGUA"
+                              and r["judge"] not in ("PASS", "FAIL", "AMBIGUA"))}
 
 
 def cmd_pick(args) -> int:
@@ -242,14 +292,84 @@ def cmd_pick(args) -> int:
     chosen = pick(samples, args.n, args.seed)
     write_jsonl(CANDIDATES, [public(c) for c in chosen])
     write_jsonl(VERDICTS, [{"key": c["key"], "verdict": c["_verdict"], "why": c["_why"]} for c in chosen])
-    (LABELS / "pick.json").write_text(json.dumps({
+    PICK.write_text(json.dumps({
         "seed": args.seed, "n": len(chosen), "holdout_share": HOLDOUT_SHARE,
         "picked_at": datetime.now().isoformat(timespec="seconds"),
-        "pool": len(samples)}, indent=2))
+        "pool": len(samples), "split_by": "scenario",
+        "scenario_splits": {c["id"]: c["split"] for c in chosen}}, indent=2))
     cats = sorted({c["category"] for c in chosen})
     print(f"{len(chosen)} candidates from {len(samples)} judged samples · "
           f"{sum(c['split'] == 'holdout' for c in chosen)} held out · categories: {', '.join(cats)}")
     return 0
+
+
+def cmd_resplit(args) -> int:
+    """Re-draw dev/holdout by scenario over the candidates already chosen.
+    Labels are kept (they belong to a sample, not to a side); only the side
+    moves. A failure the human saw counts like one the judge saw."""
+    candidates, human = read_jsonl(CANDIDATES), read_jsonl(HUMAN)
+    if not candidates:
+        sys.exit("no candidates: run `./labels.py pick` first")
+    verdicts = {r["key"]: r["verdict"] for r in read_jsonl(VERDICTS)}
+    failed = {h["key"] for h in human if h["label"] == "FAIL"}
+    has_fail = {}
+    for c in candidates:
+        f = verdicts.get(c["key"]) == "FAIL" or c["key"] in failed
+        has_fail[c["id"]] = has_fail.get(c["id"], False) or f
+    unknown = set(args.pin_dev) - set(has_fail)
+    if unknown:
+        sys.exit(f"--pin-dev names no candidate scenario: {', '.join(sorted(unknown))}")
+    splits = split_scenarios(has_fail, random.Random(args.seed), set(args.pin_dev))
+    for c in candidates:
+        c["split"] = splits[c["id"]]
+    for h in human:
+        h["split"] = splits[h["key"].split("/", 1)[1]]
+    write_jsonl(CANDIDATES, candidates)
+    write_jsonl(HUMAN, human)
+    meta = json.loads(PICK.read_text()) if PICK.is_file() else {}
+    meta.update({"split_by": "scenario", "resplit_seed": args.seed,
+                 "resplit_at": datetime.now().isoformat(timespec="seconds"),
+                 "pinned_dev": sorted(args.pin_dev), "pinned_why": args.why,
+                 "scenario_splits": splits})
+    PICK.write_text(json.dumps(meta, indent=2))
+    summary(candidates, human)
+    return 0
+
+
+def cmd_add(args) -> int:
+    candidates, human = read_jsonl(CANDIDATES), read_jsonl(HUMAN)
+    meta = json.loads(PICK.read_text()) if PICK.is_file() else {}
+    if meta.get("split_by") != "scenario":
+        sys.exit("splits are still per sample: run `./labels.py resplit` first")
+    rng = random.Random(args.seed)
+    new = more(judged_samples(args.runs), candidates, human, args.n, rng)
+    if not new:
+        sys.exit("no judged sample left to add")
+    splits = meta["scenario_splits"]
+    fresh = {s["id"]: False for s in new if s["id"] not in splits}
+    splits.update(split_scenarios(fresh, rng, set()))
+    for s in new:
+        s["split"] = splits[s["id"]]
+    write_jsonl(CANDIDATES, candidates + [public(s) for s in new])
+    write_jsonl(VERDICTS, read_jsonl(VERDICTS) +
+                [{"key": s["key"], "verdict": s["_verdict"], "why": s["_why"]} for s in new])
+    meta.setdefault("added", []).append({"n": len(new), "seed": args.seed,
+                                         "at": datetime.now().isoformat(timespec="seconds")})
+    meta["n"] = len(candidates) + len(new)
+    PICK.write_text(json.dumps(meta, indent=2))
+    print(f"added {len(new)} ({sum(s['old_version'] for s in new)} from earlier agent versions)")
+    summary(candidates + new, human)
+    return 0
+
+
+def summary(candidates: list, human: list) -> None:
+    labelled = {h["key"]: h["label"] for h in human}
+    for split in ("dev", "holdout"):
+        part = [c for c in candidates if c["split"] == split]
+        got = [labelled[c["key"]] for c in part if c["key"] in labelled]
+        print(f"  {split:8} {len({c['id'] for c in part}):3} scenarios · {len(part):3} samples · "
+              f"labelled {len(got)} (FAIL {got.count('FAIL')}, PASS {got.count('PASS')}, "
+              f"AMBIGUA {got.count('AMBIGUA')})")
 
 
 def cmd_page(args) -> int:
@@ -272,28 +392,133 @@ def cmd_import(args) -> int:
     return 0
 
 
+# A judge from another model family (B-039): a Claude judge grading agents
+# that run on Claude may share their blind spots. Codex has the catalog
+# installed (48 lh-* skills in its skill roots), and a judge that can load
+# them grades the catalog with the catalog — so every call drops the skill
+# listing, the plugin/app/permission blocks and the environment, replaces the
+# base instructions with the judge's own, runs in an empty directory with a
+# read-only sandbox and no saved session, and any tool the judge still uses
+# turns that verdict into an ERROR. `codex debug prompt-input` with the same
+# flags shows what the model sees; codex_isolation() checks it before a run.
+CODEX_FLAGS = [
+    "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check",
+    "-s", "read-only",
+    "-c", "skills.include_instructions=false",
+    "-c", "include_permissions_instructions=false",
+    "-c", "include_apps_instructions=false",
+    "-c", "include_collaboration_mode_instructions=false",
+    "-c", "include_environment_context=false",
+    "-c", "features.plugins=false", "-c", "features.apps=false",
+    "-c", "features.recommended_plugins=false",
+]
+CODEX_QUIET_ITEMS = {"agent_message", "reasoning"}   # anything else is a tool
+
+
+def codex_flags(model: str, effort: str, preamble_file: Path) -> list:
+    return CODEX_FLAGS + ["-m", model, "-c", f"model_reasoning_effort={effort}",
+                          "-c", f"model_instructions_file={json.dumps(str(preamble_file))}"]
+
+
+def codex_isolation(flags: list) -> list:
+    """What the codex judge would see that it must not: catalog skill or agent
+    names. Renders the prompt locally; no model call."""
+    overrides = [x for i, f in enumerate(flags[:-1]) if f == "-c" for x in ("-c", flags[i + 1])]
+    with tempfile.TemporaryDirectory() as tmp:
+        r = subprocess.run(["codex", "debug", "prompt-input", *overrides, "probe"],
+                           cwd=tmp, capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        return [f"prompt-input failed: {r.stderr.strip()[:200]}"]
+    leaks = sorted(set(re.findall(r"\blh-[a-z][a-z-]+", r.stdout)))
+    leaks += [a for a in ("generalist", "eng-manager", "senior-dev") if a in r.stdout]
+    return leaks
+
+
+def codex_judge(criterion: str, reply: str, flags: list, ambiguous: bool) -> tuple:
+    """(verdict | None, why, tokens). The same text run.judge sends, read by
+    another family; the verdict comes from the last agent message."""
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            r = subprocess.run(["codex", "exec", "--json", *flags, "-"], cwd=tmp,
+                               input=run.judge_prompt(criterion, reply, ambiguous),
+                               capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            return None, "judge call failed: timeout", 0
+    text, tools, tokens, errors = "", [], 0, []
+    for line in r.stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        item = ev.get("item") or {}
+        if ev.get("type") == "item.completed":
+            if item.get("type") == "agent_message":
+                text = item.get("text", "")
+            elif item.get("type") not in CODEX_QUIET_ITEMS:
+                tools.append(item.get("type"))
+        elif ev.get("type") == "turn.completed":
+            u = ev.get("usage") or {}
+            tokens += (u.get("input_tokens") or 0) + (u.get("output_tokens") or 0)
+        elif ev.get("type") in ("error", "turn.failed"):
+            errors.append(str(ev.get("message") or ev.get("error"))[:200])
+    if tools:
+        return None, f"judge used tools {sorted(set(tools))}: not a clean verdict", tokens
+    if r.returncode or errors or not text:
+        return None, f"judge call failed: {'; '.join(errors) or r.stderr.strip()[:200]}", tokens
+    verdict, why = run.parse_verdict(text)
+    return verdict, why, tokens
+
+
 def cmd_rejudge(args) -> int:
     candidates = {c["key"]: c for c in read_jsonl(CANDIDATES)}
     keys = [r["key"] for r in read_jsonl(HUMAN)] if not args.all else list(candidates)
-    run.JUDGE_MODEL = args.judge_model
-    out, spent = [], 0.0
+    if args.judge_cli == "claude":
+        if args.max_cost_usd is None:
+            sys.exit("--max-cost-usd is required for a claude judge")
+        if args.ambiguous:
+            sys.exit("--ambiguous is codex-only for now: run.judge reads PASS or FAIL")
+        run.JUDGE_MODEL = args.judge_model
+        cap = f"${args.max_cost_usd:.2f}"
+    else:
+        if not args.max_calls:
+            sys.exit("--max-calls is required for a codex judge: the CLI reports tokens, not USD")
+        if args.judge_model in ("opus", "sonnet", "haiku"):
+            sys.exit("--judge-model names a codex model for --judge-cli codex (see `codex debug models`)")
+        preamble = LABELS / ".judge-preamble.txt"
+        preamble.write_text(run.JUDGE_PREAMBLE)
+        flags = codex_flags(args.judge_model, args.effort, preamble)
+        leaks = codex_isolation(flags)
+        if leaks:
+            sys.exit(f"the codex judge would see catalog content, refusing: {', '.join(leaks)}")
+        cap = f"{args.max_calls} calls"
+    out, spent, tokens = [], 0.0, 0
     for k in keys:
-        if spent >= args.max_cost_usd:
-            print(f"budget reached at ${spent:.2f}: {len(keys) - len(out)} left unjudged")
+        if (args.judge_cli == "claude" and spent >= args.max_cost_usd) or \
+                (args.judge_cli == "codex" and len(out) >= args.max_calls):
+            print(f"cap reached ({cap}): {len(keys) - len(out)} left unjudged")
             break
         c = candidates[k]
-        ok, why, cost = run.judge(c["criterion"], c["graded"])
-        spent += cost or 0.0
-        out.append({"key": k, "judge": {True: "PASS", False: "FAIL"}.get(ok, "ERROR"),
-                    "why": why, "criterion_sha": c["criterion_sha"]})
-    path = LABELS / f"rejudge-{args.judge_model}-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+        if args.judge_cli == "claude":
+            ok, why, cost = run.judge(c["criterion"], c["graded"])
+            spent += cost or 0.0
+            verdict = {True: "PASS", False: "FAIL"}.get(ok, "ERROR")
+        else:
+            v, why, t = codex_judge(c["criterion"], c["graded"], flags, args.ambiguous)
+            tokens += t
+            verdict = v or "ERROR"
+        out.append({"key": k, "judge": verdict, "why": why, "criterion_sha": c["criterion_sha"]})
+        print(f"  {len(out):3}/{len(keys)} {verdict:7} {k}", flush=True)
+    name = args.judge_model if args.judge_cli == "claude" else f"codex-{args.judge_model}"
+    path = LABELS / f"rejudge-{name}{'-amb' if args.ambiguous else ''}-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
     write_jsonl(path, out)
-    print(f"{path} · {len(out)} verdicts · ${spent:.2f}")
+    print(f"{path} · {len(out)} verdicts · " +
+          (f"${spent:.2f}" if args.judge_cli == "claude" else f"{tokens:,} tokens"))
     return 0
 
 
 def cmd_report(args) -> int:
-    human = {r["key"]: r for r in read_jsonl(HUMAN)}
+    side = {c["key"]: c["split"] for c in read_jsonl(CANDIDATES)}
+    human = {r["key"]: dict(r, split=side.get(r["key"], r.get("split"))) for r in read_jsonl(HUMAN)}
     files = [Path(f) for f in args.rejudge] or sorted(LABELS.glob("rejudge-*.jsonl"))
     if not files:
         sys.exit("no rejudge file: run `./labels.py rejudge` first")
@@ -303,13 +528,16 @@ def cmd_report(args) -> int:
                  "stale": verdicts[k]["criterion_sha"] != h["criterion_sha"]}
                 for k, h in human.items() if k in verdicts]
         print(f"\n{f.name}")
-        for split in ("dev", "holdout"):
-            part = [r for r in rows if r["split"] == split]
+        for split in ("dev", "holdout", "all"):
+            # "all" is honest only while no criterion was tuned on dev: the
+            # stale count below says when that stopped being true.
+            part = [r for r in rows if split == "all" or r["split"] == split]
             r = rates(part)
             fmt = lambda x: "—" if x is None else f"{x:.2f}"
             print(f"  {split:8} n={len(part):3}  TPR {fmt(r['tpr'])}  TNR {fmt(r['tnr'])}  "
                   f"(tp {r['tp']} fn {r['fn']} tn {r['tn']} fp {r['fp']}, "
-                  f"ambiguous {r['ambiguous']}, no verdict {r['no_verdict']})")
+                  f"ambiguous {r['ambiguous']}, judge abstained {r['abstained']}, "
+                  f"no verdict {r['no_verdict']})")
         stale = sum(1 for r in rows if r["stale"])
         if stale:
             print(f"  {stale} label(s) were made against a different criterion text")
@@ -324,17 +552,31 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=39)
     p.add_argument("--runs", type=Path, default=run.RUNS)
     p.add_argument("--force", action="store_true")
+    p = sub.add_parser("resplit", help="dev/holdout by scenario, keeping every label")
+    p.add_argument("--seed", type=int, default=39)
+    p.add_argument("--pin-dev", nargs="*", default=[], metavar="ID",
+                   help="scenarios whose disagreements were already read")
+    p.add_argument("--why", default="", help="recorded next to the pins")
+    p = sub.add_parser("add", help="more candidates, likeliest failures first")
+    p.add_argument("--n", type=int, default=20)
+    p.add_argument("--seed", type=int, default=40)
+    p.add_argument("--runs", type=Path, default=run.RUNS)
     sub.add_parser("page", help="write labels/label.html")
     p = sub.add_parser("import", help="merge labels exported from the page")
     p.add_argument("file")
     p = sub.add_parser("rejudge", help="judge the labelled samples again (calls the model)")
+    p.add_argument("--judge-cli", choices=("claude", "codex"), default="claude")
     p.add_argument("--judge-model", default=run.JUDGE_MODEL)
-    p.add_argument("--max-cost-usd", type=float, required=True)
+    p.add_argument("--max-cost-usd", type=float, help="the cap for a claude judge")
+    p.add_argument("--max-calls", type=int, help="the cap for a codex judge")
+    p.add_argument("--effort", default="medium", help="codex reasoning effort")
+    p.add_argument("--ambiguous", action="store_true",
+                   help="codex judge may answer AMBIGUOUS; report counts it as an abstention")
     p.add_argument("--all", action="store_true", help="every candidate, labelled or not")
     p = sub.add_parser("report", help="TPR and TNR per split")
     p.add_argument("rejudge", nargs="*")
     args = ap.parse_args()
-    return {"pick": cmd_pick, "page": cmd_page, "import": cmd_import,
+    return {"pick": cmd_pick, "resplit": cmd_resplit, "add": cmd_add, "page": cmd_page, "import": cmd_import,
             "rejudge": cmd_rejudge, "report": cmd_report}[args.cmd](args)
 
 

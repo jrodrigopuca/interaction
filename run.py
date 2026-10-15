@@ -620,9 +620,7 @@ def judge(criterion: str, reply: str) -> tuple:
     the same catalog would measure it against itself. An unparseable verdict is
     an ERROR, never a pass — a harness that fails toward green is worse than no
     harness."""
-    prompt = (f"CRITERION:\n{criterion}\n\nREPLY TO GRADE:\n---\n{reply}\n---\n\n"
-              "Answer with exactly PASS or FAIL on the first line, then one "
-              "sentence explaining why.")
+    prompt = judge_prompt(criterion, reply)
     # A grader is a one-shot classifier: no tools, no customizations, and its
     # own one-paragraph system prompt instead of Claude Code's. Measured on one
     # scenario: the default session made the Opus judge cost ~$0.40 (tool
@@ -633,18 +631,38 @@ def judge(criterion: str, reply: str) -> tuple:
         JUDGE_SEEN.add(r.model)
     if r.error:
         return None, f"judge call failed: {r.error}", r.cost
-    # The verdict is the first line that says something. Seen: a verdict
-    # preceded by a bare `<br>` line, which read as "no verdict" and turned a
-    # 3/3 into a flaky — the parser's mistake, not the agent's.
-    lines = [l.strip() for l in r.text.strip().splitlines()
+    verdict, why = parse_verdict(r.text)
+    if verdict == "PASS":
+        return True, why, r.cost
+    if verdict == "FAIL":
+        return False, why, r.cost
+    return None, why, r.cost
+
+
+def judge_prompt(criterion: str, reply: str, ambiguous: bool = False) -> str:
+    """The one grading text every judge reads, whichever model or CLI runs it,
+    so that comparing judges compares models and nothing else."""
+    answer = ("Answer with exactly PASS, FAIL or AMBIGUOUS on the first line — "
+              "AMBIGUOUS only when this reply alone does not let you decide — "
+              "then one sentence explaining why." if ambiguous else
+              "Answer with exactly PASS or FAIL on the first line, then one "
+              "sentence explaining why.")
+    return f"CRITERION:\n{criterion}\n\nREPLY TO GRADE:\n---\n{reply}\n---\n\n{answer}"
+
+
+def parse_verdict(text: str) -> tuple:
+    """("PASS" | "FAIL" | "AMBIGUA" | None, why). The verdict is the first line
+    that says something. Seen: a verdict preceded by a bare `<br>` line, which
+    read as "no verdict" and turned a 3/3 into a flaky — the parser's mistake,
+    not the agent's."""
+    lines = [l.strip() for l in text.strip().splitlines()
              if l.strip() and not re.fullmatch(r"(<[^>]+>|\W)+", l.strip())]
     head = lines[0].lstrip("*_#` ").upper() if lines else ""
-    why = " ".join(lines[1:]).strip() or r.text.strip()
-    if head.startswith("PASS"):
-        return True, why, r.cost
-    if head.startswith("FAIL"):
-        return False, why, r.cost
-    return None, f"judge gave no verdict: {r.text[:120]}", r.cost
+    why = " ".join(lines[1:]).strip() or text.strip()
+    for word, verdict in (("PASS", "PASS"), ("FAIL", "FAIL"), ("AMBIGU", "AMBIGUA")):
+        if head.startswith(word):
+            return verdict, why
+    return None, f"judge gave no verdict: {text[:120]}"
 
 
 # --------------------------------------------------------------------------- #

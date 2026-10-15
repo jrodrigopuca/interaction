@@ -77,6 +77,14 @@ class Pick(unittest.TestCase):
             held = sum(s["split"] == "holdout" for s in group)
             self.assertEqual(held, round(len(group) * labels.HOLDOUT_SHARE))
 
+    def test_a_scenario_never_sits_on_both_sides(self):
+        pool = [dict(sample(i, "FAIL" if i % 4 == 0 else "PASS"), id=f"sc{i % 7}") for i in range(40)]
+        sides = {}
+        for s in labels.pick(pool, 40, seed=3):
+            sides.setdefault(s["id"], set()).add(s["split"])
+        self.assertTrue(all(len(v) == 1 for v in sides.values()))
+        self.assertIn({"holdout"}, sides.values())
+
     def test_identical_replies_count_once(self):
         dup = [sample(1, "PASS"), dict(sample(1, "PASS"), key="r2/1")]
         self.assertEqual(len(labels.pick(dup, 10, seed=1)), 1)
@@ -87,6 +95,78 @@ class Pick(unittest.TestCase):
             cand.write_text("{}\n")
             with mock.patch.object(labels, "CANDIDATES", cand), self.assertRaises(SystemExit):
                 labels.cmd_pick(SimpleNamespace(force=False, runs=Path(tmp), n=1, seed=1))
+
+
+class Resplit(unittest.TestCase):
+
+    def run_in(self, tmp, cands, human, verdicts, **kw):
+        t = Path(tmp)
+        patches = [mock.patch.object(labels, n, t / f) for n, f in
+                   (("CANDIDATES", "c.jsonl"), ("HUMAN", "h.jsonl"),
+                    ("VERDICTS", "v.jsonl"), ("PICK", "pick.json"))]
+        for pt in patches:
+            pt.start()
+        try:
+            labels.write_jsonl(t / "c.jsonl", cands)
+            labels.write_jsonl(t / "h.jsonl", human)
+            labels.write_jsonl(t / "v.jsonl", verdicts)
+            with mock.patch("builtins.print"):
+                labels.cmd_resplit(SimpleNamespace(seed=1, why="", **kw))
+            return (labels.read_jsonl(t / "c.jsonl"), labels.read_jsonl(t / "h.jsonl"),
+                    json.loads((t / "pick.json").read_text()))
+        finally:
+            for pt in patches:
+                pt.stop()
+
+    def data(self):
+        cands = [dict(labels.public(sample(i, "PASS")), id=f"sc{i % 10}", key=f"r/sc{i % 10}-{i}",
+                      split="dev") for i in range(30)]
+        for c in cands:
+            c["key"] = f"r{c['key'][2:].split('-')[1]}/{c['id']}"
+        human = [{"key": c["key"], "label": "FAIL" if c["id"] in ("sc1", "sc2") else "PASS",
+                  "split": "dev"} for c in cands]
+        verdicts = [{"key": c["key"], "verdict": "PASS"} for c in cands]
+        return cands, human, verdicts
+
+    def test_pinned_scenarios_go_to_dev_and_labels_follow_their_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cands, human, meta = self.run_in(tmp, *self.data(), pin_dev=["sc0", "sc3"])
+        side = {c["key"]: c["split"] for c in cands}
+        self.assertEqual({c["split"] for c in cands if c["id"] in ("sc0", "sc3")}, {"dev"})
+        self.assertTrue(all(h["split"] == side[h["key"]] for h in human))
+        self.assertEqual(len(human), 30)                         # no label lost
+        self.assertEqual(meta["pinned_dev"], ["sc0", "sc3"])
+
+    def test_a_human_failure_counts_for_the_holdout_draw(self):
+        real = labels.split_scenarios
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(labels, "split_scenarios", side_effect=real) as spy:
+            self.run_in(tmp, *self.data(), pin_dev=[])
+        has_fail = spy.call_args.args[0]
+        self.assertEqual({k for k, f in has_fail.items() if f}, {"sc1", "sc2"})
+
+    def test_an_unknown_pin_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(SystemExit):
+            self.run_in(tmp, *self.data(), pin_dev=["nope"])
+
+
+class More(unittest.TestCase):
+
+    def test_earlier_versions_then_failed_scenarios_then_the_rest(self):
+        chosen = [dict(sample(1, "PASS"), id="hurt")]
+        human = [{"key": "r/hurt", "label": "FAIL"}]
+        pool = ([dict(sample(10 + i, "PASS"), id="other") for i in range(5)] +
+                [dict(sample(20 + i, "PASS"), id="hurt") for i in range(2)] +
+                [dict(sample(30 + i, "PASS", old=True), id="any") for i in range(2)])
+        got = labels.more(pool, chosen, human, 5, labels.random.Random(1))
+        self.assertEqual([s["id"] for s in got[:4]], ["any", "any", "hurt", "hurt"])
+        self.assertEqual(len(got), 5)
+
+    def test_never_adds_a_chosen_sample_or_a_duplicate_reply(self):
+        chosen = [sample(1, "PASS")]
+        pool = [sample(1, "PASS"), dict(sample(1, "PASS"), key="r2/1"), sample(2, "PASS")]
+        got = labels.more(pool, chosen, [], 10, labels.random.Random(1))
+        self.assertEqual([s["key"] for s in got], ["r/2"])
 
 
 class Hidden(unittest.TestCase):
@@ -154,11 +234,108 @@ class Rejudge(unittest.TestCase):
                     mock.patch("builtins.print"):
                 labels.write_jsonl(t / "c.jsonl", cands)
                 labels.write_jsonl(t / "h.jsonl", human)
-                labels.cmd_rejudge(SimpleNamespace(judge_model="opus", max_cost_usd=1.0, all=False))
+                labels.cmd_rejudge(SimpleNamespace(judge_cli="claude", judge_model="opus", max_cost_usd=1.0,
+                                                   ambiguous=False, all=False))
                 out = labels.read_jsonl(next(t.glob("rejudge-opus-*.jsonl")))
         self.assertEqual(judge.call_count, 2)         # 0.5 + 0.5 reaches 1.0
         self.assertEqual(out[0]["criterion_sha"], cands[0]["criterion_sha"])
         self.assertEqual(out[0]["judge"], "PASS")
+
+
+def codex_out(*events, rc=0):
+    return SimpleNamespace(returncode=rc, stderr="",
+                           stdout="".join(json.dumps(e) + "\n" for e in events))
+
+
+MSG = lambda t: {"type": "item.completed", "item": {"type": "agent_message", "text": t}}
+DONE = {"type": "turn.completed", "usage": {"input_tokens": 900, "output_tokens": 40}}
+
+
+class CodexJudge(unittest.TestCase):
+    """A judge from another family: same text, its own parse, and no tools."""
+
+    def judge(self, *events, ambiguous=False, rc=0):
+        with mock.patch.object(labels.subprocess, "run", return_value=codex_out(*events, rc=rc)) as sp:
+            got = labels.codex_judge("PASS if X", "the reply", ["-m", "m"], ambiguous)
+        return got, sp.call_args
+
+    def test_reads_the_same_text_run_judge_sends(self):
+        _, call = self.judge(MSG("PASS\nok"), DONE)
+        self.assertEqual(call.kwargs["input"], run.judge_prompt("PASS if X", "the reply"))
+        self.assertEqual(call.args[0][:3], ["codex", "exec", "--json"])
+
+    def test_pass_fail_and_ambiguous(self):
+        self.assertEqual(self.judge(MSG("**PASS**\nfine"), DONE)[0], ("PASS", "fine", 940))
+        self.assertEqual(self.judge(MSG("FAIL\nno"), DONE)[0][0], "FAIL")
+        got, call = self.judge(MSG("AMBIGUOUS\ncannot tell"), DONE, ambiguous=True)
+        self.assertEqual(got[0], "AMBIGUA")
+        self.assertEqual(call.kwargs["input"], run.judge_prompt("PASS if X", "the reply", True))
+
+    def test_a_judge_that_used_a_tool_gives_no_verdict(self):
+        (v, why, _), _ = self.judge({"type": "item.completed", "item": {"type": "command_execution"}},
+                                    MSG("PASS\nlooked it up"), DONE)
+        self.assertIsNone(v)
+        self.assertIn("command_execution", why)
+
+    def test_a_failed_call_or_an_unreadable_answer_is_no_verdict(self):
+        self.assertIsNone(self.judge(MSG("PASS"), rc=1)[0][0])
+        self.assertIsNone(self.judge({"type": "turn.failed", "error": "quota"})[0][0])
+        self.assertIsNone(self.judge(MSG("I think it mostly works"), DONE)[0][0])
+
+    def test_a_run_is_refused_when_the_judge_would_see_the_catalog(self):
+        leaky = SimpleNamespace(returncode=0, stderr="", stdout='[{"text": "- lh-backlog: ..."}]')
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(labels, "LABELS", Path(tmp)), \
+                mock.patch.object(labels, "CANDIDATES", Path(tmp) / "c.jsonl"), \
+                mock.patch.object(labels, "HUMAN", Path(tmp) / "h.jsonl"), \
+                mock.patch.object(labels.subprocess, "run", return_value=leaky) as sp, \
+                self.assertRaises(SystemExit) as stop:
+            labels.cmd_rejudge(SimpleNamespace(judge_cli="codex", judge_model="m", max_calls=5,
+                                               max_cost_usd=None, effort="low", ambiguous=False, all=False))
+        self.assertIn("lh-backlog", str(stop.exception))
+        self.assertEqual(sp.call_count, 1)            # the render, never an exec
+
+    def test_the_isolation_flags_reach_the_render_and_the_exec(self):
+        flags = labels.codex_flags("m", "low", Path("/p"))
+        for f in ("skills.include_instructions=false", "--ephemeral", "read-only"):
+            self.assertIn(f, flags)
+        with mock.patch.object(labels.subprocess, "run",
+                               return_value=SimpleNamespace(returncode=0, stderr="", stdout="[]")) as sp:
+            self.assertEqual(labels.codex_isolation(flags), [])
+        self.assertIn("skills.include_instructions=false", sp.call_args.args[0])
+
+    def test_a_codex_run_stops_at_its_call_cap(self):
+        cands = [dict(labels.public(sample(i, "PASS")), split="dev") for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            with mock.patch.object(labels, "LABELS", t), \
+                    mock.patch.object(labels, "CANDIDATES", t / "c.jsonl"), \
+                    mock.patch.object(labels, "HUMAN", t / "h.jsonl"), \
+                    mock.patch.object(labels, "codex_isolation", return_value=[]), \
+                    mock.patch.object(labels, "codex_judge", return_value=("AMBIGUA", "?", 10)) as j, \
+                    mock.patch("builtins.print"):
+                labels.write_jsonl(t / "c.jsonl", cands)
+                labels.write_jsonl(t / "h.jsonl", [{"key": c["key"], "label": "PASS"} for c in cands])
+                labels.cmd_rejudge(SimpleNamespace(judge_cli="codex", judge_model="m", max_calls=3,
+                                                   max_cost_usd=None, effort="low", ambiguous=True,
+                                                   all=False))
+                out = labels.read_jsonl(next(t.glob("rejudge-codex-m-amb-*.jsonl")))
+        self.assertEqual(j.call_count, 3)
+        self.assertEqual({r["judge"] for r in out}, {"AMBIGUA"})
+
+
+class Verdicts(unittest.TestCase):
+
+    def test_run_judge_still_reads_only_pass_or_fail(self):
+        self.assertNotIn("AMBIGUOUS", run.judge_prompt("c", "r"))
+        self.assertIn("AMBIGUOUS", run.judge_prompt("c", "r", ambiguous=True))
+        self.assertEqual(run.parse_verdict("<br>\nFAIL\nwhy")[0], "FAIL")
+
+    def test_an_abstaining_judge_is_counted_apart(self):
+        rows = [{"label": "FAIL", "judge": "FAIL"}, {"label": "FAIL", "judge": "AMBIGUA"},
+                {"label": "FAIL", "judge": "ERROR"}]
+        r = labels.rates(rows)
+        self.assertEqual((r["tnr"], r["abstained"], r["no_verdict"]), (1.0, 1, 1))
 
 
 if __name__ == "__main__":
