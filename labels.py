@@ -501,13 +501,31 @@ def cmd_rejudge(args) -> int:
         if leaks:
             sys.exit(f"the codex judge would see catalog content, refusing: {', '.join(leaks)}")
         cap = f"{args.max_calls} calls"
-    out, spent, tokens = [], 0.0, 0
+    name = args.judge_model if args.judge_cli == "claude" else f"codex-{args.judge_model}"
+    stem = f"rejudge-{name}{'-amb' if args.ambiguous else ''}-"
+    out = []
+    if args.resume:
+        path = Path(args.resume)
+        if not path.name.startswith(stem):
+            sys.exit(f"{path.name} is not a run of this judge ({stem}*): resume the same judge")
+        # Kept: a verdict on the criterion text as it is now. An ERROR, or a
+        # verdict on a criterion that has changed since, is judged again.
+        out = [r for r in read_jsonl(path) if r["judge"] != "ERROR" and r["key"] in candidates
+               and r["criterion_sha"] == candidates[r["key"]]["criterion_sha"]]
+        done = {r["key"] for r in out}
+        keys = [k for k in keys if k not in done]
+        print(f"resuming {path.name}: {len(done)} kept, {len(keys)} to judge")
+    else:
+        path = LABELS / f"{stem}{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    spent, tokens, calls = 0.0, 0, 0
     for k in keys:
         if (args.judge_cli == "claude" and spent >= args.max_cost_usd) or \
-                (args.judge_cli == "codex" and len(out) >= args.max_calls):
-            print(f"cap reached ({cap}): {len(keys) - len(out)} left unjudged")
+                (args.judge_cli == "codex" and calls >= args.max_calls):
+            print(f"cap reached ({cap}): {len(keys) - calls} left unjudged; "
+                  f"--resume {path.name} continues")
             break
         c = candidates[k]
+        calls += 1
         if args.judge_cli == "claude":
             ok, why, cost = run.judge(c["criterion"], c["graded"])
             spent += cost or 0.0
@@ -517,11 +535,10 @@ def cmd_rejudge(args) -> int:
             tokens += t
             verdict = v or "ERROR"
         out.append({"key": k, "judge": verdict, "why": why, "criterion_sha": c["criterion_sha"]})
-        print(f"  {len(out):3}/{len(keys)} {verdict:7} {k}", flush=True)
-    name = args.judge_model if args.judge_cli == "claude" else f"codex-{args.judge_model}"
-    path = LABELS / f"rejudge-{name}{'-amb' if args.ambiguous else ''}-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+        write_jsonl(path, out)                       # a cut run keeps what it paid for
+        print(f"  {calls:3}/{len(keys)} {verdict:7} {k}", flush=True)
     write_jsonl(path, out)
-    print(f"{path} · {len(out)} verdicts · " +
+    print(f"{path} · {len(out)} verdicts ({calls} new) · " +
           (f"${spent:.2f}" if args.judge_cli == "claude" else f"{tokens:,} tokens"))
     return 0
 
@@ -583,6 +600,8 @@ def main() -> int:
     p.add_argument("--ambiguous", action="store_true",
                    help="codex judge may answer AMBIGUOUS; report counts it as an abstention")
     p.add_argument("--all", action="store_true", help="every candidate, labelled or not")
+    p.add_argument("--resume", metavar="FILE",
+                   help="a cut run of the same judge: keep its verdicts, judge the rest")
     p = sub.add_parser("report", help="TPR and TNR per split")
     p.add_argument("rejudge", nargs="*")
     args = ap.parse_args()

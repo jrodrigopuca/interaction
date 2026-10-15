@@ -235,7 +235,7 @@ class Rejudge(unittest.TestCase):
                 labels.write_jsonl(t / "c.jsonl", cands)
                 labels.write_jsonl(t / "h.jsonl", human)
                 labels.cmd_rejudge(SimpleNamespace(judge_cli="claude", judge_model="opus", max_cost_usd=1.0,
-                                                   ambiguous=False, all=False))
+                                                   ambiguous=False, all=False, resume=None))
                 out = labels.read_jsonl(next(t.glob("rejudge-opus-*.jsonl")))
         self.assertEqual(judge.call_count, 2)         # 0.5 + 0.5 reaches 1.0
         self.assertEqual(out[0]["criterion_sha"], cands[0]["criterion_sha"])
@@ -291,7 +291,7 @@ class CodexJudge(unittest.TestCase):
                 mock.patch.object(labels.subprocess, "run", return_value=leaky) as sp, \
                 self.assertRaises(SystemExit) as stop:
             labels.cmd_rejudge(SimpleNamespace(judge_cli="codex", judge_model="m", max_calls=5,
-                                               max_cost_usd=None, effort="low", ambiguous=False, all=False))
+                                               max_cost_usd=None, effort="low", ambiguous=False, all=False, resume=None))
         self.assertIn("lh-backlog", str(stop.exception))
         self.assertEqual(sp.call_count, 1)            # the render, never an exec
 
@@ -319,7 +319,7 @@ class CodexJudge(unittest.TestCase):
                 labels.write_jsonl(t / "h.jsonl", [{"key": c["key"], "label": "PASS"} for c in cands])
                 labels.cmd_rejudge(SimpleNamespace(judge_cli="codex", judge_model="m", max_calls=3,
                                                    max_cost_usd=None, effort="low", ambiguous=True,
-                                                   all=False))
+                                                   all=False, resume=None))
                 out = labels.read_jsonl(next(t.glob("rejudge-codex-m-amb-*.jsonl")))
         self.assertEqual(j.call_count, 3)
         self.assertEqual({r["judge"] for r in out}, {"AMBIGUA"})
@@ -337,6 +337,48 @@ class Verdicts(unittest.TestCase):
                 {"label": "FAIL", "judge": "ERROR"}]
         r = labels.rates(rows)
         self.assertEqual((r["tnr"], r["abstained"], r["no_verdict"]), (1.0, 1, 1))
+
+
+class Resume(unittest.TestCase):
+    """A run cut by its cap continues where it stopped, in the same file."""
+
+    def go(self, prior, **kw):
+        cands = [dict(labels.public(sample(i, "PASS")), split="dev") for i in range(5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            f = t / "rejudge-opus-20261015-000000.jsonl"
+            with mock.patch.object(labels, "LABELS", t), \
+                    mock.patch.object(labels, "CANDIDATES", t / "c.jsonl"), \
+                    mock.patch.object(labels, "HUMAN", t / "h.jsonl"), \
+                    mock.patch.object(run, "judge", return_value=(False, "no", 0.1)) as judge, \
+                    mock.patch("builtins.print"):
+                labels.write_jsonl(t / "c.jsonl", cands)
+                labels.write_jsonl(t / "h.jsonl", [{"key": c["key"], "label": "PASS"} for c in cands])
+                labels.write_jsonl(f, prior(cands))
+                args = dict(judge_cli="claude", judge_model="opus", max_cost_usd=5.0,
+                            ambiguous=False, all=False, resume=str(f))
+                args.update(kw)
+                labels.cmd_rejudge(SimpleNamespace(**args))
+                return judge, labels.read_jsonl(f), sorted(t.glob("rejudge-*"))
+
+    def test_keeps_what_was_judged_and_judges_only_the_rest(self):
+        prior = lambda cs: [{"key": c["key"], "judge": "PASS", "why": "", "criterion_sha": c["criterion_sha"]}
+                            for c in cs[:3]]
+        judge, out, files = self.go(prior)
+        self.assertEqual(judge.call_count, 2)
+        self.assertEqual([r["judge"] for r in out], ["PASS"] * 3 + ["FAIL"] * 2)
+        self.assertEqual(len(files), 1)                       # the same file, not a second run
+
+    def test_an_error_or_a_changed_criterion_is_judged_again(self):
+        prior = lambda cs: [{"key": cs[0]["key"], "judge": "ERROR", "why": "", "criterion_sha": cs[0]["criterion_sha"]},
+                            {"key": cs[1]["key"], "judge": "PASS", "why": "", "criterion_sha": "old"}]
+        judge, out, _ = self.go(prior)
+        self.assertEqual(judge.call_count, 5)
+        self.assertEqual(len(out), 5)
+
+    def test_refuses_a_file_from_another_judge(self):
+        with self.assertRaises(SystemExit):
+            self.go(lambda cs: [], judge_model="sonnet")
 
 
 if __name__ == "__main__":
