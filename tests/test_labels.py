@@ -381,5 +381,73 @@ class Resume(unittest.TestCase):
             self.go(lambda cs: [], judge_model="sonnet")
 
 
+class Refresh(unittest.TestCase):
+    """A criterion fixed in scenarios/ reaches the candidates; the labels made
+    against the old text stay marked until the human looks again."""
+
+    def test_takes_the_current_criterion_and_moves_its_hash(self):
+        c = dict(labels.public(sample(1, "PASS")), split="dev", id="sc")
+        scs = {"sc": run.Scenario(id="sc", category="c", prompt="p", assertions={"judge": "PASS if Y"})}
+        got = labels.refreshed([c], scs)[0]
+        self.assertEqual((got["criterion"], got["criterion_sha"]), ("PASS if Y", run.criterion_sha("PASS if Y")))
+        self.assertEqual(got["graded"], c["graded"])
+        self.assertEqual(labels.refreshed([c], {})[0], c)          # a scenario gone: left as is
+
+    def test_an_imported_label_keeps_the_text_it_was_made_against(self):
+        cands = [dict(labels.public(sample(1, "PASS")), split="dev")]
+        rows = labels.merge([], [{"key": "r/1", "label": "PASS", "criterion_sha": "old"}], cands)
+        self.assertEqual(rows[0]["criterion_sha"], "old")
+
+    def test_the_page_lets_a_newer_label_win_and_shows_stale_ones(self):
+        page = labels.build_page([labels.public(sample(1, "PASS"))], {})
+        self.assertIn("v.at > labels[k].at", page)
+        self.assertIn('id="stale"', page)
+
+
+class Review(unittest.TestCase):
+    """A label revised after review keeps its first value, survives an older
+    export, and an excluded one is not scored."""
+
+    def cands(self):
+        return [dict(labels.public(sample(i, "PASS")), split="dev") for i in range(2)]
+
+    def test_an_older_export_does_not_undo_a_revision(self):
+        on_file = [{"key": "r/1", "label": "FAIL", "original_label": "PASS", "at": "2026-10-15T12:00:00",
+                    "revised": {"why": "x"}, "criterion_sha": "s", "split": "dev"}]
+        rows = labels.merge(on_file, [{"key": "r/1", "label": "PASS", "at": "2026-10-15T01:00:00Z"}],
+                            self.cands())
+        self.assertEqual(rows[0]["label"], "FAIL")
+
+    def test_a_newer_export_wins_and_keeps_the_review_trail(self):
+        on_file = [{"key": "r/1", "label": "FAIL", "original_label": "PASS", "at": "2026-10-15T12:00:00",
+                    "excluded": "gone", "criterion_sha": "s", "split": "dev"}]
+        rows = labels.merge(on_file, [{"key": "r/1", "label": "AMBIGUA", "at": "2026-10-16T00:00:00"}],
+                            self.cands())
+        self.assertEqual((rows[0]["label"], rows[0]["original_label"], rows[0]["excluded"]),
+                         ("AMBIGUA", "PASS", "gone"))
+
+    def test_report_skips_excluded_and_shows_first_labels(self):
+        cands = self.cands()
+        human = [dict(key=c["key"], label="FAIL", criterion_sha=c["criterion_sha"], split="dev") for c in cands]
+        human[0]["excluded"] = "scenario rewritten"
+        human[1]["original_label"] = "PASS"
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            with mock.patch.object(labels, "LABELS", t), \
+                    mock.patch.object(labels, "CANDIDATES", t / "c.jsonl"), \
+                    mock.patch.object(labels, "HUMAN", t / "h.jsonl"), \
+                    mock.patch("builtins.print") as out:
+                labels.write_jsonl(t / "c.jsonl", cands)
+                labels.write_jsonl(t / "h.jsonl", human)
+                labels.write_jsonl(t / "rejudge-x-1.jsonl",
+                                   [{"key": c["key"], "judge": "FAIL", "criterion_sha": c["criterion_sha"]}
+                                    for c in cands])
+                labels.cmd_report(SimpleNamespace(rejudge=[]))
+        text = "\n".join(str(c.args[0]) for c in out.call_args_list)
+        self.assertIn("1 label(s) excluded", text)
+        self.assertIn("all      n=  1", text)
+        self.assertIn("first    n=  1  TPR 0.00", text)       # first label PASS, judge FAIL
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -190,12 +190,14 @@ button.pass{border-color:var(--pass);color:var(--pass)}button.fail{border-color:
 button.on{color:var(--card)}button.pass.on{background:var(--pass)}button.fail.on{background:var(--fail)}button.amb.on{background:var(--amb)}
 textarea{width:100%;min-height:52px;font:inherit;padding:6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
 .grow{flex:1}a{color:var(--accent)}
+.stale{border:1px solid var(--amb);color:var(--amb);border-radius:8px;padding:8px 12px;margin:10px 0}
 </style></head><body><main>
 <header><h1>Etiquetar al juez</h1><span class="muted" id="progress"></span><span class="grow"></span>
 <button id="export">Exportar etiquetas</button></header>
 <p class="muted">Leé la respuesta completa y decidí si cumple el <b>criterio</b>, como lo haría el juez. No ves su veredicto a propósito. <b>AMBIGUA</b> es para cuando con esta respuesta ni vos podés decidir. Todo se guarda en este navegador; al terminar, exportá.</p>
 <header><span class="tag" id="id"></span><span class="tag" id="agent"></span><span class="tag" id="cat"></span><span class="muted" id="run"></span></header>
 <section><h2>Pedido al agente</h2><pre id="prompt"></pre></section>
+<p id="stale" class="stale" hidden>El criterio cambió desde tu etiqueta. Volvé a decidir con este texto: tu etiqueta anterior queda marcada.</p>
 <section><h2>Criterio</h2><pre id="criterion"></pre></section>
 <section class="reply"><h2>Respuesta (lo que lee el juez)</h2><pre id="graded"></pre></section>
 <section><h2>Nota (opcional)</h2><textarea id="note" placeholder="Por qué, sobre todo si es FAIL o AMBIGUA"></textarea></section>
@@ -207,8 +209,11 @@ textarea{width:100%;min-height:52px;font:inherit;padding:6px;border-radius:6px;b
 const DATA = __DATA__;
 const STORE = "b039-labels";
 let labels = {}; try { labels = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) {}
-for (const [k, v] of Object.entries(__PRIOR__)) if (!labels[k]) labels[k] = v;
-let i = Math.max(0, DATA.findIndex(d => !labels[d.key])); if (i < 0) i = 0;
+// labels.jsonl wins when it is newer: a label corrected outside the page
+// (or on another browser) must not be reverted by an older local copy.
+for (const [k, v] of Object.entries(__PRIOR__))
+  if (!labels[k] || (v.at && (!labels[k].at || v.at > labels[k].at))) labels[k] = v;
+let i = DATA.findIndex(d => !labels[d.key] || labels[d.key].criterion_sha !== d.criterion_sha); if (i < 0) i = 0;
 const $ = id => document.getElementById(id);
 function save() { try { localStorage.setItem(STORE, JSON.stringify(labels)); } catch (e) {} }
 function show() {
@@ -216,9 +221,10 @@ function show() {
   $("id").textContent = d.id; $("agent").textContent = d.agent; $("cat").textContent = d.category;
   $("run").textContent = d.run; $("prompt").textContent = d.prompt; $("criterion").textContent = d.criterion;
   $("graded").textContent = d.graded; $("note").value = l.note || "";
+  $("stale").hidden = !(l.label && l.criterion_sha && l.criterion_sha !== d.criterion_sha);
   document.querySelectorAll("[data-v]").forEach(b => b.classList.toggle("on", b.dataset.v === l.label));
-  const done = DATA.filter(x => labels[x.key] && labels[x.key].label).length;
-  $("progress").textContent = `${i + 1} de ${DATA.length} · etiquetadas ${done}`;
+  const done = DATA.filter(x => labels[x.key] && labels[x.key].label && labels[x.key].criterion_sha === x.criterion_sha).length;
+  $("progress").textContent = `${i + 1} de ${DATA.length} · al día ${done}`;
   window.scrollTo(0, 0);
 }
 document.querySelectorAll("[data-v]").forEach(b => b.onclick = () => {
@@ -248,8 +254,11 @@ def build_page(candidates: list, prior: dict) -> str:
 
 
 def merge(existing: list, exported: list, candidates: list) -> list:
-    """Exported labels win over earlier ones for the same key; a label for a
-    key that is not a candidate, or with an unknown value, is refused."""
+    """Exported labels win over earlier ones for the same key, unless the one
+    on file is newer — a label revised outside the page must not be undone by
+    an older export. What a review added to a row (`original_label`,
+    `revised`, `excluded`) is kept. A label for a key that is not a candidate,
+    or with an unknown value, is refused."""
     known = {c["key"]: c for c in candidates}
     by_key = {r["key"]: r for r in existing}
     for r in exported:
@@ -258,8 +267,15 @@ def merge(existing: list, exported: list, candidates: list) -> list:
         if r.get("label") not in CHOICES:
             raise SystemExit(f"{r['key']}: label must be one of {CHOICES}, got {r.get('label')!r}")
         c = known[r["key"]]
-        by_key[r["key"]] = {"key": r["key"], "label": r["label"], "note": r.get("note", ""),
-                            "criterion_sha": c["criterion_sha"], "split": c["split"],
+        prior = by_key.get(r["key"], {})
+        if prior.get("at") and r.get("at") and r["at"] < prior["at"]:
+            continue
+        kept = {k: prior[k] for k in ("original_label", "revised", "excluded") if k in prior}
+        by_key[r["key"]] = {**kept, "key": r["key"], "label": r["label"], "note": r.get("note", ""),
+                            # the text the human read, not the one current now:
+                            # a label made before `refresh` must stay stale
+                            "criterion_sha": r.get("criterion_sha") or c["criterion_sha"],
+                            "split": c["split"],
                             "at": r.get("at")}
     return [by_key[c["key"]] for c in candidates if c["key"] in by_key]
 
@@ -363,7 +379,7 @@ def cmd_add(args) -> int:
 
 
 def summary(candidates: list, human: list) -> None:
-    labelled = {h["key"]: h["label"] for h in human}
+    labelled = {h["key"]: h["label"] for h in human if not h.get("excluded")}
     for split in ("dev", "holdout"):
         part = [c for c in candidates if c["split"] == split]
         got = [labelled[c["key"]] for c in part if c["key"] in labelled]
@@ -372,12 +388,44 @@ def summary(candidates: list, human: list) -> None:
               f"AMBIGUA {got.count('AMBIGUA')})")
 
 
+def refreshed(candidates: list, scenarios: dict) -> list:
+    """Candidates carrying the criterion each scenario has NOW. The reply is
+    the same; what it is graded against moved. Labels keep the hash of the
+    text the human read, so `report` and the page show which ones to review,
+    and `rejudge --resume` judges only the samples whose text changed."""
+    out = []
+    for c in candidates:
+        sc = scenarios.get(c["id"])
+        now = (sc.assertions or {}).get("judge") if sc else None
+        if now and now != c["criterion"]:
+            c = dict(c, criterion=now, criterion_sha=run.criterion_sha(now))
+        out.append(c)
+    return out
+
+
+def cmd_refresh(args) -> int:
+    candidates = read_jsonl(CANDIDATES)
+    new = refreshed(candidates, {s.id: s for s in run.load_scenarios()})
+    moved = sorted({n["id"] for o, n in zip(candidates, new) if o["criterion_sha"] != n["criterion_sha"]})
+    write_jsonl(CANDIDATES, new)
+    human = {h["key"]: h for h in read_jsonl(HUMAN)}
+    stale = [n["key"] for n in new if n["key"] in human and human[n["key"]]["criterion_sha"] != n["criterion_sha"]]
+    print(f"{len(moved)} scenario(s) with a new criterion: {', '.join(moved) or '—'}")
+    print(f"{len(stale)} label(s) made against an older text · `./labels.py page --only-stale` to review them")
+    return 0
+
+
 def cmd_page(args) -> int:
     candidates = read_jsonl(CANDIDATES)
     if not candidates:
         sys.exit("no candidates: run `./labels.py pick` first")
     prior = {r["key"]: {k: r[k] for k in ("label", "note", "criterion_sha", "at") if k in r}
              for r in read_jsonl(HUMAN)}
+    if args.only_stale:
+        candidates = [c for c in candidates
+                      if c["key"] in prior and prior[c["key"]].get("criterion_sha") != c["criterion_sha"]]
+        if not candidates:
+            sys.exit("no label is stale: nothing to review")
     PAGE.write_text(build_page(candidates, prior))
     print(f"{PAGE} · {len(candidates)} candidates, {len(prior)} already labelled · open it in a browser")
     return 0
@@ -545,13 +593,20 @@ def cmd_rejudge(args) -> int:
 
 def cmd_report(args) -> int:
     side = {c["key"]: c["split"] for c in read_jsonl(CANDIDATES)}
-    human = {r["key"]: dict(r, split=side.get(r["key"], r.get("split"))) for r in read_jsonl(HUMAN)}
+    rows_h = read_jsonl(HUMAN)
+    excluded = [r for r in rows_h if r.get("excluded")]
+    human = {r["key"]: dict(r, split=side.get(r["key"], r.get("split"))) for r in rows_h
+             if not r.get("excluded")}
+    if excluded:
+        print(f"{len(excluded)} label(s) excluded: " +
+              "; ".join(f"{r['key']} ({r['excluded']})" for r in excluded))
     files = [Path(f) for f in args.rejudge] or sorted(LABELS.glob("rejudge-*.jsonl"))
     if not files:
         sys.exit("no rejudge file: run `./labels.py rejudge` first")
     for f in files:
         verdicts = {r["key"]: r for r in read_jsonl(f)}
-        rows = [{"label": h["label"], "judge": verdicts[k]["judge"], "split": h["split"],
+        rows = [{"label": h["label"], "first": h.get("original_label", h["label"]),
+                 "judge": verdicts[k]["judge"], "split": h["split"],
                  "stale": verdicts[k]["criterion_sha"] != h["criterion_sha"]}
                 for k, h in human.items() if k in verdicts]
         print(f"\n{f.name}")
@@ -565,6 +620,13 @@ def cmd_report(args) -> int:
                   f"(tp {r['tp']} fn {r['fn']} tn {r['tn']} fp {r['fp']}, "
                   f"ambiguous {r['ambiguous']}, judge abstained {r['abstained']}, "
                   f"no verdict {r['no_verdict']})")
+        # A review that moved labels toward the judges would raise TNR by
+        # construction; the first labels are the check on that.
+        if any(r["first"] != r["label"] for r in rows):
+            r = rates([dict(x, label=x["first"]) for x in rows])
+            fmt = lambda x: "—" if x is None else f"{x:.2f}"
+            print(f"  {'first':8} n={len(rows):3}  TPR {fmt(r['tpr'])}  TNR {fmt(r['tnr'])}  "
+                  f"(all splits, labels as first given, before review)")
         stale = sum(1 for r in rows if r["stale"])
         if stale:
             print(f"  {stale} label(s) were made against a different criterion text")
@@ -588,7 +650,9 @@ def main() -> int:
     p.add_argument("--n", type=int, default=20)
     p.add_argument("--seed", type=int, default=40)
     p.add_argument("--runs", type=Path, default=run.RUNS)
-    sub.add_parser("page", help="write labels/label.html")
+    sub.add_parser("refresh", help="take each scenario's current criterion from scenarios/")
+    p = sub.add_parser("page", help="write labels/label.html")
+    p.add_argument("--only-stale", action="store_true", help="only labels made against an older criterion")
     p = sub.add_parser("import", help="merge labels exported from the page")
     p.add_argument("file")
     p = sub.add_parser("rejudge", help="judge the labelled samples again (calls the model)")
@@ -605,7 +669,7 @@ def main() -> int:
     p = sub.add_parser("report", help="TPR and TNR per split")
     p.add_argument("rejudge", nargs="*")
     args = ap.parse_args()
-    return {"pick": cmd_pick, "resplit": cmd_resplit, "add": cmd_add, "page": cmd_page, "import": cmd_import,
+    return {"pick": cmd_pick, "resplit": cmd_resplit, "add": cmd_add, "refresh": cmd_refresh, "page": cmd_page, "import": cmd_import,
             "rejudge": cmd_rejudge, "report": cmd_report}[args.cmd](args)
 
 
