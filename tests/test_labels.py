@@ -297,7 +297,8 @@ class CodexJudge(unittest.TestCase):
 
     def test_the_isolation_flags_reach_the_render_and_the_exec(self):
         flags = labels.codex_flags("m", "low", Path("/p"))
-        for f in ("skills.include_instructions=false", "--ephemeral", "read-only"):
+        for f in ("skills.include_instructions=false", "--ephemeral", "read-only",
+                  "features.shell_tool=false", "features.multi_agent=false"):
             self.assertIn(f, flags)
         with mock.patch.object(labels.subprocess, "run",
                                return_value=SimpleNamespace(returncode=0, stderr="", stdout="[]")) as sp:

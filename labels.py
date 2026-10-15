@@ -411,6 +411,16 @@ CODEX_FLAGS = [
     "-c", "include_environment_context=false",
     "-c", "features.plugins=false", "-c", "features.apps=false",
     "-c", "features.recommended_plugins=false",
+    # A grader needs no tools. Turning them off is the stronger guarantee and
+    # the cheaper call: measured on one sample, 12,953 input tokens -> 8,481,
+    # same verdict. Codex still adds ~7.7k of its own around an ~800-token
+    # prompt; what it is was not inspected (prompt-input shows no tools).
+    "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
+    "-c", "features.multi_agent=false", "-c", "features.view_image=false",
+    "-c", "features.image_generation=false", "-c", "features.browser_use=false",
+    "-c", "features.computer_use=false", "-c", "features.goals=false",
+    "-c", "features.sleep_tool=false", "-c", "features.tool_suggest=false",
+    "-c", "features.skill_search=false", "-c", 'web_search="disabled"',
 ]
 CODEX_QUIET_ITEMS = {"agent_message", "reasoning"}   # anything else is a tool
 
