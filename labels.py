@@ -537,7 +537,8 @@ def codex_judge(criterion: str, reply: str, flags: list, ambiguous: bool) -> tup
 
 def cmd_rejudge(args) -> int:
     candidates = {c["key"]: c for c in read_jsonl(CANDIDATES)}
-    keys = [r["key"] for r in read_jsonl(HUMAN)] if not args.all else list(candidates)
+    keys = ([r["key"] for r in read_jsonl(HUMAN) if not r.get("excluded")] if not args.all
+            else list(candidates))
     if args.judge_cli == "claude":
         if args.max_cost_usd is None:
             sys.exit("--max-cost-usd is required for a claude judge")

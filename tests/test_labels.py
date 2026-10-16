@@ -458,5 +458,25 @@ class When(unittest.TestCase):
                         labels.when(later_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")))
 
 
+class Excluded(unittest.TestCase):
+
+    def test_rejudge_never_spends_on_an_excluded_label(self):
+        cands = [dict(labels.public(sample(i, "PASS")), split="dev") for i in range(3)]
+        human = [{"key": c["key"], "label": "PASS"} for c in cands]
+        human[0]["excluded"] = "scenario rewritten"
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            with mock.patch.object(labels, "LABELS", t), \
+                    mock.patch.object(labels, "CANDIDATES", t / "c.jsonl"), \
+                    mock.patch.object(labels, "HUMAN", t / "h.jsonl"), \
+                    mock.patch.object(run, "judge", return_value=(True, "ok", 0.01)) as judge, \
+                    mock.patch("builtins.print"):
+                labels.write_jsonl(t / "c.jsonl", cands)
+                labels.write_jsonl(t / "h.jsonl", human)
+                labels.cmd_rejudge(SimpleNamespace(judge_cli="claude", judge_model="opus", max_cost_usd=1.0,
+                                                   ambiguous=False, all=False, resume=None))
+        self.assertEqual([c.args[1] for c in judge.call_args_list], ["reply 1", "reply 2"])
+
+
 if __name__ == "__main__":
     unittest.main()
