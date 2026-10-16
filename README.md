@@ -123,7 +123,7 @@ purpose), but a PASS next to one deserves a look at the trace.
 Two independent knobs, because they answer different questions:
 
 ```bash
-./run.py --max-cost-usd 13                                     # defaults: agent on sonnet, judge on opus
+./run.py --max-cost-usd 13                                     # defaults: agent and judge on sonnet
 ./run.py --model opus --only dev-ratifies --max-cost-usd 1     # re-check one failure on a stronger agent
 ```
 
@@ -146,10 +146,13 @@ Two independent knobs, because they answer different questions:
   name, the floor is not the last word: a twin scenario closes that gate
   (`deny:` the tool, assert `unchanged_files`) and holds on any model — see
   `*-behind-the-gate` in `hard-rules.yaml`.
-- `--judge-model` — the PASS/FAIL classifier. Defaults to **Opus**: the judge
-  decides the verdict, and a lenient judge turns every run green, which is
-  the failure mode this harness exists to avoid. Its prompt is short, so the
-  stronger model is cheap on this side.
+- `--judge-model` — the PASS/FAIL classifier. Defaults to **Sonnet**, chosen
+  by measurement (B-039, `labels.py`): against 78 hand-labelled replies it
+  agreed with the human on every PASS and every FAIL once the criteria were
+  corrected, at ~$0.009 a verdict. Opus, the earlier default, was the most
+  lenient of the judges measured — the failure mode this harness exists to
+  avoid — and cost twice as much. The figures and their limits are in the
+  catalog's ESTADO-DEL-ARTE §4.
 
 ## What a run costs
 

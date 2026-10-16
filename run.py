@@ -151,7 +151,7 @@ QUOTA_STOP = 0.90
 # would on the agent side. On a subscription the currency is rate-limit
 # budget rather than dollars.
 AGENT_MODEL = "sonnet"  # --model
-JUDGE_MODEL = "opus"    # --judge-model
+JUDGE_MODEL = "sonnet"  # --judge-model; calibrated against human labels in B-039
 JUDGE_SEEN = set()      # models the judge's init events reported; see run.json
 
 

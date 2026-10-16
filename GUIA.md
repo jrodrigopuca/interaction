@@ -81,7 +81,7 @@ muestras que `--repeat`, no.
 | `--max-cost-usd USD` | Tope de gasto de la corrida; obligatorio salvo con `--list`, `--dry-run` y `--applicability` | |
 | `--repeat N` | Muestras por escenario. Con más de una, si los veredictos discrepan el escenario se reporta `FLAKY`, nunca verde por mayoría | 1 |
 | `--model M` | Modelo del agente bajo prueba | `sonnet` |
-| `--judge-model M` | Modelo del juez | `opus` |
+| `--judge-model M` | Modelo del juez | `sonnet` |
 | `--timeout S` | Tope para un escenario de un solo agente | 300 |
 | `--delegate-timeout S` | Tope para escenarios con `delegate: true` | 1800 |
 
@@ -92,8 +92,13 @@ muestras que `--repeat`, no.
   robustez: un archivo de agente que guía a Sonnet guía a los modelos más
   fuertes. Si un FAIL huele a capacidad y no a prompt, volvé a correr ESE
   escenario con `--model opus` antes de tocar el agente.
-- **Juez en Opus.** El juez decide el veredicto; un juez blando pone todo en
-  verde, que es justo la falla que este harness existe para evitar. Corre en
+- **Juez en Sonnet, elegido midiendo** (B-039, `labels.py`). El juez decide
+  el veredicto, y un juez blando pone todo en verde, que es justo la falla que
+  este harness existe para evitar. Contra 78 respuestas etiquetadas a mano,
+  con los criterios corregidos, Sonnet coincidió en todos los PASS y todos los
+  FAIL, a unos USD 0,009 por veredicto. Opus, el juez anterior, resultó el más
+  indulgente de los medidos y cuesta el doble. Las cifras y sus límites están
+  en ESTADO-DEL-ARTE §4 del catálogo. Corre en
   una sesión `--safe-mode`, con su propio system prompt de un párrafo y sin
   herramientas, por dos motivos medidos: no hereda tu `CLAUDE.md` ni tu output
   style (con la sesión por defecto respondía que sus instrucciones mencionaban
