@@ -174,7 +174,8 @@ class Scenario:
     until: str = ""          # the backlog item (B-NNN) whose closing ends the experiment
     workspace: str = ""      # fixture dir seeded into a fresh cwd per sample
     allow: str = ""          # --allowedTools, comma-separated
-    deny: str = ""           # --disallowedTools, comma-separated
+    deny: str = ""           # --disallowedTools, comma-separated: the tool is HIDDEN
+    refuse: str = ""         # tools left visible but out of the permissions: a call is REFUSED
     floor: str = ""          # smallest model family the rule was MEASURED to hold on
     budget: float = 0.0      # per-sample ceiling override (USD); see sample_budget
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
@@ -292,11 +293,16 @@ def load_scenarios() -> list:
                 workspace=raw.get("workspace", ""),
                 allow=raw.get("allow", ""),
                 deny=raw.get("deny", ""),
+                refuse=raw.get("refuse", "") or "",
                 floor=raw.get("floor", "") or "",
                 budget=float(raw.get("budget", 0) or 0),
                 fingerprint=_digest(src),
             ))
     for s in out:
+        clash = set(spec_tools(s.refuse)) & (set(spec_tools(s.allow)) | set(spec_tools(s.deny)))
+        if clash:
+            sys.exit(f"{s.id}: {', '.join(sorted(clash))} is in `refuse:` and in `allow:`/`deny:` — "
+                     f"refused means visible and not permitted; it cannot also be allowed or hidden")
         if s.floor and s.floor not in MODEL_LADDER:
             sys.exit(f"{s.id}: floor `{s.floor}` is not one of {MODEL_LADDER}")
     ids = [s.id for s in out]
@@ -349,9 +355,33 @@ def quota_of(events: list):
     return out
 
 
+def spec_tools(spec: str) -> list:
+    """The bare tool names in a comma-separated tool spec: "Bash(rm:*),Edit" →
+    ["Bash", "Edit"]."""
+    return [t.strip().split("(")[0] for t in (spec or "").split(",") if t.strip()]
+
+
+def permissions_for(refuse: str = "") -> dict:
+    """The harness permissions with `refuse` taken out of `allow`.
+
+    `deny:` passes --disallowedTools, which REMOVES the tool from what the model
+    sees: it never learns it was refused, it just never had it. Measured on
+    2026-10-16 (run 20261016-101017, B-066): with Edit/Write denied that way
+    and the shell open, architect and senior-dev edited through Bash 6/6 and
+    never once called Edit — editing with the tools at hand, not routing
+    around a refusal. `refuse:` keeps the tool visible and drops it from the
+    allow list, so a call is refused by the host and the agent reads the
+    refusal, as when the user answers "no" at the prompt."""
+    gone = set(spec_tools(refuse))
+    if not gone:
+        return HARNESS_PERMISSIONS
+    return {**HARNESS_PERMISSIONS,
+            "allow": [r for r in HARNESS_PERMISSIONS["allow"] if r.split("(")[0] not in gone]}
+
+
 def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
-        cwd: Path = None, allow: str = "", deny: str = "",
+        cwd: Path = None, allow: str = "", deny: str = "", refuse: str = "",
         safe_mode: bool = False, system: str = "", tools: str = None,
         neutral: bool = False, max_budget: float = 0.0) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
@@ -373,9 +403,12 @@ def ask(prompt: str, agent: str = "", model: str = "",
         cmd += ["--allowedTools", allow]
     if deny:
         cmd += ["--disallowedTools", deny]
+    if refuse and not neutral:
+        # The user's own settings may allow the very tool: nothing would be refused.
+        return Reply(text="", error="`refuse:` needs the neutral session (not --user-session)")
     if neutral:
         cmd += NEUTRAL_SESSION
-        cmd += ["--settings", json.dumps({"permissions": HARNESS_PERMISSIONS})]
+        cmd += ["--settings", json.dumps({"permissions": permissions_for(refuse)})]
     if safe_mode:
         # Every customization off: CLAUDE.md, output styles, skills, hooks,
         # agents. A grader must not inherit the user's persona — measured: with
@@ -1287,7 +1320,7 @@ def run_one(sc: Scenario) -> Result:
     ws = make_workspace(sc)
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
-                cwd=ws, allow=sc.allow, deny=sc.deny, neutral=NEUTRAL,
+                cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
                 max_budget=sc.sample_budget)
     if reply.error:
         res = Result(sc, reply, workspace=str(ws or ""))

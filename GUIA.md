@@ -294,7 +294,8 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     symbol: parseCSVLine
   workspace: fixtures/csv-trim      # se copia al cwd vacío de la muestra; sin esto el cwd queda vacío
   allow: "Bash(fd:*)"               # --allowedTools
-  deny: "Bash(brew:*)"              # --disallowedTools
+  deny: "Bash(brew:*)"              # --disallowedTools: el agente NO VE la herramienta
+  refuse: "Edit,Write"              # la ve, pero fuera de los permisos: al usarla recibe un rechazo
   delegate: true                    # graba el árbol de subagentes
   timeout: 600                      # tope propio en segundos
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
@@ -321,6 +322,12 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   le falta para que la pregunta se pueda contestar, sin acercar el prompt a lo
   que se espera. Un fallo que apunta a qué corregir del agente o de la skill es
   un buen resultado.
+- **`deny:` esconde, `refuse:` rechaza.** Con `deny:` el agente nunca supo que
+  la herramienta existía: si edita por la shell, está usando lo que tiene, no
+  esquivando un "no". Para medir qué hace ante un rechazo, como cuando el
+  usuario dice que no en el aviso de permiso, la herramienta va en `refuse:`.
+  Medido en B-066: con Edit escondido y la shell abierta, 6 de 6 muestras
+  editaron por la shell sin intentar Edit ni una vez.
 - **Una pregunta por veredicto; lo demás, a `observe:`.** Un escenario de
   disparo pregunta si la skill cargó. Si además querés ver qué HIZO el agente
   (no tocar un archivo, dejar una nota), ponelo en `observe:`: queda en la traza
