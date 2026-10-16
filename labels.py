@@ -34,7 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -212,7 +212,7 @@ let labels = {}; try { labels = JSON.parse(localStorage.getItem(STORE) || "{}");
 // labels.jsonl wins when it is newer: a label corrected outside the page
 // (or on another browser) must not be reverted by an older local copy.
 for (const [k, v] of Object.entries(__PRIOR__))
-  if (!labels[k] || (v.at && (!labels[k].at || v.at > labels[k].at))) labels[k] = v;
+  if (!labels[k] || (v.at && (!labels[k].at || Date.parse(v.at) > Date.parse(labels[k].at)))) labels[k] = v;
 let i = DATA.findIndex(d => !labels[d.key] || labels[d.key].criterion_sha !== d.criterion_sha); if (i < 0) i = 0;
 const $ = id => document.getElementById(id);
 function save() { try { localStorage.setItem(STORE, JSON.stringify(labels)); } catch (e) {} }
@@ -253,6 +253,14 @@ def build_page(candidates: list, prior: dict) -> str:
             .replace("__PRIOR__", json.dumps(prior, ensure_ascii=False).replace("</", "<\\/")))
 
 
+def when(stamp: str) -> datetime:
+    """An `at` as an aware instant. The page writes UTC with a Z; a stamp
+    written by hand may be local and naive. Compared as text, "…T12:00"
+    (local) and "…T14:00Z" order by accident, not by time."""
+    d = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    return d if d.tzinfo else d.astimezone()
+
+
 def merge(existing: list, exported: list, candidates: list) -> list:
     """Exported labels win over earlier ones for the same key, unless the one
     on file is newer — a label revised outside the page must not be undone by
@@ -268,7 +276,7 @@ def merge(existing: list, exported: list, candidates: list) -> list:
             raise SystemExit(f"{r['key']}: label must be one of {CHOICES}, got {r.get('label')!r}")
         c = known[r["key"]]
         prior = by_key.get(r["key"], {})
-        if prior.get("at") and r.get("at") and r["at"] < prior["at"]:
+        if prior.get("at") and r.get("at") and when(r["at"]) < when(prior["at"]):
             continue
         kept = {k: prior[k] for k in ("original_label", "revised", "excluded") if k in prior}
         by_key[r["key"]] = {**kept, "key": r["key"], "label": r["label"], "note": r.get("note", ""),

@@ -400,7 +400,7 @@ class Refresh(unittest.TestCase):
 
     def test_the_page_lets_a_newer_label_win_and_shows_stale_ones(self):
         page = labels.build_page([labels.public(sample(1, "PASS"))], {})
-        self.assertIn("v.at > labels[k].at", page)
+        self.assertIn("Date.parse(v.at) > Date.parse(labels[k].at)", page)
         self.assertIn('id="stale"', page)
 
 
@@ -447,6 +447,15 @@ class Review(unittest.TestCase):
         self.assertIn("1 label(s) excluded", text)
         self.assertIn("all      n=  1", text)
         self.assertIn("first    n=  1  TPR 0.00", text)       # first label PASS, judge FAIL
+
+
+class When(unittest.TestCase):
+
+    def test_utc_and_local_stamps_compare_as_instants(self):
+        local_noon = labels.datetime(2026, 10, 15, 12, 0).astimezone()
+        later_utc = (local_noon + labels.timedelta(hours=1)).astimezone(labels.timezone.utc)
+        self.assertLess(labels.when(local_noon.replace(tzinfo=None).isoformat()),
+                        labels.when(later_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")))
 
 
 if __name__ == "__main__":
