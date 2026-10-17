@@ -94,6 +94,10 @@ instructions mention Senior Architect or Rioplatense?". It also makes a strong
 judge cheap — ~$0.004 per verdict on Opus instead of ~$0.40, because the
 default session's tool schemas alone were ~30k tokens of cache write. And a verdict that doesn't parse as PASS/FAIL is an
 `ERROR`, never a pass: a harness that fails toward green is worse than none.
+The judge reasons first and ends on a `VERDICT: PASS|FAIL` line (B-068): with
+the verdict on its first line it decided before thinking, and once reasoned
+its way to the opposite answer while the parser kept the first word. Two
+verdict lines that disagree are an `ERROR` too.
 
 **Routing works differently.** It's the one thing you can't test by invoking an
 agent, because the question is *which* agent. Those scenarios show a neutral

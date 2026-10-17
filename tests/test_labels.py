@@ -260,25 +260,25 @@ class CodexJudge(unittest.TestCase):
         return got, sp.call_args
 
     def test_reads_the_same_text_run_judge_sends(self):
-        _, call = self.judge(MSG("PASS\nok"), DONE)
+        _, call = self.judge(MSG("ok\nVERDICT: PASS"), DONE)
         self.assertEqual(call.kwargs["input"], run.judge_prompt("PASS if X", "the reply"))
         self.assertEqual(call.args[0][:3], ["codex", "exec", "--json"])
 
     def test_pass_fail_and_ambiguous(self):
-        self.assertEqual(self.judge(MSG("**PASS**\nfine"), DONE)[0], ("PASS", "fine", 940))
-        self.assertEqual(self.judge(MSG("FAIL\nno"), DONE)[0][0], "FAIL")
-        got, call = self.judge(MSG("AMBIGUOUS\ncannot tell"), DONE, ambiguous=True)
+        self.assertEqual(self.judge(MSG("fine\n**VERDICT: PASS**"), DONE)[0], ("PASS", "fine", 940))
+        self.assertEqual(self.judge(MSG("no\nVERDICT: FAIL"), DONE)[0][0], "FAIL")
+        got, call = self.judge(MSG("cannot tell\nVERDICT: AMBIGUOUS"), DONE, ambiguous=True)
         self.assertEqual(got[0], "AMBIGUA")
         self.assertEqual(call.kwargs["input"], run.judge_prompt("PASS if X", "the reply", True))
 
     def test_a_judge_that_used_a_tool_gives_no_verdict(self):
         (v, why, _), _ = self.judge({"type": "item.completed", "item": {"type": "command_execution"}},
-                                    MSG("PASS\nlooked it up"), DONE)
+                                    MSG("looked it up\nVERDICT: PASS"), DONE)
         self.assertIsNone(v)
         self.assertIn("command_execution", why)
 
     def test_a_failed_call_or_an_unreadable_answer_is_no_verdict(self):
-        self.assertIsNone(self.judge(MSG("PASS"), rc=1)[0][0])
+        self.assertIsNone(self.judge(MSG("VERDICT: PASS"), rc=1)[0][0])
         self.assertIsNone(self.judge({"type": "turn.failed", "error": "quota"})[0][0])
         self.assertIsNone(self.judge(MSG("I think it mostly works"), DONE)[0][0])
 
@@ -330,7 +330,7 @@ class Verdicts(unittest.TestCase):
     def test_run_judge_still_reads_only_pass_or_fail(self):
         self.assertNotIn("AMBIGUOUS", run.judge_prompt("c", "r"))
         self.assertIn("AMBIGUOUS", run.judge_prompt("c", "r", ambiguous=True))
-        self.assertEqual(run.parse_verdict("<br>\nFAIL\nwhy")[0], "FAIL")
+        self.assertEqual(run.parse_verdict("why\n<br>\nVERDICT: FAIL")[0], "FAIL")
 
     def test_an_abstaining_judge_is_counted_apart(self):
         rows = [{"label": "FAIL", "judge": "FAIL"}, {"label": "FAIL", "judge": "AMBIGUA"},

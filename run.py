@@ -674,28 +674,40 @@ def judge(criterion: str, reply: str) -> tuple:
 
 def judge_prompt(criterion: str, reply: str, ambiguous: bool = False) -> str:
     """The one grading text every judge reads, whichever model or CLI runs it,
-    so that comparing judges compares models and nothing else."""
-    answer = ("Answer with exactly PASS, FAIL or AMBIGUOUS on the first line — "
-              "AMBIGUOUS only when this reply alone does not let you decide — "
-              "then one sentence explaining why." if ambiguous else
-              "Answer with exactly PASS or FAIL on the first line, then one "
-              "sentence explaining why.")
+    so that comparing judges compares models and nothing else.
+
+    Reasoning first, verdict last (B-068). With the verdict on the first line
+    the judge decided before thinking, and could think its way out of it: run
+    20261016-112616 got "FAIL", then "Reconsidering: … (2) holds … (1) holds
+    … PASS: …", and the parser kept the FAIL of a correct reply."""
+    choices = "PASS, FAIL or AMBIGUOUS" if ambiguous else "PASS or FAIL"
+    amb = (" Use AMBIGUOUS only when this reply alone does not let you decide."
+           if ambiguous else "")
+    answer = (f"First check the reply against each part of the criterion, in a few "
+              f"short sentences. Then end with one last line that is exactly "
+              f"`VERDICT: ` followed by {choices}, and nothing after it.{amb}")
     return f"CRITERION:\n{criterion}\n\nREPLY TO GRADE:\n---\n{reply}\n---\n\n{answer}"
 
 
+VERDICT_LINE = re.compile(r"^\W*VERDICT\W*:?\W*(PASS|FAIL|AMBIGUOUS)\b\W*$", re.I)
+VERDICT_WORD = {"PASS": "PASS", "FAIL": "FAIL", "AMBIGUOUS": "AMBIGUA"}
+
+
 def parse_verdict(text: str) -> tuple:
-    """("PASS" | "FAIL" | "AMBIGUA" | None, why). The verdict is the first line
-    that says something. Seen: a verdict preceded by a bare `<br>` line, which
-    read as "no verdict" and turned a 3/3 into a flaky — the parser's mistake,
-    not the agent's."""
-    lines = [l.strip() for l in text.strip().splitlines()
-             if l.strip() and not re.fullmatch(r"(<[^>]+>|\W)+", l.strip())]
-    head = lines[0].lstrip("*_#` ").upper() if lines else ""
-    why = " ".join(lines[1:]).strip() or text.strip()
-    for word, verdict in (("PASS", "PASS"), ("FAIL", "FAIL"), ("AMBIGU", "AMBIGUA")):
-        if head.startswith(word):
-            return verdict, why
-    return None, f"judge gave no verdict: {text[:120]}"
+    """("PASS" | "FAIL" | "AMBIGUA" | None, why). The verdict is the line that
+    says `VERDICT: X`. None — an ERROR, never a pass — when there is no such
+    line, or when two of them disagree: a judge that contradicts itself has
+    not decided, and taking its first word or its last would be the parser
+    deciding for it. The reasoning before the line is the `why`."""
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    found = [(i, VERDICT_WORD[m.group(1).upper()]) for i, l in enumerate(lines)
+             for m in [VERDICT_LINE.match(l)] if m]
+    if not found:
+        return None, f"judge gave no verdict line: {text[:160]}"
+    if len({v for _, v in found}) > 1:
+        return None, f"judge contradicted itself ({' then '.join(v for _, v in found)}): {text[:160]}"
+    why = " ".join(l for i, l in enumerate(lines) if i not in {j for j, _ in found}).strip()
+    return found[-1][1], why or text.strip()
 
 
 # --------------------------------------------------------------------------- #

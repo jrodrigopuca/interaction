@@ -104,6 +104,11 @@ muestras que `--repeat`, no.
   style (con la sesión por defecto respondía que sus instrucciones mencionaban
   "Senior Architect"), y cuesta unos 0,004 a 0,03 por veredicto en vez de
   0,40.
+- **El juez razona primero y da el veredicto al final**, en una línea
+  `VERDICT: PASS` o `VERDICT: FAIL` (B-068). Con el veredicto en la primera
+  línea decidía antes de pensar: una vez escribió FAIL, razonó, terminó en
+  PASS, y quedó FAIL una respuesta correcta. Sin esa línea, o con dos que no
+  coinciden, la muestra es ERROR.
 
 ### Qué escribe una corrida
 
