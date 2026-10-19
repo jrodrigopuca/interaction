@@ -99,5 +99,57 @@ class GeneratorScenarioRegex(unittest.TestCase):
             self.assertNotRegex(cmd, self.rx)
 
 
+TESTS_RAN = {"cmd": r"parseCSVLine\.test\.mjs|node\s+--test", "output": r"\b(\d+)/\1 pasaron\b"}
+
+
+class ExpectCommandOutput(unittest.TestCase):
+    """B-082: an item {cmd, output} is judged by what the command printed, not
+    by its exit code — a compound command's exit belongs to its last segment."""
+
+    def test_a_compound_command_whose_tail_failed_counts_by_its_output(self):
+        """The case of run 20261019-111623, sample 1."""
+        ev = bash("a", "node parseCSVLine.test.mjs; node -e 'bad'",
+                  result="Exit code 1\n24/24 pasaron\n[eval]:1\nSyntaxError", error=True)
+        self.assertEqual(fails(ev, [TESTS_RAN]), [])
+        # The plain form still reads the exit code, as before.
+        self.assertTrue(fails(ev, [TESTS_RAN["cmd"]]))
+
+    def test_some_tests_failing_does_not_count(self):
+        out = fails(bash("a", "node parseCSVLine.test.mjs", result="23/24 pasaron", error=True),
+                    [TESTS_RAN])
+        self.assertTrue(out and "ran without that output" in out[0])
+
+    def test_a_refused_command_with_no_output_does_not_count(self):
+        out = fails(bash("a", "node parseCSVLine.test.mjs",
+                         result="This command requires approval", error=True), [TESTS_RAN])
+        self.assertTrue(out)
+
+    def test_output_as_a_list_of_text_blocks_is_read(self):
+        ev = bash("a", "node --test", result=[{"type": "text", "text": "# 31/31 pasaron"}])
+        self.assertEqual(fails(ev, [TESTS_RAN]), [])
+
+    def test_the_string_form_is_unchanged(self):
+        self.assertEqual(fails(bash("a", "npm run gen")), [])
+        self.assertTrue(fails(bash("a", "npm run gen", error=True)))
+
+    def test_the_loader_takes_only_strings_or_exactly_cmd_and_output(self):
+        import tempfile
+        from unittest import mock
+
+        def load(item):
+            with tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / "x.yaml").write_text(
+                    "- id: x\n  category: c\n  prompt: p\n  assert:\n"
+                    f"    observe:\n      expect_commands: [{item}]\n")
+                with mock.patch.object(run, "SCENARIOS", Path(tmp)):
+                    return run.load_scenarios()
+
+        self.assertEqual(len(load("'node'")), 1)
+        self.assertEqual(len(load("{cmd: 'node', output: 'ok'}")), 1)
+        for bad in ("{cmd: 'node'}", "{cmd: 'node', output: 'ok', exit: 0}", "3"):
+            with self.assertRaises(SystemExit, msg=bad):
+                load(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

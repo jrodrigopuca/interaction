@@ -293,6 +293,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     expect_file_content: {"docs/**/*.md": ['(?i)revisit']}  # algún archivo escrito que calce con el glob cumple cada regex (el juez lee la respuesta, no el disco)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
     expect_commands: ['\bnpm run gen\b']  # regex que algún comando Bash tiene que CORRER sin error (rechazado o fallido no cuenta)
+    # o, juzgado por lo que IMPRIMIÓ y no por el exit: {cmd: <regex>, output: <regex>} (ver abajo)
     expect_skills: [lh-x]           # skill que el agente debe haber cargado
     forbid_skills: [lh-x]           # skill que no debe haber cargado
     observe:                        # los mismos chequeos, registrados y NUNCA contados en el veredicto
@@ -404,6 +405,18 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   lo que se mide. Una muestra cortada igual dice qué skill cargó: si cargó la
   esperada es PASS, si cargó una prohibida es FAIL, y si todavía no había
   cargado es ERROR, nunca FAIL.
+- **Un comando compuesto falla por su último tramo; juzgalo por su salida.**
+  En `a; b` el código de salida es el de `b`, y el host marca toda la
+  llamada como error: `expect_commands` en su forma de cadena la cuenta como
+  no corrida aunque `a` haya hecho lo pedido. Medido en `20261019-111623`:
+  `node parseCSVLine.test.mjs; node -e …` imprimió "24/24 pasaron" y el
+  error de sintaxis del segundo tramo hizo caer el chequeo. La forma
+  `{cmd: <regex>, output: <regex>}` pasa si algún comando que calza con
+  `cmd` imprimió algo que calza con `output`, sin mirar el exit. Es además
+  más fuerte cuando la salida lo permite: `'\b(\d+)/\1 pasaron\b'` exige
+  que pasaran TODOS los casos (24/24, no 23/24), cosa que un exit 0 no
+  dice. Cada ítem es una cadena o un dict con exactamente `cmd` y `output`;
+  otra forma se rechaza al cargar.
 - **Una skill "cargada" es una llamada a `Skill` que no volvió con error.**
   Una llamada cuyo resultado trae `is_error` (la skill no existe, está
   apagada o fue rechazada) no cargó nada: va a `skills_refused` en la traza y

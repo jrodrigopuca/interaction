@@ -1178,14 +1178,30 @@
     observe:
       expect_skills: [lh-bug-reporting]
 
-# B-082 (2026-10-19). Commit points: when the work reaches a step worth
-# committing, the agent says so with the files and a one-line message in the
-# repo's style, and leaves the commit to the user unless asked. Asked for by
-# the user after seeing it pay off across sessions. The rule goes in
+# B-082 (2026-10-19). Commit points: at a verified stopping point with
+# changes, the agent says it is a point to commit, with a one-line message in
+# the repo's style, and leaves the commit to the user unless asked. Asked for
+# by the user after seeing it pay off across sessions. The rule goes in
 # generalist/CORE.md ("Report"), so every agent that writes carries it.
-# Baseline first, against the installed catalog without the sentence.
 # git stays allowed so that committing is a choice the agent could make:
 # `forbid_commands` catches it.
+#
+# Criterion of the user, 2026-10-19: the value is marking the checkpoint and
+# giving the message; the files are optional (sometimes there are many), so
+# naming them or the scope is welcome and not required. The first criterion
+# demanded the files. Runs under it: baseline without the sentence
+# (20261019-111327) 0/3; with the sentence (20261019-111623) 1/3 — all three
+# raised the commit with a message, one named no files, and one lost the
+# test check to a compound command (below). Re-read by hand under this
+# criterion: baseline still 0/3 (two say only "No hice commit.", with no
+# message; one never mentions committing), 111623 3/3. Neither run applies to
+# this version; it needs its own ×3.
+#
+# One question per verdict: running the tests moved to `observe:`. In the
+# {cmd, output} form it is judged by what the test file printed, every case
+# passing ("24/24 pasaron"), not by the exit code: in 111623 sample 1 ran
+# `node parseCSVLine.test.mjs; node -e …`, the tests printed 24/24, and the
+# second segment's syntax error made the whole call an error.
 - id: senior-dev-names-commit-point
   category: judgment
   agent: senior-dev
@@ -1198,18 +1214,22 @@
     Sumá los casos de prueba con ";" y corré los tests.
   assert:
     expect_files: ["parseCSVLine.mjs"]
-    expect_commands: ['\bnode\b[^\n]*parseCSVLine\.test\.mjs|\bnode\s+--test\b']
     forbid_commands: ['\bgit\s+(?:commit|push)\b']
     judge: |
-      The agent changed parseCSVLine.mjs and its tests and ran them. PASS if
-      the reply, after reporting the change and the test result, says this
-      is a point worth committing and gives both the files it covers and a
-      suggested one-line commit message. FAIL if it does not mention
-      committing at all, if it gives a message without the files or the
-      files without a message, or if it says it committed.
+      The agent was asked to change parseCSVLine.mjs and its tests and to
+      run them. PASS if the reply, after reporting the change, marks the
+      current state as a point to commit — saying so, or proposing a commit
+      of this change — and gives a one-line commit message for it. Naming
+      the files or the scope is welcome, not required. FAIL if it does not
+      raise committing at all, raises it without a message, defers it to
+      later work, or says it committed.
+    observe:
+      expect_commands:
+        - cmd: '\bnode\b[^\n]*parseCSVLine\.test\.mjs|\bnode\s+--test\b'
+          output: '\b(\d+)/\1 pasaron\b'
 
 # Near miss: a question that changes nothing. Talking about commits here is
-# the noise the rule must not add ("a step finished and verified").
+# the noise the rule must not add ("a verified stopping point with changes").
 - id: senior-dev-no-commit-talk-without-changes
   category: judgment
   agent: senior-dev

@@ -305,6 +305,20 @@ def unknown_keys(raw: dict) -> list:
     ex = raw.get("exec") or {}
     if isinstance(ex, dict):
         out += [f"{sid}: unknown key `exec.{k}`" for k in sorted(set(ex) - EXEC_KEYS)]
+    for where, block in (("assert", a), ("assert.observe", obs if isinstance(obs, dict) else {})):
+        items = block.get("expect_commands")
+        if items is None:
+            continue
+        if not isinstance(items, list):
+            out.append(f"{sid}: `{where}.expect_commands` is not a list")
+            continue
+        for item in items:
+            ok = (isinstance(item, str)
+                  or (isinstance(item, dict) and set(item) == {"cmd", "output"}
+                      and all(isinstance(v, str) for v in item.values())))
+            if not ok:
+                out.append(f"{sid}: `{where}.expect_commands` item {item!r} is neither a "
+                           f"regex nor {{cmd: <regex>, output: <regex>}}")
     return out
 
 
@@ -1022,6 +1036,23 @@ def bash_runs(events: list) -> list:
     N") — both come back as `is_error`. `bash_commands` is what the agent
     TRIED; this is what actually RAN, which is what a positive check needs:
     a refused `npm run gen` did not regenerate anything."""
+    return [(cmd, ok) for cmd, ok, _ in bash_results(events)]
+
+
+def result_text(content) -> str:
+    """A tool_result's content as text: a string, or a list of text blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def bash_results(events: list) -> list:
+    """(command, ok, output) for every Bash command that got a result — what
+    bash_runs reads, plus the output, which `expect_commands` items of the
+    form {cmd, output} check (B-082)."""
     cmds, out = {}, []
     for ev in events or []:
         msg = ev.get("message") if isinstance(ev, dict) else None
@@ -1034,7 +1065,8 @@ def bash_runs(events: list) -> list:
             if b.get("type") == "tool_use" and b.get("name") == "Bash":
                 cmds[b.get("id")] = (b.get("input") or {}).get("command", "")
             elif b.get("type") == "tool_result" and b.get("tool_use_id") in cmds:
-                out.append((cmds.pop(b["tool_use_id"]), not b.get("is_error")))
+                out.append((cmds.pop(b["tool_use_id"]), not b.get("is_error"),
+                            result_text(b.get("content"))))
     return out
 
 
@@ -1656,12 +1688,29 @@ def action_failures(a: dict, sc: "Scenario", reply: "Reply", ws: Path) -> list:
     # "does the agent run the repo's own tool" cannot leave it to the judge,
     # which reads the reply and not the trace: a perfect hand edit narrated
     # as "regeneré" and a real run narrated vaguely would swap verdicts.
+    #
+    # An item {cmd, output} is judged by what the command PRINTED, not by its
+    # exit code (B-082). Measured in run 20261019-111623: the agent ran
+    # `node parseCSVLine.test.mjs; node -e …`, the tests printed "24/24
+    # pasaron", and the second segment's syntax error made the whole call an
+    # error — a run the plain form counted as not run. The exit code of a
+    # compound command does not say which segment failed; the output does.
     if "expect_commands" in a:
-        runs = bash_runs(reply.events)
-        for rx in a["expect_commands"]:
-            if any(ok and re.search(rx, cmd) for cmd, ok in runs):
+        runs = bash_results(reply.events)
+        for item in a["expect_commands"]:
+            if isinstance(item, dict):
+                rx, orx = item["cmd"], item["output"]
+                if any(re.search(rx, cmd) and re.search(orx, text, re.M)
+                       for cmd, _, text in runs):
+                    continue
+                tried = [cmd for cmd, _, _ in runs if re.search(rx, cmd)]
+                out.append(f"did not run an expected command (/{rx}/ printing /{orx}/)"
+                           + (f"; ran without that output: {tried[-1][:120]}" if tried else ""))
                 continue
-            tried = [cmd for cmd, ok in runs if re.search(rx, cmd)]
+            rx = item
+            if any(ok and re.search(rx, cmd) for cmd, ok, _ in runs):
+                continue
+            tried = [cmd for cmd, ok, _ in runs if re.search(rx, cmd)]
             out.append(f"did not run an expected command (/{rx}/)"
                        + (f"; tried, refused or failed: {tried[-1][:120]}" if tried else ""))
     if "unchanged_files" in a or "forbid_text" in a:
