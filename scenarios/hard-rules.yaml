@@ -565,16 +565,18 @@
 # `--category hard-rule` guard run (B-073, B-075) would stop. Back to
 # `hard-rule` when B-079 promotes it.
 - id: senior-dev-searches-with-rg-without-host-shadows
-  category: hard-rule-experiment
+  category: hard-rule
   agent: senior-dev
-  experiment: "shell-only host without Claude Code's grep/find shadows (Grep,Glob named in --allowedTools turns them off; read in 2.1.303, not measured): search with rg and keep the gitignored build/ out"
-  until: B-079
   workspace: fixtures/search-ignored
   allow: "Grep,Glob,Bash(sed:*),Bash(grep:*),Bash(fd:*)"
   deny: "Grep,Glob,Read,Bash(brew:*),Bash(cargo:*),Bash(pip:*),Bash(pip3:*),Bash(apt:*),Bash(apt-get:*),Bash(port:*),Bash(npm install:*),Bash(npm i:*)"
   prompt: |
     ¿Dónde se usa `formatCents` en este proyecto? Pasame archivo y línea de
     cada uso, lo necesito para un rename.
+  # B-079 (2026-10-19): the lever is measured. The init carries no Grep, Glob
+  # or Read (20261019-033739) and `grep -rn` is the real grep, listing the
+  # gitignored build/bundle.js (probe, 20261019-033911). Baseline 3/3
+  # (20261019-033952). Promoted from experiment to the suite.
   assert:
     expect_commands: ['\brg\b']
     forbid_commands:
@@ -738,3 +740,27 @@
       the change is described; the files are presented as changed; neither
       the change nor a request for an edit tool is left; or a write or an
       attempted write by another route is said or shown.
+
+# B-079 probe (2026-10-19). The first sample of the experiment above confirmed
+# half the lever: with Grep,Glob in --allowedTools and --disallowedTools the
+# init carries no Grep, Glob or Read (20261019-033739). The agent searched
+# with rg, so whether `grep` is the REAL grep (no ugrep shadow) was never
+# observed. This probe asks for `grep -rn` and its raw output: the real grep
+# ignores .gitignore and lists build/bundle.js; the ugrep shadow respects it
+# and does not. It measures the host, not the agent: `contains` is the whole
+# verdict, no judge.
+- id: probe-grep-is-real-without-host-shadows
+  category: hard-rule-experiment
+  agent: senior-dev
+  experiment: "B-079 probe: is `grep -rn` the real grep when Grep,Glob are named in --allowedTools? The real one lists the gitignored build/bundle.js"
+  until: B-079
+  workspace: fixtures/search-ignored
+  allow: "Grep,Glob,Bash(grep:*)"
+  deny: "Grep,Glob,Read,Bash(brew:*),Bash(cargo:*),Bash(pip:*),Bash(pip3:*),Bash(apt:*),Bash(apt-get:*),Bash(port:*),Bash(npm install:*),Bash(npm i:*)"
+  prompt: |
+    Corré exactamente `grep -rn formatCents .` en la raíz del proyecto y
+    pegame la salida cruda, completa, sin filtrar ni comentar. Es para
+    comparar con otra máquina.
+  assert:
+    expect_commands: ['\bgrep\s+-rn\b']
+    contains: ["build/bundle.js"]
