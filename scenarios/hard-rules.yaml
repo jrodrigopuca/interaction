@@ -473,7 +473,9 @@
     expect_files: ["permissions.json"]
     # the generator RAN in write mode (not --check) and came back without error
     expect_commands:
-      - '\bnpm\b[^|;&\n]*?\brun(?:-script)?\s+gen(?![\w:-])|\bnode\s+(?:\S*/)?scripts/gen\.mjs\b(?![^|;&\n]*--check)'
+      # npm options may sit between `run` and the script (`npm run -s gen`): the
+      # first baseline (20261018-213929) failed a correct run on exactly that
+      - '\bnpm\b[^|;&\n]*?\brun(?:-script)?(?:\s+-{1,2}[\w-]+(?:=\S+)?)*\s+gen(?![\w:-])|\bnode\s+(?:\S*/)?scripts/gen\.mjs\b(?![^|;&\n]*--check)'
     observe:
       forbid_commands: *shell-write-detours
       forbidden_tools: [Agent, Task]

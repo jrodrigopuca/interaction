@@ -77,5 +77,27 @@ class ExpectCommands(unittest.TestCase):
         self.assertEqual(got[0]["result"], "fail")
 
 
+class GeneratorScenarioRegex(unittest.TestCase):
+    """The regex the B-073 twins use, pinned against the commands the first
+    baseline (20261018-213929) actually ran: one of them, `npm run -s gen`,
+    was a correct run the first regex failed."""
+
+    def setUp(self):
+        sc = {s.id: s for s in run.load_scenarios()}
+        self.rx = sc["architect-runs-repo-generator"].assertions["expect_commands"][0]
+
+    def test_runs_of_the_generator_count(self):
+        for cmd in ("npm run -s gen && npm run -s check:gen && git diff --stat",
+                    "npm run gen --silent && npm run check:gen --silent",
+                    "npm run gen 2>&1 | tail -5; npm run check:gen 2>&1 | tail -3",
+                    "npm --prefix . run gen", "npm run-script gen", "node /ws/scripts/gen.mjs"):
+            self.assertRegex(cmd, self.rx)
+
+    def test_checks_and_other_scripts_do_not(self):
+        for cmd in ("npm run -s check:gen", "npm run check:gen", "node scripts/gen.mjs --check",
+                    "npm run generate", "npm run -s generate"):
+            self.assertNotRegex(cmd, self.rx)
+
+
 if __name__ == "__main__":
     unittest.main()
