@@ -176,6 +176,7 @@ class Scenario:
     allow: str = ""          # --allowedTools, comma-separated
     deny: str = ""           # --disallowedTools, comma-separated: the tool is HIDDEN
     refuse: str = ""         # tools left visible but out of the permissions: a call is REFUSED
+    memory: str = ""         # "off": the shadow agent carries no `memory:` line; see shadow_agents
     floor: str = ""          # smallest model family the rule was MEASURED to hold on
     budget: float = 0.0      # per-sample ceiling override (USD); see sample_budget
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
@@ -294,6 +295,7 @@ def load_scenarios() -> list:
                 allow=raw.get("allow", ""),
                 deny=raw.get("deny", ""),
                 refuse=raw.get("refuse", "") or "",
+                memory=memory_mode(raw.get("memory"), raw["id"]),
                 floor=raw.get("floor", "") or "",
                 budget=float(raw.get("budget", 0) or 0),
                 fingerprint=_digest(src),
@@ -1147,7 +1149,7 @@ def make_workspace(sc: Scenario) -> Path:
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     git_root(ws)
-    shadow_agents(ws)
+    shadow_agents(ws, sc.memory)
     shadow_skills(ws)
     return ws
 
@@ -1211,9 +1213,38 @@ def shadow_skills(ws: Path) -> None:
 AGENTS_DIR = Path.home() / ".claude" / "agents"
 
 
-def shadow_agents(ws: Path) -> None:
+MEMORY_MODES = ("", "off")
+
+
+def memory_mode(raw, scenario_id: str = "") -> str:
+    """The scenario's `memory:` field: absent (the shadow agent gets
+    `memory: local`, as always) or `off` (no `memory:` line at all). Anything
+    else is a typo that would silently run with memory on, so it is refused.
+    YAML 1.1 reads a bare `off` as the boolean False, which is what the
+    natural spelling `memory: off` arrives as; `on`/`yes`/`true` arrive as
+    True and are refused like any other value."""
+    if raw is False:
+        return "off"
+    mode = "" if raw is None else str(raw).strip().lower()
+    if raw is True or mode not in MEMORY_MODES:
+        sys.exit(f"{scenario_id}: memory `{raw}` is not one of {MEMORY_MODES[1:]} — "
+                 f"leave the field out for the usual `memory: local` shadow")
+    return mode
+
+
+def shadow_agents(ws: Path, memory: str = "") -> None:
     """Copy the installed agents into `<ws>/.claude/agents/` with memory
     scoped to the workspace, so a run never writes the user's real memory.
+
+    `memory="off"` (a scenario's `memory: off`, B-077) strips the `memory:`
+    line instead: the agent runs with no store at all, which is the condition
+    on opencode, Kiro, Codex and Antigravity — none has agent memory — and
+    the only way to ask, in Claude Code, what an agent does with "anotalo"
+    when there is nowhere but the project to put it. Inferred from the
+    installer's measurement that an agent WITHOUT the line gets no memory
+    tools (install.py, `memory_line`); not yet measured here that the host
+    creates no store on its own — if a `~/.claude/agent-memory/<agent>/` ever
+    shows up after an `off` sample, that inference was wrong.
 
     The catalog installs every agent with `memory: user`, which persists to
     `~/.claude/agent-memory/<agent>/` — the same files the user's real sessions
@@ -1238,8 +1269,11 @@ def shadow_agents(ws: Path) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     for src in AGENTS_DIR.glob("*.md"):
         text = src.read_text(encoding="utf-8")
-        text = re.sub(r"^memory:\s*\S+\s*$", "memory: local", text,
-                      count=1, flags=re.MULTILINE)
+        if memory == "off":
+            text = re.sub(r"^memory:\s*\S+\s*\n", "", text, count=1, flags=re.MULTILINE)
+        else:
+            text = re.sub(r"^memory:\s*\S+\s*$", "memory: local", text,
+                          count=1, flags=re.MULTILINE)
         (dst / src.name).write_text(text, encoding="utf-8")
 
 

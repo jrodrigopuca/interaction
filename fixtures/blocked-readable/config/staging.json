@@ -1,0 +1,6 @@
+{
+  "host": "staging.internal",
+  "port": 8081,
+  "basePath": "/api/v2",
+  "logLevel": "debug"
+}

@@ -302,6 +302,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   allow: "Bash(fd:*)"               # --allowedTools
   deny: "Bash(brew:*)"              # --disallowedTools: el agente NO VE la herramienta
   refuse: "Edit,Write"              # la ve, pero fuera de los permisos: al usarla recibe un rechazo
+  memory: off                       # el agente sombra va SIN línea memory:, como en un host sin memoria
   delegate: true                    # graba el árbol de subagentes
   timeout: 600                      # tope propio en segundos
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
@@ -334,6 +335,16 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   usuario dice que no en el aviso de permiso, la herramienta va en `refuse:`.
   Medido en B-066: con Edit escondido y la shell abierta, 6 de 6 muestras
   editaron por la shell sin intentar Edit ni una vez.
+- **`memory: off` simula un host sin memoria.** Por defecto el agente sombra
+  lleva `memory: local` y lo que persiste queda en el workspace de la muestra
+  (`memory_forbid_types` lo lee). Con `memory: off` la línea `memory:` se
+  borra del frontmatter: el agente corre sin ningún store, que es la condición
+  de opencode, Kiro, Codex y Antigravity (ninguno tiene memoria de agente).
+  Sirve para preguntar qué hace con "anotalo" cuando el único destino es un
+  archivo del proyecto. Cualquier otro valor se rechaza al cargar: un typo
+  correría con memoria y nadie lo vería. Inferido del instalador (un agente
+  sin la línea no recibe las herramientas de memoria), no medido todavía que
+  el host no cree el store por su cuenta.
 - **Una pregunta por veredicto; lo demás, a `observe:`.** Un escenario de
   disparo pregunta si la skill cargó. Si además querés ver qué HIZO el agente
   (no tocar un archivo, dejar una nota), ponelo en `observe:`: queda en la traza

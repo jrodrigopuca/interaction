@@ -1,0 +1,6 @@
+{
+  "host": "inventory.example.com",
+  "port": 443,
+  "basePath": "/api/v1",
+  "logLevel": "info"
+}

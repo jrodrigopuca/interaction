@@ -1,0 +1,8 @@
+{
+  "name": "billing-lib",
+  "version": "2.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/bundle.mjs"
+  }
+}
