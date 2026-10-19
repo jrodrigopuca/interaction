@@ -1,0 +1,95 @@
+# Is the reply BETTER because of the skill? (B-062, the value question.)
+#
+# skill-triggers.yaml asks whether a skill loads; it cannot say whether the
+# skill is worth its description, which travels in every session. Here the
+# same task runs twice: with the full catalog, and with the skill taken out
+# (`ablate:`). The pair must be identical but for its id and `ablate:` —
+# run.py refuses to load an `ablate:` without such a twin. No difference, and
+# the skill is a candidate to merge, drop, or leave a line in the body; only
+# this measurement decides that.
+#
+# `ablate:` takes catalog names (not copied into the workspace, and their row
+# leaves every agent's Skills table) and host names (turned off through
+# `skillOverrides` in the session's --settings). A sample where the ablated
+# name still reaches the model — offered in the init, or read from its
+# installed copy by path — is an ERROR, not a verdict.
+#
+# Deterministic checks run before the judge and carry the comparison while
+# the judge is not calibrated against human labels (B-039). `manual: true`:
+# each pair is run on demand, with its cost approved.
+
+# --------------------------------------------------------------------------- #
+# security / lh-code-audit. fixtures/audit-sort-ident (see skill-triggers.yaml).
+# Narrow on purpose: the prompt names ONE endpoint. The second instance
+# (users export, `fields`) is found only by hunting the class from its root
+# (sqlIdent); products is the gated decoy (allowlist in productSort).
+# Deterministic: the reply names the root and the second route. Judge:
+# exploitability claimed for reports AND users, NOT for products.
+# --------------------------------------------------------------------------- #
+- &audit_value_1
+  id: value-code-audit-1
+  category: skill-value
+  agent: security
+  manual: true
+  workspace: fixtures/audit-sort-ident
+  budget: 2
+  prompt: |
+    Un cliente abrió un ticket: pegándole a /reports/export con valores raros
+    en `sort` a veces recibe un 500. Antes de tratarlo como un bug común,
+    ¿hay algo de seguridad ahí? El código está en este repo.
+  assert:
+    matches: '(?is)(?=.*sqlIdent)(?=.*(users-repo|/admin/users|pickColumns|\bfields\b))'
+    judge: |
+      The fixture: sqlIdent() in src/db/sql.mjs wraps an identifier in double
+      quotes without escaping a double quote inside it. /reports/export
+      passes `sort` unvalidated (buildListOptions) into ORDER BY via
+      sqlIdent; /admin/users/export passes `fields` unvalidated (pickColumns)
+      into the SELECT list via sqlIdentList; /products passes `sort` through
+      the PRODUCT_SORTS allowlist first and is safe. PASS if the reply (1)
+      says /reports/export is SQL-injectable through `sort` and places the
+      cause in sqlIdent not escaping the quote and/or the missing allowlist,
+      (2) reports /admin/users/export (`fields`) as a second instance of the
+      same flaw, and (3) does not claim /products is exploitable (calling
+      sqlIdent itself unsafe is fine; saying products is safe because of the
+      allowlist is ideal). FAIL if it misses either vulnerable route, calls
+      products exploitable, or treats the 500 as a plain functional bug.
+
+- <<: *audit_value_1
+  id: value-code-audit-1-without
+  ablate: [lh-code-audit]
+
+# --------------------------------------------------------------------------- #
+# dba / lh-query-performance (tanda P6). The user proposes the WRONG column
+# order (range/sort column first). dba's body says nothing about composite
+# order; lh-query-performance #3 does. Deterministic: an index led by
+# account_id, followed by occurred_at.
+# --------------------------------------------------------------------------- #
+- &qp_value_1
+  id: value-query-performance-1
+  category: skill-value
+  agent: dba
+  manual: true
+  prompt: |
+    Postgres 16. El listado de eventos tarda 3 s:
+
+    SELECT * FROM events
+    WHERE account_id = $1 AND occurred_at >= now() - interval '30 days'
+    ORDER BY occurred_at DESC
+    LIMIT 50;
+
+    `events` tiene 80 millones de filas y unas 20 mil cuentas. Pensaba crear
+    `CREATE INDEX ON events (occurred_at, account_id);`. ¿Va?
+  assert:
+    matches: '(?is)\(\s*account_id\s*,\s*occurred_at'
+    judge: |
+      PASS if the reply says the proposed order (occurred_at, account_id) is
+      wrong or worse, and recommends an index led by the equality column
+      account_id followed by occurred_at (DESC optional), explaining that
+      equality columns go before the range/sort column so the sort and the
+      range are served by the index. FAIL if it accepts the proposed order,
+      recommends occurred_at first, or recommends two single-column indexes
+      as the fix.
+
+- <<: *qp_value_1
+  id: value-query-performance-1-without
+  ablate: [lh-query-performance]

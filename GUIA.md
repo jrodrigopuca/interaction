@@ -273,7 +273,8 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
 ```yaml
 - id: qa-never-fixes-product        # único en toda la suite
   category: hard-rule               # routing | composition | hard-rule | handoff |
-                                    # inheritance | judgment | self-verification | build-quality
+                                    # inheritance | judgment | self-verification | build-quality |
+                                    # skill-trigger | skill-value
   agent: qa                         # vacío en routing: elegir el agente ES la pregunta
   expect: dba                       # solo routing: quién debería recibir el trabajo
   prompt: |                         # lo que se le dice al agente
@@ -309,7 +310,16 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   timeout: 600                      # tope propio en segundos
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
   manual: true                      # excluido de ./run.py a secas; correr con --category
+  ablate: [lh-code-audit]           # skills fuera de la sesión: rama "sin" de una medición de valor (ver abajo)
 ```
+
+**El loader es estricto.** Una clave que el harness no conoce, arriba, en
+`assert:`, en `observe:` o en `exec:`, corta la carga con un mensaje que nombra
+cada una. Antes se ignoraba en silencio: un `ablate:` desconocido corría su
+rama idéntica a la otra con una huella propia (dos mediciones iguales que se
+leían como distintas), y un `forbid_skill:` mal escrito pasaba siempre.
+`observe:` acepta solo chequeos sobre lo que el agente HIZO (los de
+`action_failures`): un `matches` o un `contains` ahí también se rechaza.
 
 Reglas para escribir uno bueno, sacadas de errores reales:
 
@@ -394,6 +404,45 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   lo que se mide. Una muestra cortada igual dice qué skill cargó: si cargó la
   esperada es PASS, si cargó una prohibida es FAIL, y si todavía no había
   cargado es ERROR, nunca FAIL.
+- **Una skill "cargada" es una llamada a `Skill` que no volvió con error.**
+  Una llamada cuyo resultado trae `is_error` (la skill no existe, está
+  apagada o fue rechazada) no cargó nada: va a `skills_refused` en la traza y
+  no cuenta para `expect_skills` ni `forbid_skills`. Una llamada sin resultado
+  todavía (un corte por presupuesto) sigue contando, como siempre.
+- **El valor de una skill se mide con `ablate:`.** Misma tarea, dos ramas: el
+  catálogo completo y la skill afuera. La rama "sin" es una copia de la otra
+  con otro `id` y `ablate:`; el harness rechaza al cargar un `ablate:` sin un
+  gemelo idéntico en todo lo demás (prompt, aserciones, criterio, fixture),
+  porque entonces la diferencia mediría el escenario y no la skill. Un ancla
+  de YAML (`- <<: *x`) es la forma natural (`scenarios/skill-value.yaml`).
+  - **Un nombre del catálogo** no se copia a la carpeta de la muestra y su
+    fila sale de la tabla de Skills de cada agente sombra. Solo la fila: si
+    el cuerpo la nombra en otro lado, esa mención queda.
+  - **Cualquier otro nombre es del host** (una skill que trae Claude Code:
+    `code-review`, `simplify`…) y se apaga con `skillOverrides: {nombre:
+    "off"}` en el mismo `--settings` que los permisos. Leído en el binario
+    2.1.303, sin medir: `skillOverrides` se lee de la política y de
+    `--settings`, y "off" la saca del modelo y del menú. Necesita la sesión
+    neutral.
+  - **Una muestra donde la skill quitada igual llegó es ERROR, no
+    veredicto:** si el `init` todavía la ofrece (`skills`), o si el agente
+    leyó una ruta con su nombre (la copia instalada sigue en
+    `~/.claude/skills/`; la sesión neutral la saca de la lista, no del
+    disco). Un nombre del host mal escrito no se detecta: no hay lista del
+    host fuera del `init`; mirá que el nombre exista en el `init` de una
+    corrida anterior.
+- **Las skills del host se registran solas, sin nombrarlas.** Cada muestra
+  guarda `host_skills` (lo cargado menos los nombres del catálogo) y, si el
+  escenario tiene `expect_skills`, su casilla (`skill_cell`) y el orden de
+  carga (`first_load`: posición de la esperada y de la primera del host). Las
+  casillas son cuatro: **nuestra + host** (válido, complemento), **solo
+  nuestra**, **solo host** (cargó la del host EN LUGAR de la nuestra: la
+  falla que se busca) y **ninguna**. "Nuestra" es la del `expect_skills` del
+  escenario, no cualquiera del catálogo. El resumen sale al final de la
+  corrida y `viz.py` lo muestra por muestra. Por eso no se escribe
+  `forbid_skills: [code-review]` en un disparo: una del host además de la
+  nuestra no es falla, y una lista de nombres del host envejece con cada
+  versión del CLI.
 
 ---
 
@@ -421,6 +470,7 @@ que algo se rompió.
 |---|---|---|---|
 | `skill-trigger` | ¿Cada agente carga su skill cuando corresponde, y no en un casi-acierto? | Cambió la `description:` de una skill, el CORE, el instalador, o el host (versión de Claude Code) | USD 14,10, 120 escenarios (`20261014-003338`) |
 | `build-quality` | ¿Revisar o delegar mejora el código que se entrega? | Muy rara vez: la pregunta ya está respondida (README) | USD 14,71 las tres ramas |
+| `skill-value` | ¿La respuesta sale mejor gracias a la skill? (con y sin, `ablate:`) | Antes de quitar, fusionar o mover una skill al cuerpo (B-062) | sin corrida todavía; `--dry-run` da el estimado |
 
 ### Cómo se corre
 
@@ -459,6 +509,10 @@ que algo se rompió.
   producto con usuarios, y `lh-focus` como segunda skill junto a `lh-inspire`
   ante "lanzamos y nadie la usó, ¿seguimos?". Una carga de más ahí no es una
   regresión.
+- **"Solo host" es la casilla a leer.** El resumen del final de la corrida
+  cuenta las muestras de disparo por casilla y nombra las que cargaron una
+  skill del host en lugar de la nuestra. Una del host además de la nuestra no
+  es regresión.
 - **Para comparar con la corrida anterior:**
   `./viz.py runs/<base> runs/<nueva> --compare`.
 

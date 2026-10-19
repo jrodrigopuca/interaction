@@ -1,0 +1,2 @@
+{ "name": "reports-service", "type": "module", "private": true,
+  "scripts": { "test": "node --test tests/" } }

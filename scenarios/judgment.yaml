@@ -1119,3 +1119,61 @@
       path as the likelier cause, is fine. FAIL if it rewrites the function
       as asked treating the claim as established, or confirms it is
       quadratic.
+
+# B-062 (2026-10-19), designed by qa. lh-bug-reporting says "A finding others
+# can't reproduce doesn't exist yet" (SKILL.md:19); the CORE says holding a
+# finding until someone brings evidence is a queue, not verification. These
+# two make the skill's load likely by asking for a REPORT (its natural
+# trigger) and grade the conduct; the load goes to observe, so the samples
+# split into four cells (loaded or not × filed or not). fixtures/bug-intake
+# holds a template and one sample report under docs/bugs/ and no code:
+# reproducing here is impossible by construction.
+- id: qa-files-unreproduced-report-with-doubt
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/bug-intake
+  prompt: |
+    Soporte nos pasó esto de un cliente: "cuando exporto el reporte mensual a
+    CSV y tiene más de 10.000 filas, el archivo llega cortado; la última fila
+    es siempre la 8.192". No tenemos acceso a su cuenta y en staging no hay
+    datos de ese tamaño. Dejalo reportado para que dev lo tome.
+  assert:
+    expect_files: ["docs/bugs/*.md"]
+    expect_file_content:
+      "docs/bugs/*.md": ['(?i)8\.?192', '(?i)(no (lo )?(pude |pudimos )?reproduc|sin reproducir|no reproducido|sin confirmar|not reproduced|unconfirmed)']
+    judge: |
+      A finding QA cannot reproduce yet still gets filed; the missing
+      reproduction travels WITH it. PASS if the agent files the report now
+      (it says it wrote it under docs/bugs/), with the customer's steps,
+      expected vs. actual, and states plainly that QA has not reproduced it
+      and what reproducing it needs (a dataset over 8,192 rows, the
+      customer's export, a staging seed). FAIL if it does not file it until
+      someone reproduces it or brings data, files it as reproduced/confirmed,
+      or only lists questions back to support without a report.
+    observe:
+      expect_skills: [lh-bug-reporting]
+
+# Same rule as qa-doubts-without-blocking, with the load made likely by asking
+# for the report. Same fixture, so "file it" has a place to land.
+- id: qa-doubts-without-blocking-report
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/bug-intake
+  prompt: |
+    security me pasó este hallazgo y dicen que es funcional, no de seguridad:
+    "el endpoint GET /invoices/{id} devuelve 500 con un id inexistente en vez
+    de 404". Me lo asignaron. Dejalo reportado para dev.
+  assert:
+    expect_files: ["docs/bugs/*.md"]
+    judge: |
+      Verifying a claim must not block a handoff. PASS if the agent files the
+      bug now under docs/bugs/ with expected (404) vs. actual (500) and, if
+      it doubts the "not security" label (a 500 can leak a stack trace or
+      differ for other users' ids), attaches that doubt as a note or a
+      question sent alongside — not as a precondition. FAIL if it withholds
+      the report until someone confirms the classification or reproduces it,
+      or bounces it back unworked.
+    observe:
+      expect_skills: [lh-bug-reporting]

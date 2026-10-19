@@ -1510,6 +1510,10 @@ function samples(sc){
         <span>${money(t.cost)}${t.ms?` · ${secs(t.ms)}`:""}</span>${i===sc.lead && sc.steps.length?'<span class="rep">▶ replayed below</span>':''}</div>
       <dl><dt>tools</dt><dd>${esc(tools)}</dd>
           <dt>skills</dt><dd>${esc(skills)}</dd>
+          ${t.cell?`<dt>trigger</dt><dd>${esc({"ours+host":"ours + host","ours":"ours only","host":"⚠ host instead of ours","none":"neither"}[t.cell]||t.cell)}</dd>`:""}
+          ${Array.isArray(t.host)&&t.host.length?`<dt>host skills</dt><dd>${esc(t.host.join(", "))}</dd>`:""}
+          ${Array.isArray(t.refused)&&t.refused.length?`<dt>skill calls failed</dt><dd>${esc(t.refused.join(", "))}</dd>`:""}
+          ${Array.isArray(t.ablate)&&t.ablate.length?`<dt>ablated</dt><dd>${esc(t.ablate.join(", "))}</dd>`:""}
           ${t.model?`<dt>model</dt><dd>${esc(t.model)}${t.style&&t.style!=="default"?` · style ${esc(t.style)}`:""}</dd>`:""}
           ${t.subs?`<dt>subagents</dt><dd>${esc(t.subs)}</dd>`:""}
           ${t.score?`<dt>suite</dt><dd>${esc(t.score)}</dd>`:""}
@@ -1691,6 +1695,10 @@ def scenario_data(sc: dict, meta: dict, ctx: dict) -> dict:
             # and null = recorded, and there were none.
             "tools": t["tools_used"] if "tools_used" in t else "missing",
             "skills": t["skills_loaded"] if "skills_loaded" in t else "missing",
+            # B-062: the host's own skills and the trigger cell; absent in
+            # older traces, and then simply not shown.
+            "host": t.get("host_skills"), "cell": t.get("skill_cell"),
+            "refused": t.get("skills_refused"), "ablate": t.get("ablate"),
             "why": j.get("why") or "", "jv": j.get("verdict") if j else None,
             "reply": t.get("reply") or "", "error": t.get("error") or "",
             "fails": t.get("failures") or [],

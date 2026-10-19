@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -181,6 +182,8 @@ class Scenario:
     floor: str = ""          # smallest model family the rule was MEASURED to hold on
     budget: float = 0.0      # per-sample ceiling override (USD); see sample_budget
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
+    ablate: tuple = ()       # skills taken out of the session; see ablated_names
+    twin_key: str = ""       # hash of the entry minus id/ablate: the with/without pair shares it
 
     @property
     def is_routing(self) -> bool:
@@ -269,16 +272,93 @@ def host_fingerprints(scenarios: list) -> dict:
     }
 
 
+# Every key the loader reads (B-062). An unknown key used to be dropped in
+# silence: an `ablate:` the loader did not know ran its branch identical to
+# the other one, under a fingerprint of its own — two equal measurements that
+# read as two different ones. A typo in `assert:` (`forbid_skill:`) passed
+# every sample the same way. Now the load stops and names each one.
+SCENARIO_KEYS = frozenset({
+    "id", "category", "prompt", "agent", "expect", "assert", "delegate", "exec",
+    "timeout", "manual", "experiment", "until", "workspace", "allow", "deny",
+    "refuse", "memory", "hide_commands", "floor", "budget", "ablate"})
+EXEC_KEYS = frozenset({"suite", "symbol", "from_file"})
+
+
+def unknown_keys(raw: dict) -> list:
+    """One message per key the harness would ignore. `observe:` takes only the
+    checks on what the agent DID (observe_results runs action_failures), so a
+    reply check there (`matches`, `contains`) would be ignored too."""
+    sid = raw.get("id", "?")
+    out = [f"{sid}: unknown key `{k}`" for k in sorted(set(raw) - SCENARIO_KEYS)]
+    a = raw.get("assert") or {}
+    if not isinstance(a, dict):
+        return out + [f"{sid}: `assert:` is not a mapping"]
+    assert_keys = set(REPLY_CHECKS) | set(ACTION_CHECKS) | {"judge", "observe", "min_score"}
+    out += [f"{sid}: unknown key `assert.{k}`" for k in sorted(set(a) - assert_keys)]
+    obs = a.get("observe") or {}
+    if not isinstance(obs, dict):
+        out.append(f"{sid}: `assert.observe:` is not a mapping")
+    else:
+        out += [f"{sid}: `assert.observe.{k}` is not an action check "
+                f"(observe takes {', '.join(sorted(ACTION_CHECKS))})"
+                for k in sorted(set(obs) - set(ACTION_CHECKS))]
+    ex = raw.get("exec") or {}
+    if isinstance(ex, dict):
+        out += [f"{sid}: unknown key `exec.{k}`" for k in sorted(set(ex) - EXEC_KEYS)]
+    return out
+
+
+ABLATE_NAME = re.compile(r"^[A-Za-z0-9][\w:.-]*$")
+
+
+def ablated_names(raw, scenario_id: str = "", expected=()) -> tuple:
+    """The scenario's `ablate:` (B-062): skills taken out of the session, to
+    measure a skill's VALUE as the same task with and without it.
+
+    A catalog skill is not copied into the workspace and its row leaves every
+    shadow agent's Skills table; any other name is the HOST's (a skill Claude
+    Code ships) and goes out through `skillOverrides: off` in the same
+    `--settings` as the permissions. A sample where the name still reaches the
+    model is an ERROR, not a verdict (see ablation_leaks)."""
+    if raw is None:
+        return ()
+    names = [raw] if isinstance(raw, str) else raw
+    if not isinstance(names, list) or not names:
+        sys.exit(f"{scenario_id}: `ablate:` must be a non-empty list of skill names")
+    bad = [n for n in names if not isinstance(n, str) or not ABLATE_NAME.match(n)]
+    if bad:
+        sys.exit(f"{scenario_id}: `ablate:` has names that are not skill names: {bad}")
+    if len(set(names)) != len(names):
+        sys.exit(f"{scenario_id}: `ablate:` repeats a name")
+    clash = sorted(set(names) & set(expected or ()))
+    if clash:
+        sys.exit(f"{scenario_id}: {', '.join(clash)} is in `ablate:` and in `expect_skills:` — "
+                 f"a skill taken out cannot be expected to load")
+    return tuple(names)
+
+
+def twin_key(raw: dict, workspace_digest: str = "") -> str:
+    """What two branches of an ablation must share: the whole entry but its id
+    and `ablate:`, plus the fixture. Equal keys are the proof, at load, that a
+    with/without difference measures the skill and nothing else."""
+    rest = {k: v for k, v in raw.items() if k not in ("id", "ablate")}
+    return _digest(json.dumps(rest, sort_keys=True, ensure_ascii=False).encode()
+                   + workspace_digest.encode())
+
+
 def load_scenarios() -> list:
-    out = []
+    out, unknown = [], []
     for path in sorted(SCENARIOS.glob("*.yaml")):
         for raw in yaml.safe_load(path.read_text()) or []:
+            unknown += [f"{path.name}: {m}" for m in unknown_keys(raw)]
             # What the verdict was measured AGAINST: prompt, assertions, judge
             # criterion and the fixture it seeds. A PASS from before the
             # criterion changed is not evidence about the scenario as it is now.
             src = json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()
-            if raw.get("workspace"):
-                src += tree_digest(ROOT / raw["workspace"]).encode()
+            ws_digest = tree_digest(ROOT / raw["workspace"]) if raw.get("workspace") else ""
+            src += ws_digest.encode()
+            expected = ((raw.get("assert") or {}).get("expect_skills") or []
+                        if isinstance(raw.get("assert"), dict) else [])
             out.append(Scenario(
                 id=raw["id"],
                 category=raw.get("category", path.stem),
@@ -301,7 +381,18 @@ def load_scenarios() -> list:
                 floor=raw.get("floor", "") or "",
                 budget=float(raw.get("budget", 0) or 0),
                 fingerprint=_digest(src),
+                ablate=ablated_names(raw.get("ablate"), raw.get("id", "?"), expected),
+                twin_key=twin_key(raw, ws_digest),
             ))
+    if unknown:
+        sys.exit("unknown keys — the harness would ignore them and run as if they "
+                 "were not there:\n  " + "\n  ".join(unknown))
+    plain = {s.twin_key for s in out if not s.ablate}
+    for s in out:
+        if s.ablate and s.twin_key not in plain:
+            sys.exit(f"{s.id}: `ablate:` needs a twin without it — the same prompt, "
+                     f"assertions, judge and fixture under another id — or the "
+                     f"difference measures the scenario, not the skill")
     for s in out:
         clash = set(spec_tools(s.refuse)) & (set(spec_tools(s.allow)) | set(spec_tools(s.deny)))
         if clash:
@@ -401,7 +492,8 @@ def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
         cwd: Path = None, allow: str = "", deny: str = "", refuse: str = "",
         safe_mode: bool = False, system: str = "", tools: str = None,
-        neutral: bool = False, max_budget: float = 0.0, path: str = "") -> Reply:
+        neutral: bool = False, max_budget: float = 0.0, path: str = "",
+        skill_overrides: dict = None) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -424,9 +516,20 @@ def ask(prompt: str, agent: str = "", model: str = "",
     if refuse and not neutral:
         # The user's own settings may allow the very tool: nothing would be refused.
         return Reply(text="", error="`refuse:` needs the neutral session (not --user-session)")
+    if skill_overrides and not neutral:
+        # The user's own settings could turn the skill back on.
+        return Reply(text="", error="`ablate:` of a host skill needs the neutral session "
+                                    "(not --user-session)")
     if neutral:
         cmd += NEUTRAL_SESSION
-        cmd += ["--settings", json.dumps({"permissions": permissions_for(refuse)})]
+        # ONE --settings: permissions and skill overrides in the same dict.
+        # Read in the 2.1.303 binary, not measured: skillOverrides is read from
+        # policySettings and flagSettings (`--settings`), and "off" hides the
+        # skill from the model and from the slash menu, bundled skills included.
+        settings = {"permissions": permissions_for(refuse)}
+        if skill_overrides:
+            settings["skillOverrides"] = dict(skill_overrides)
+        cmd += ["--settings", json.dumps(settings)]
     if safe_mode:
         # Every customization off: CLAUDE.md, output styles, skills, hooks,
         # agents. A grader must not inherit the user's persona — measured: with
@@ -785,10 +888,98 @@ def lane_tools(events: list) -> tuple:
     return tools, skills
 
 
+def skill_calls(events: list) -> list:
+    """[(bare name, loaded?)] for each Skill call in the main lane, in order.
+
+    A call whose tool_result came back `is_error` did not load anything: the
+    skill was missing, turned off, or refused. Counting the call itself, as
+    before B-062, made an ablated skill read as loaded — the agent's Skills
+    table still names it, so the model calls it anyway. A call with no result
+    in the stream (a budget cut) still counts, as it always did."""
+    errored = set()
+    for ev in events or []:
+        msg = ev.get("message") if isinstance(ev, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+                errored.add(b.get("tool_use_id"))
+    out = []
+    for ev in events or []:
+        if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Skill":
+                name = str((b.get("input") or {}).get("skill", "") or "")
+                if name:
+                    out.append((name.rsplit(":", 1)[-1], b.get("id") not in errored))
+    return out
+
+
 def loaded_skills(events: list) -> set:
     """The skills the agent itself loaded, by bare name: a host may report a
-    namespaced one (`plugin:lh-x`), and the scenario names the skill."""
-    return {name.rsplit(":", 1)[-1] for name in lane_tools(events)[1] if name}
+    namespaced one (`plugin:lh-x`), and the scenario names the skill. Only
+    calls that did not fail (see skill_calls)."""
+    return {name for name, ok in skill_calls(events) if ok}
+
+
+@functools.lru_cache(maxsize=1)
+def catalog_names_or_none():
+    """catalog_skill_names() for recording, where a missing install manifest
+    must not stop a run that already paid: None means "cannot tell"."""
+    try:
+        return frozenset(catalog_skill_names())
+    except SystemExit:
+        return None
+
+
+def host_skills(events: list):
+    """Skills the agent loaded that are not the catalog's: the HOST's own
+    (code-review, simplify…). Generic on purpose — no host name is written in
+    a scenario, so a new CLI version's skills are seen too. None: unknown."""
+    catalog = catalog_names_or_none()
+    if catalog is None:
+        return None
+    return sorted(loaded_skills(events) - catalog)
+
+
+def first_load_index(events: list, names) -> object:
+    """Position, among the skills that loaded, of the first one in `names`."""
+    names = set(names or ())
+    for i, (name, _) in enumerate((c for c in skill_calls(events) if c[1])):
+        if name in names:
+            return i
+    return None
+
+
+SKILL_CELLS = ("ours+host", "ours", "host", "none")
+
+
+def skill_cell(sc: "Scenario", events: list):
+    """The trigger sample in one of four cells (B-062, the user's criterion of
+    2026-10-19). "Ours" is the scenario's own `expect_skills`, not any catalog
+    skill: lh-verification + code-review in place of lh-pairing is "host".
+      ours+host  ours loaded and the host's too — valid, a complement
+      ours       ours alone
+      host       the host's loaded INSTEAD of ours — the failure to find
+      none       neither (another catalog skill, or nothing)
+    None outside trigger samples, or when the catalog cannot be read."""
+    expected = sc.assertions.get("expect_skills")
+    if not expected:
+        return None
+    hosts = host_skills(events)
+    if hosts is None:
+        return None
+    got = loaded_skills(events)
+    ours = all(s in got for s in expected)
+    if ours:
+        return "ours+host" if hosts else "ours"
+    return "host" if hosts else "none"
 
 
 def skill_failures(assertions: dict, events: list) -> list:
@@ -1166,9 +1357,52 @@ def make_workspace(sc: Scenario) -> Path:
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     git_root(ws)
-    shadow_agents(ws, sc.memory)
-    shadow_skills(ws)
+    gone = ablation_split(sc.ablate)[0]
+    shadow_agents(ws, sc.memory, drop_skills=gone)
+    shadow_skills(ws, skip=gone)
     return ws
+
+
+def ablation_split(names) -> tuple:
+    """(catalog names, host names) of an `ablate:` list. Decided at run time,
+    not at load: which names are the catalog's comes from the install."""
+    if not names:
+        return (), ()
+    catalog = catalog_skill_names()
+    return (tuple(n for n in names if n in catalog),
+            tuple(n for n in names if n not in catalog))
+
+
+def ablation_leaks(names, events: list) -> list:
+    """Ways an ablated skill still reached this sample — each makes it an
+    ERROR, never a verdict: the branch "without" would be measuring "with".
+
+    - the init event still offers it to the model (`skills`): the override
+      did not take, or the name is wrong;
+    - a tool call reads a path with its name in it — the installed copy is
+      still on disk in ~/.claude/skills/, which the neutral session keeps out
+      of the listing but not out of the filesystem.
+    A Skill call to it is not a leak: it fails, and skill_calls drops it."""
+    out = []
+    for n in names or ():
+        path = re.compile(rf"[/\\]{re.escape(n)}(?![\w-])|(?<![\w-]){re.escape(n)}[/\\]")
+        for ev in events or []:
+            if not isinstance(ev, dict):
+                continue
+            if ev.get("type") == "system" and ev.get("subtype") == "init":
+                offered = {str(s).rsplit(":", 1)[-1] for s in ev.get("skills") or []}
+                if n in offered:
+                    out.append(f"`{n}` is still offered to the model (init skills)")
+            msg = ev.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if not isinstance(content, list):
+                continue
+            for b in content:
+                if (isinstance(b, dict) and b.get("type") == "tool_use"
+                        and b.get("name") != "Skill"
+                        and path.search(json.dumps(b.get("input") or {}))):
+                    out.append(f"`{n}` read by path ({b.get('name')})")
+    return sorted(set(out))
 
 
 def git_root(ws: Path) -> None:
@@ -1211,17 +1445,18 @@ def catalog_skill_names() -> set:
             | {p.parent.name for p in catalog.glob("skills/*/SKILL.md")})
 
 
-def shadow_skills(ws: Path) -> None:
+def shadow_skills(ws: Path, skip=()) -> None:
     """Copy the INSTALLED copy of each catalog skill into `<ws>/.claude/skills/`.
 
     The neutral session no longer reads ~/.claude/skills (it is user-level), and
     measured: without this an agent sees 19 skills instead of 93 and loses every
     catalog one. Copying the installed copy, not the catalog source, tests what
     the installer produced. Only catalog skills: the user's own would make the
-    run depend on whoever runs it."""
+    run depend on whoever runs it. `skip`: the scenario's ablated catalog
+    skills (see ablated_names), left out of the session entirely."""
     src_root = INSTALLED_AGENTS.parent / "skills"
     dst = ws / ".claude" / "skills"
-    for name in sorted(catalog_skill_names()):
+    for name in sorted(catalog_skill_names() - set(skip or ())):
         src = src_root / name
         if (src / "SKILL.md").is_file():
             shutil.copytree(src, dst / name, dirs_exist_ok=True)
@@ -1315,7 +1550,16 @@ def memory_mode(raw, scenario_id: str = "") -> str:
     return mode
 
 
-def shadow_agents(ws: Path, memory: str = "") -> None:
+def drop_skill_rows(text: str, names) -> str:
+    """The agent body without the Skills-table row of each name (`ablate:`).
+    Only the row: a mention elsewhere in the body stays, and is what the agent
+    would still know about the skill without it."""
+    for n in names or ():
+        text = re.sub(rf"^\|\s*`{re.escape(n)}`\s*\|.*(?:\n|$)", "", text, flags=re.MULTILINE)
+    return text
+
+
+def shadow_agents(ws: Path, memory: str = "", drop_skills=()) -> None:
     """Copy the installed agents into `<ws>/.claude/agents/` with memory
     scoped to the workspace, so a run never writes the user's real memory.
 
@@ -1357,6 +1601,7 @@ def shadow_agents(ws: Path, memory: str = "") -> None:
         else:
             text = re.sub(r"^memory:\s*\S+\s*$", "memory: local", text,
                           count=1, flags=re.MULTILINE)
+        text = drop_skill_rows(text, drop_skills)
         (dst / src.name).write_text(text, encoding="utf-8")
 
 
@@ -1502,10 +1747,14 @@ def run_one(sc: Scenario) -> Result:
     path = (path_without(sc.hide_commands, os.environ.get("PATH", ""),
                          ws.parent / f"{ws.name}.bin")
             if sc.hide_commands else "")
+    host_off = {n: "off" for n in ablation_split(sc.ablate)[1]}
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
                 cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
-                max_budget=sc.sample_budget, path=path)
+                max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None)
+    leaks = ablation_leaks(sc.ablate, reply.events)
+    if leaks:
+        reply.error = "ablate: " + "; ".join(leaks)
     if reply.error:
         res = Result(sc, reply, workspace=str(ws or ""))
         if reply.error.startswith("budget"):
@@ -1764,7 +2013,20 @@ def trial_record(r: Result) -> dict:
         "output_style": r.reply.output_style or None,
         "permission_denials": permission_denials(r.reply.events) or None,
         "tools_used": lane_tools(r.reply.events)[0] or None,
-        "skills_loaded": lane_tools(r.reply.events)[1] or None,
+        # Only the calls that loaded; a failed one (missing, turned off,
+        # refused) goes to skills_refused — see skill_calls.
+        "skills_loaded": [n for n, ok in skill_calls(r.reply.events) if ok] or None,
+        "skills_refused": [n for n, ok in skill_calls(r.reply.events) if not ok] or None,
+        # B-062: the host's own skills that loaded (None: catalog unreadable),
+        # the trigger cell, and which loaded first — ours or the host's.
+        "host_skills": host_skills(r.reply.events),
+        "skill_cell": skill_cell(r.sc, r.reply.events),
+        "first_load": ({"expected": first_load_index(r.reply.events,
+                                                     r.sc.assertions.get("expect_skills")),
+                        "host": first_load_index(r.reply.events,
+                                                 host_skills(r.reply.events) or ())}
+                       if r.sc.assertions.get("expect_skills") else None),
+        "ablate": list(r.sc.ablate) or None,
         "checks": r.checks or None,
         # Recorded, never counted: what the agent DID beside the question the
         # verdict answers (see observe_results).
@@ -1906,6 +2168,9 @@ def report(aggs: list, outdir: Path, elapsed: float):
     print(f"\n{len(aggs) - len(bad)}/{len(aggs)} passed{tail} · "
           f"${total:.2f} · {elapsed:.0f}s")
     print(f"run saved to {outdir}")
+    cells = skill_cell_lines(aggs)
+    if cells:
+        print("\n" + "\n".join(cells))
     denied = [a.sc.id for a in aggs
               if any(permission_denials(t.reply.events) for t in a.trials)]
     if denied:
@@ -1924,6 +2189,29 @@ def report(aggs: list, outdir: Path, elapsed: float):
         print("\nread the full reply before believing a failure — a judge FAIL "
               "can be the judge's mistake, not the agent's.")
     return 1 if bad else 0
+
+
+def skill_cell_lines(aggs: list) -> list:
+    """The trigger samples in the four cells of skill_cell (B-062). The host
+    cell is the one to read: the host's skill loaded INSTEAD of ours."""
+    tally = {c: 0 for c in SKILL_CELLS}
+    instead = []
+    for a in aggs:
+        for t in a.trials:
+            if t.reply.error and not t.cut_verdict:
+                continue
+            cell = skill_cell(a.sc, t.reply.events)
+            if cell:
+                tally[cell] += 1
+                if cell == "host":
+                    instead.append(f"{a.sc.id} ({', '.join(host_skills(t.reply.events) or [])})")
+    if not sum(tally.values()):
+        return []
+    out = [f"skill triggers: ours+host {tally['ours+host']} · ours {tally['ours']} · "
+           f"host instead of ours {tally['host']} · none {tally['none']}"]
+    if instead:
+        out.append("  host instead of ours: " + ", ".join(sorted(set(instead))))
+    return out
 
 
 def estimate(scenarios: list, repeat: int) -> float:
@@ -2031,6 +2319,7 @@ def main():
     if args.list or args.dry_run:
         for s in scenarios:
             judged = " +judge" if "judge" in s.assertions else ""
+            judged += f" -ablate:{','.join(s.ablate)}" if s.ablate else ""
             print(f"  {s.category:12} {s.id:28} agent={s.agent or '(routing)'}{judged}")
         calls = (len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
                  ) * args.repeat

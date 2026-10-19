@@ -1862,3 +1862,546 @@
     los próximos cinco años?
   assert:
     forbid_skills: [lh-brutal-critique]
+
+# =========================================================================== #
+# B-062 (2026-10-19), designed by qa, reviewed by stark. Five skills whose
+# description changes or that never loaded.
+#
+# THE HOST'S OWN SKILLS (user's criterion, 2026-10-19). Our skill is a row of
+# the agent's Skills table: when the request fits its trigger, OURS has to
+# load. A host skill (Claude Code ships code-review, simplify, verify…) loaded
+# AS WELL is valid; loaded INSTEAD of ours is the failure to find. No host
+# name is written here: every trigger sample is classified by run.py into
+# ours+host / ours / host / none (skill_cell, from host_skills = loaded minus
+# the catalog's names), printed at the end of the run and shown per sample by
+# viz.py. `expect_skills` already ignores extra skills, so the verdict did not
+# change; the cell is what tells "host instead" from "nothing loaded".
+#
+# BLINDNESS. The mentoring prompts were written by qa WITH the new
+# description in view, and borrow its words ("la semana que viene" ~ "will
+# need soon", "estándar del equipo" ~ "hurt repeatedly", near-2 ~ "Not for
+# simple questions"): they guard the territory both descriptions share, and
+# can flatter the new one. Three blind prompts (two triggers and a twin of
+# near-1), written by an agent that read only the skill's body, go in the
+# TODO slot below. code-health is blind to the new description, not the old.
+# =========================================================================== #
+
+# --------------------------------------------------------------------------- #
+# architect / lh-mentoring — new description drops "an expensive decision
+# being made casually", which is lh-tradeoffs'. The body already carries the
+# ladder (problem → why → solution → resource), so low recall here is not by
+# itself a defect (B-023). near-1 is the one case that separates the old
+# description from the new. lh-tradeoffs' own block above is the regression.
+# --------------------------------------------------------------------------- #
+- id: skill-mentoring-trigger-1
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Misconception that will bite again: async ≠ another thread.
+  prompt: |
+    Ya le agarré la mano a async/await en Node: si a una función le pongo
+    async, corre en otro hilo y no bloquea. Así que a todo lo que hace cálculo
+    pesado le estoy poniendo async. ¿Voy bien?
+  assert:
+    expect_skills: [lh-mentoring]
+
+- id: skill-mentoring-trigger-2
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Skipping a fundamental needed within days (ORM without SQL).
+  prompt: |
+    Uso Prisma para todo y nunca aprendí SQL, no me hizo falta. La semana que
+    viene me toca optimizar los reportes que tardan 20 segundos. ¿Qué opción
+    de Prisma los hace más rápidos?
+  assert:
+    expect_skills: [lh-mentoring]
+
+- id: skill-mentoring-trigger-3
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # A correction the user will repeat everywhere: swallowing errors.
+  prompt: |
+    Para que la app no se caiga nunca, envolví todas las llamadas a la API en
+    try/catch con el catch vacío. Desde que lo hice no tuvimos más crashes.
+    ¿Lo dejo como estándar del equipo?
+  assert:
+    expect_skills: [lh-mentoring]
+
+- id: skill-mentoring-trigger-4
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Misconception with a recurring cost: "indexes only help".
+  prompt: |
+    Mi regla es: cada columna que aparece en un WHERE lleva su propio índice,
+    total los índices solo pueden ayudar. ¿Hay algo que se me esté escapando?
+  assert:
+    expect_skills: [lh-mentoring]
+
+# B-062 blind triggers (2026-10-19), written by an agent that read only the
+# body of architect/skills/lh-mentoring/SKILL.md, without its frontmatter
+# (description) or its When to Use section, and without this file or the
+# B-062 analysis. Prompts are verbatim.
+
+- id: skill-mentoring-blind-1
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Misconception: provider retries read as a timing problem; the missing
+  # concept is idempotency (at-least-once delivery).
+  prompt: |
+    Che, armé un webhook en Express que recibe los pagos de Mercado Pago y en
+    el handler hago todo de una: actualizo la orden a "pagada", mando el mail
+    de confirmación y descuento stock. Funciona bárbaro en local, pero en
+    staging vi que a veces la misma notificación llega dos o tres veces y se
+    me duplican los mails y el stock queda negativo. ¿Le pongo un `setTimeout`
+    de un par de segundos antes de procesar para que se "asienten" los
+    reintentos, o hay una forma más prolija de esperar?
+  assert:
+    expect_skills: [lh-mentoring]
+
+- id: skill-mentoring-blind-2
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Misconception: cache invalidation treated as an operations chore
+  # (restart Redis) instead of a design decision that was skipped.
+  prompt: |
+    Estoy metiendo caché en la API de catálogo con Redis: guardo el JSON de
+    cada producto con la clave `product:{id}` y sin TTL, total los productos
+    casi no cambian. El problema es que cuando alguien edita un precio desde
+    el backoffice, la web sigue mostrando el viejo hasta que reinicio Redis.
+    ¿Cómo hago para que el backoffice reinicie Redis solo después de cada
+    guardado, así no lo tengo que hacer yo a mano?
+  assert:
+    expect_skills: [lh-mentoring]
+
+- id: skill-mentoring-near-1-blind
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Blind twin of skill-mentoring-near-1: an expensive-to-reverse engine
+  # change made casually belongs to lh-tradeoffs, not to a lesson.
+  prompt: |
+    Estamos con un monolito en Django y Postgres que anda bien, con unos 40
+    mil usuarios, pero leí que MongoDB escala mejor y es más flexible para
+    cuando agreguemos features nuevas, así que el finde quiero migrar todo.
+    Tenemos unas 60 tablas con foreign keys, varias transacciones en el
+    checkout y reportes que hacen joins entre pedidos, clientes y facturas.
+    ¿Me pasás un script para exportar las tablas a colecciones y cómo
+    reemplazo el ORM de Django por algo que hable con Mongo?
+  assert:
+    forbid_skills: [lh-mentoring]
+    observe:
+      expect_skills: [lh-tradeoffs]
+
+- id: skill-mentoring-near-1
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # THE discriminating case. Expensive decision made casually: the OLD
+  # description lists it as a mentoring trigger, the new one gives it to
+  # lh-tradeoffs only. Predicted: base may load mentoring (alone or with
+  # tradeoffs); after the change, tradeoffs only. observe records whether
+  # tradeoffs took it, without moving the verdict.
+  prompt: |
+    Este finde paso la base de Postgres a DynamoDB porque escala mejor. ¿Qué
+    librería me recomendás para no tener que reescribir tanto las queries?
+  assert:
+    forbid_skills: [lh-mentoring]
+    observe:
+      expect_skills: [lh-tradeoffs]
+
+- id: skill-mentoring-near-2
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Simple question: the description's own "not for simple questions".
+  prompt: |
+    ¿Cuál es la diferencia entre `let` y `const` en JavaScript?
+  assert:
+    forbid_skills: [lh-mentoring]
+
+- id: skill-mentoring-near-3
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Reviewing an existing structure: lh-design-review. A review "generates
+  # teachable moments" per the skill's own Resources, so this is the
+  # neighbour most likely to drag mentoring in.
+  prompt: |
+    Nuestro servicio de pedidos llama por HTTP al de inventario, y el de
+    inventario llama por HTTP al de pedidos para confirmar reservas. ¿Está
+    bien armado así?
+  assert:
+    forbid_skills: [lh-mentoring]
+
+- id: skill-mentoring-near-4
+  category: skill-trigger
+  agent: architect
+  manual: true
+  # Expert, reversible choice, no misconception: answer + one line (ladder
+  # row 2). Lexically close to a lesson ("¿cuál es la forma correcta?").
+  prompt: |
+    Valido el body con Zod en el borde. ¿Cuál es la forma correcta: `parse`
+    con try/catch o `safeParse` y chequear `success`?
+  assert:
+    forbid_skills: [lh-mentoring]
+
+# --------------------------------------------------------------------------- #
+# senior-dev / lh-react-next — description 76 → 27 words (B-062, kept and
+# always installed: the user works in React/Next often). Regression: the eight
+# skill-react-next-* above. One trigger outside Next, because the scope note
+# being removed was the one naming Vite/React Native.
+# --------------------------------------------------------------------------- #
+- id: skill-react-next-trigger-5
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  prompt: |
+    SPA con Vite y React, sin servidor propio. El checkout tiene 14 useState
+    sueltos y un useEffect que sincroniza tres de ellos entre sí; cada tanto
+    queda un total viejo en pantalla. ¿Cómo reorganizo ese estado?
+  assert:
+    expect_skills: [lh-react-next]
+
+# --------------------------------------------------------------------------- #
+# senior-dev / lh-code-health — description 63 → 52 words, and the Skills
+# table row ("Writing/modifying code") to be aligned with it. Never loaded in
+# the stored senior-dev samples (qa's count), so the risk the new row fixes —
+# loading on every edit — is not observed today; the near-misses guard the
+# NEW description against starting to. fixtures/long-function (processOrder,
+# 60 lines) is real bait for an unasked refactor.
+# --------------------------------------------------------------------------- #
+- id: skill-code-health-trigger-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  # In-diff vs ticket, with a deadline.
+  prompt: |
+    Para el viernes tengo que sumar el cupón tipo "bogo" (2x1) en
+    processOrder. La función ya está larga. ¿La parto ahora en este mismo PR o
+    meto el else-if y abro un ticket para después?
+  assert:
+    expect_skills: [lh-code-health]
+
+- id: skill-code-health-trigger-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Choosing which debt to pay first.
+  prompt: |
+    Nos dieron una semana para "pagar deuda técnica". Candidatos: el módulo de
+    facturación (feo, nadie lo toca desde 2023), el parser de webhooks (lo
+    cambiamos casi todas las semanas y se rompe seguido) y los nombres
+    inconsistentes en todo el front. ¿Por dónde empezamos?
+  assert:
+    expect_skills: [lh-code-health]
+
+- id: skill-code-health-trigger-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Tempted by a shortcut, said out loud.
+  prompt: |
+    Para salir hoy pensaba hardcodear la tasa de IVA en tres lugares en vez de
+    sacarla a config; total después lo arreglamos. ¿Lo hago así?
+  assert:
+    expect_skills: [lh-code-health]
+
+- id: skill-code-health-trigger-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Refactor-now decision with no safety net.
+  prompt: |
+    Quiero aprovechar que estoy tocando el cálculo de envío para reescribir
+    todo el módulo de precios, que no tiene ni un test. ¿Lo hago en esta
+    misma tarea?
+  assert:
+    expect_skills: [lh-code-health]
+
+- id: skill-code-health-near-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  # An edit inside a long function, with no debt decision asked. The bait is
+  # the function itself. If the agent refactors anyway, that is a scope
+  # question for observe, not this verdict.
+  # budget 2: it edits and may run the tests.
+  budget: 2
+  prompt: |
+    El envío gratis ahora arranca en $400 en lugar de $500. Cambialo en
+    src/orders.mjs.
+  assert:
+    forbid_skills: [lh-code-health]
+    observe:
+      unchanged_files: [src/result.mjs, tests/orders.test.mjs]
+
+- id: skill-code-health-near-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  budget: 2
+  # New validation + its test: writing code, no debt decision.
+  prompt: |
+    Agregale a processOrder que rechace líneas con qty mayor a 999 con el
+    código "QTY_TOO_HIGH", y su test.
+  assert:
+    forbid_skills: [lh-code-health]
+
+- id: skill-code-health-near-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Conceptual: what the word means, no decision on the table.
+  prompt: |
+    ¿Qué significa "deuda técnica" exactamente? Lo escucho todo el tiempo.
+  assert:
+    forbid_skills: [lh-code-health]
+
+- id: skill-code-health-near-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Reviewing the user's code: lh-pairing (and the host's code-review).
+  prompt: |
+    Revisame esta función antes de mergear:
+
+    export function slugify(s) {
+      return s.toLowerCase().replace(/ /g, "-")
+    }
+  assert:
+    forbid_skills: [lh-code-health]
+
+# --------------------------------------------------------------------------- #
+# senior-dev / lh-pairing — the block where the host's skills compete. In the
+# neutral session's init (CLI 2.1.303) the host offers code-review and
+# simplify, built for "review this" and "clean this up". `debug` has
+# disableModelInvocation and is about the Claude Code session, `verify`
+# competes with lh-verification: neither is in play here. Under the user's
+# criterion a host skill is never CORRECT in place of ours on a trigger;
+# pairing-trigger-1 ("Revisame src/orders.mjs", a path code-review accepts)
+# is where "host instead" is likeliest, and the cell report is what sees it.
+# The near-misses only forbid ours: simplify loading on near-1 is the host
+# doing its job. Harness limit: git_root() commits the whole fixture, so
+# "review my current diff" (empty) cannot be staged without a new field.
+# --------------------------------------------------------------------------- #
+- id: skill-pairing-trigger-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  prompt: |
+    Revisame src/orders.mjs, lo escribí yo ayer y lo quiero mergear hoy.
+  assert:
+    expect_skills: [lh-pairing]
+
+- id: skill-pairing-trigger-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  # Co-debugging: the user has a hypothesis and wants to work it together.
+  prompt: |
+    Te sumo a un bug: en algunos pedidos con cupón de porcentaje el total nos
+    da un centavo distinto que el que calcula facturación. Yo sospecho del
+    redondeo. ¿Cómo lo encaramos entre los dos?
+  assert:
+    expect_skills: [lh-pairing]
+
+- id: skill-pairing-trigger-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Splitting work between the user and the agent.
+  prompt: |
+    Hay que exponer processOrder por HTTP y además sumar el cupón 2x1. Somos
+    vos y yo esta semana. ¿Cómo nos dividimos?
+  assert:
+    expect_skills: [lh-pairing]
+
+- id: skill-pairing-trigger-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Pasted code from the user, non-React so lh-react-next stays out.
+  prompt: |
+    Escribí esto para reintentar llamadas, ¿lo ves bien?
+
+    def retry(fn, times=3):
+        for i in range(times):
+            try:
+                return fn()
+            except Exception:
+                time.sleep(2 ** i)
+  assert:
+    expect_skills: [lh-pairing]
+
+- id: skill-pairing-near-1
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  budget: 2
+  # Cleanup without behaviour change: the host's `simplify` is built for
+  # this; lh-code-health is the catalog neighbour. Either is fine.
+  prompt: |
+    Simplificá src/orders.mjs sin cambiar el comportamiento; los tests tienen
+    que seguir pasando.
+  assert:
+    forbid_skills: [lh-pairing]
+
+- id: skill-pairing-near-2
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/long-function
+  budget: 2
+  # Writing tests on the agent's own initiative: no peer in the loop.
+  prompt: |
+    Escribile tests a processOrder para los casos de cupón vencido y monto
+    mínimo.
+  assert:
+    forbid_skills: [lh-pairing]
+
+- id: skill-pairing-near-3
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Conceptual question about reviews.
+  prompt: |
+    ¿Qué conviene mirar primero en un code review, en general?
+  assert:
+    forbid_skills: [lh-pairing]
+
+- id: skill-pairing-near-4
+  category: skill-trigger
+  agent: senior-dev
+  manual: true
+  # Fix it for me, alone: debugging, but not TOGETHER. Known fuzzy border
+  # ("co-debugging"); a load here is worth reading, not an automatic bug.
+  # Real bug: an empty list gives 0/0.
+  prompt: |
+    Esta función a veces devuelve NaN. Arreglala.
+
+    function average(xs) {
+      return xs.reduce((a, b) => a + b, 0) / xs.length
+    }
+  assert:
+    forbid_skills: [lh-pairing]
+
+# --------------------------------------------------------------------------- #
+# security / lh-code-audit. fixtures/audit-sort-ident: sqlIdent() "quotes"
+# identifiers without escaping a double quote. Two routes carry raw input to
+# it (reports: `sort`; users: `fields`); a third (products) goes through an
+# allowlist and is SAFE. No file, read alone, shows the whole flaw. The host's
+# `security-review` (pending changes) is in the init's slash commands, not in
+# its skills list; if it ever loads, the cell report shows it. qa's near-4
+# (the one-line obvious SQLi) was dropped: it decided nothing while the
+# description keeps "hunting a specific vuln class".
+# --------------------------------------------------------------------------- #
+- id: skill-code-audit-trigger-1
+  category: skill-trigger
+  agent: security
+  manual: true
+  workspace: fixtures/audit-sort-ident
+  budget: 2
+  prompt: |
+    El jueves sale este servicio a producción. Auditalo por seguridad y dejá
+    los hallazgos en SECURITY-AUDIT.md.
+  assert:
+    expect_skills: [lh-code-audit]
+    observe:
+      expect_file_content:
+        "SECURITY-AUDIT.md": ['(?i)sqlIdent', '(?i)users', '(?i)reports']
+
+- id: skill-code-audit-trigger-2
+  category: skill-trigger
+  agent: security
+  manual: true
+  # A diff to review for vulnerabilities (IDOR).
+  prompt: |
+    ¿Me revisás este diff por vulnerabilidades antes de aprobar el PR?
+
+    +router.get("/invoices/:id/pdf", requireLogin, async (req, res) => {
+    +  const inv = await db.invoice.findUnique({ where: { id: req.params.id } })
+    +  if (!inv) return res.sendStatus(404)
+    +  res.type("pdf").send(await renderPdf(inv))
+    +})
+  assert:
+    expect_skills: [lh-code-audit]
+
+- id: skill-code-audit-trigger-3
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Hunting one named class across code.
+  prompt: |
+    Sospecho que tenemos path traversal en las descargas de adjuntos. Esto es
+    lo que hay:
+
+    app.get("/files", (req, res) => {
+      const p = path.join(UPLOADS, req.query.name)
+      res.sendFile(p)
+    })
+    app.get("/avatars/:user", (req, res) => {
+      res.sendFile(path.resolve(AVATARS, req.params.user + ".png"))
+    })
+  assert:
+    expect_skills: [lh-code-audit]
+
+- id: skill-code-audit-trigger-4
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Secrets shipped to the client: a class in config, not in logic.
+  prompt: |
+    ¿Estamos filtrando algo que no deberíamos al bundle del front? Este es
+    nuestro .env.production de la app Vite:
+
+    VITE_API_URL=https://api.example.com
+    VITE_STRIPE_PK=pk_live_51Hx...
+    VITE_STRIPE_SK=sk_live_51Hx...
+    VITE_SENTRY_DSN=https://abc@o1.ingest.sentry.io/2
+    DATABASE_URL=postgres://app:pw@db:5432/app
+  assert:
+    expect_skills: [lh-code-audit]
+
+- id: skill-code-audit-near-1
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Design with no code yet: lh-threat-modeling.
+  prompt: |
+    Vamos a sumar SSO con SAML para clientes enterprise. Todavía no hay
+    código. ¿Qué tenemos que pensar de seguridad antes de diseñarlo?
+  assert:
+    forbid_skills: [lh-code-audit]
+
+- id: skill-code-audit-near-2
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Findings already exist; ordering them is lh-remediation.
+  prompt: |
+    El scanner nos tiró 40 hallazgos: 3 críticos de dependencias, 12 de
+    headers faltantes y el resto "informativos". Tenemos dos días. ¿Qué
+    arreglamos primero?
+  assert:
+    forbid_skills: [lh-code-audit]
+
+- id: skill-code-audit-near-3
+  category: skill-trigger
+  agent: security
+  manual: true
+  # Conceptual question about a class.
+  prompt: |
+    ¿Qué diferencia hay entre XSS reflejado y almacenado?
+  assert:
+    forbid_skills: [lh-code-audit]
