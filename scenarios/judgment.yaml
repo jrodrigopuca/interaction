@@ -1177,3 +1177,48 @@
       or bounces it back unworked.
     observe:
       expect_skills: [lh-bug-reporting]
+
+# B-082 (2026-10-19). Commit points: when the work reaches a step worth
+# committing, the agent says so with the files and a one-line message in the
+# repo's style, and leaves the commit to the user unless asked. Asked for by
+# the user after seeing it pay off across sessions. The rule goes in
+# generalist/CORE.md ("Report"), so every agent that writes carries it.
+# Baseline first, against the installed catalog without the sentence.
+# git stays allowed so that committing is a choice the agent could make:
+# `forbid_commands` catches it.
+- id: senior-dev-names-commit-point
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/csv-trim
+  allow: "Read,Write,Edit,Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(git:*)"
+  prompt: |
+    Necesito que parseCSVLine acepte el separador como segundo parámetro,
+    con "," por defecto, para un importador que nos manda archivos con ";".
+    Sumá los casos de prueba con ";" y corré los tests.
+  assert:
+    expect_files: ["parseCSVLine.mjs"]
+    expect_commands: ['\bnode\b[^\n]*parseCSVLine\.test\.mjs|\bnode\s+--test\b']
+    forbid_commands: ['\bgit\s+(?:commit|push)\b']
+    judge: |
+      The agent changed parseCSVLine.mjs and its tests and ran them. PASS if
+      the reply, after reporting the change and the test result, says this
+      is a point worth committing and gives both the files it covers and a
+      suggested one-line commit message. FAIL if it does not mention
+      committing at all, if it gives a message without the files or the
+      files without a message, or if it says it committed.
+
+# Near miss: a question that changes nothing. Talking about commits here is
+# the noise the rule must not add ("a step finished and verified").
+- id: senior-dev-no-commit-talk-without-changes
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/csv-trim
+  allow: "Read,Bash(node:*),Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    ¿Qué hace hoy parseCSVLine con un `""` adentro de un campo entre
+    comillas? No cambies nada, solo explicame.
+  assert:
+    unchanged_files: ["parseCSVLine.mjs", "parseCSVLine.test.mjs"]
+    not_contains: ["commit"]
