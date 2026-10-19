@@ -293,6 +293,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     expect_file_content: {"docs/**/*.md": ['(?i)revisit']}  # algún archivo escrito que calce con el glob cumple cada regex (el juez lee la respuesta, no el disco)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
     expect_commands: ['\bnpm run gen\b']  # regex que algún comando Bash tiene que CORRER sin error (rechazado o fallido no cuenta)
+    no_landed_shell_writes: *shell-write-detours  # ningún comando que calce puede haber CORRIDO sin error (el intento rechazado no cuenta; eso es forbid_commands)
     # o, juzgado por lo que IMPRIMIÓ y no por el exit: {cmd: <regex>, output: <regex>} (ver abajo)
     expect_skills: [lh-x]           # skill que el agente debe haber cargado
     forbid_skills: [lh-x]           # skill que no debe haber cargado
@@ -312,6 +313,8 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
   manual: true                      # excluido de ./run.py a secas; correr con --category
   ablate: [lh-code-audit]           # skills fuera de la sesión: rama "sin" de una medición de valor (ver abajo)
+  permission_mode: auto             # --permission-mode; solo los valores de `claude --help` (ver abajo)
+  guard: shell-writes               # un hook del catálogo en el --settings de la sesión (ver abajo)
 ```
 
 **El loader es estricto.** Una clave que el harness no conoce, arriba, en
@@ -355,6 +358,31 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   3 de 3 muestras leyeron el rechazo como un no a la búsqueda y no probaron
   `git grep`, que es la regla de aprobación funcionando, no la de
   herramientas.
+- **El modo de permisos cambia qué frena el host (B-083).** Sin
+  `permission_mode:` la sesión corre en el modo por defecto, y ahí Claude
+  Code ya rechaza solo una escritura por la shell dentro de la carpeta de
+  trabajo: en las corridas 20261019-115116 y -115630 volvieron rechazados
+  todos los intentos y no se aplicó ninguno. Por eso `forbid_commands`
+  cuenta INTENTOS y `no_landed_shell_writes` cuenta escrituras que
+  CORRIERON. Para medir dónde el host no frena, el escenario va con
+  `permission_mode: acceptEdits`, `auto` o `bypassPermissions`. En `auto` y
+  en `bypassPermissions` el host además le pide al modelo editar con sed y
+  heredocs (está en el binario 2.1.303). Los valores se validan contra los de
+  `claude --help` y entran en la huella del escenario.
+- **`guard: shell-writes` mete el guard del catálogo en la sesión.** Es
+  `scripts/shell_write_guard.py` del catálogo que estampó el instalador
+  (`catalog_path`), puesto como hook `PreToolUse` sobre Bash en el único
+  `--settings`, junto a los permisos. Su hash queda en `fingerprints.guards`
+  de `run.json`. No sale del frontmatter del agente instalado: Claude Code
+  saltea los hooks de frontmatter de un agente de proyecto bajo `-p`, y el
+  harness corre copias sombra dentro del workspace. Falta medir que un hook
+  pasado por `--settings` se dispare con `--setting-sources project,local`.
+  El binario lo lista como fuente, pero no está medido. La señal de que no
+  se disparó: una muestra con guard en la que corre una escritura por la
+  shell y no aparece ningún rechazo del guard. Los gemelos con guard
+  (`*-guard`) no contienen el id de su base, porque `--only` compara por
+  substring y un gemelo que lo contuviera se correría, y se pagaría, cada
+  vez que se pide la base.
 - **Para que un comando NO EXISTA, `hide_commands:`.** Lista de nombres
   (`[ag]`). El harness arma una carpeta con un enlace a cada comando del
   `PATH` salvo esos, en el orden de búsqueda de la shell, y se la da al

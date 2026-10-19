@@ -184,6 +184,8 @@ class Scenario:
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
     ablate: tuple = ()       # skills taken out of the session; see ablated_names
     twin_key: str = ""       # hash of the entry minus id/ablate: the with/without pair shares it
+    permission_mode: str = ""  # --permission-mode for the agent; see PERMISSION_MODES
+    guard: str = ""          # a catalog hook in the session's --settings; see GUARDS
 
     @property
     def is_routing(self) -> bool:
@@ -269,6 +271,9 @@ def host_fingerprints(scenarios: list) -> dict:
                      + " · git root per workspace",
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
+        # B-083: the guard's script is catalog code outside any agent file.
+        "guards": {g: _digest(guard_script(g).read_bytes())
+                   for g in sorted({s.guard for s in scenarios if s.guard})} or None,
     }
 
 
@@ -280,8 +285,54 @@ def host_fingerprints(scenarios: list) -> dict:
 SCENARIO_KEYS = frozenset({
     "id", "category", "prompt", "agent", "expect", "assert", "delegate", "exec",
     "timeout", "manual", "experiment", "until", "workspace", "allow", "deny",
-    "refuse", "memory", "hide_commands", "floor", "budget", "ablate"})
+    "refuse", "memory", "hide_commands", "floor", "budget", "ablate",
+    "permission_mode", "guard"})
 EXEC_KEYS = frozenset({"suite", "symbol", "from_file"})
+
+# `permission_mode:` (B-083) — the CLI's own choices, read from
+# `claude --help` on 2.1.303. Unset, the session runs in the default mode,
+# where the host's permission engine already refuses a file write by the
+# shell (measured: every attempt in runs 20261019-115116 and -115630 came
+# back refused). acceptEdits, auto and bypassPermissions are where the
+# CORE's rule had no enforcement, and auto and bypass inject the host's own
+# instruction to edit with sed and heredocs (binary, `bashFirst` steer).
+PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
+
+# `guard:` (B-083) — a hook the catalog ships, added to the session's single
+# `--settings` as a PreToolUse hook. The script is taken from the catalog
+# the installer stamped (`catalog_path`), not from an installed agent's
+# frontmatter: Claude Code skips a PROJECT agent's frontmatter hooks under
+# `-p` (documented), and the harness runs shadow copies inside the workspace.
+# Its hash enters the run's fingerprints.
+GUARDS = {"shell-writes": "scripts/shell_write_guard.py"}
+
+
+def catalog_root():
+    """The catalog the installed agents came from, per the installer's stamp."""
+    try:
+        return Path(json.loads((INSTALLED_AGENTS.parent / ".local-agents.json")
+                               .read_text())["catalog_path"])
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def guard_script(name: str) -> Path:
+    """The catalog file behind a `guard:` name; exits when it cannot be found,
+    because a guarded scenario run without its guard is the baseline under
+    the after's name."""
+    root = catalog_root()
+    path = root / GUARDS[name] if root else None
+    if path is None or not path.is_file():
+        sys.exit(f"guard `{name}`: {GUARDS[name]} not found in the installed catalog "
+                 f"({root or 'no ~/.claude/.local-agents.json'})")
+    return path
+
+
+def guard_hooks(name: str) -> dict:
+    """The `hooks` settings block for a guard, in the documented shape."""
+    command = f'python3 "{guard_script(name)}"'
+    return {"PreToolUse": [{"matcher": "Bash",
+                            "hooks": [{"type": "command", "command": command}]}]}
 
 
 def unknown_keys(raw: dict) -> list:
@@ -397,6 +448,8 @@ def load_scenarios() -> list:
                 fingerprint=_digest(src),
                 ablate=ablated_names(raw.get("ablate"), raw.get("id", "?"), expected),
                 twin_key=twin_key(raw, ws_digest),
+                permission_mode=raw.get("permission_mode", "") or "",
+                guard=raw.get("guard", "") or "",
             ))
     if unknown:
         sys.exit("unknown keys — the harness would ignore them and run as if they "
@@ -414,6 +467,11 @@ def load_scenarios() -> list:
                      f"refused means visible and not permitted; it cannot also be allowed or hidden")
         if s.floor and s.floor not in MODEL_LADDER:
             sys.exit(f"{s.id}: floor `{s.floor}` is not one of {MODEL_LADDER}")
+        if s.permission_mode and s.permission_mode not in PERMISSION_MODES:
+            sys.exit(f"{s.id}: permission_mode `{s.permission_mode}` is not one of "
+                     f"{PERMISSION_MODES} (claude --help)")
+        if s.guard and s.guard not in GUARDS:
+            sys.exit(f"{s.id}: guard `{s.guard}` is not one of {sorted(GUARDS)}")
     ids = [s.id for s in out]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
@@ -507,7 +565,8 @@ def ask(prompt: str, agent: str = "", model: str = "",
         cwd: Path = None, allow: str = "", deny: str = "", refuse: str = "",
         safe_mode: bool = False, system: str = "", tools: str = None,
         neutral: bool = False, max_budget: float = 0.0, path: str = "",
-        skill_overrides: dict = None) -> Reply:
+        skill_overrides: dict = None, permission_mode: str = "",
+        hooks: dict = None) -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -534,6 +593,11 @@ def ask(prompt: str, agent: str = "", model: str = "",
         # The user's own settings could turn the skill back on.
         return Reply(text="", error="`ablate:` of a host skill needs the neutral session "
                                     "(not --user-session)")
+    if hooks and not neutral:
+        # The user's own hooks would run beside the guard, unmeasured.
+        return Reply(text="", error="`guard:` needs the neutral session (not --user-session)")
+    if permission_mode:
+        cmd += ["--permission-mode", permission_mode]
     if neutral:
         cmd += NEUTRAL_SESSION
         # ONE --settings: permissions and skill overrides in the same dict.
@@ -543,6 +607,13 @@ def ask(prompt: str, agent: str = "", model: str = "",
         settings = {"permissions": permissions_for(refuse)}
         if skill_overrides:
             settings["skillOverrides"] = dict(skill_overrides)
+        if hooks:
+            # B-083. The binary lists "Startup settings (--settings option)"
+            # as a hook source; not yet measured that it fires under
+            # `--setting-sources project,local`. A guarded sample whose stream
+            # shows a shell write that RAN, with no guard refusal anywhere in
+            # the run, is the sign it did not.
+            settings["hooks"] = hooks
         cmd += ["--settings", json.dumps(settings)]
     if safe_mode:
         # Every customization off: CLAUDE.md, output styles, skills, hooks,
@@ -1150,6 +1221,7 @@ ACTION_CHECKS = {
     "expect_file_content": "no written file matching",
     "forbidden_tools": "invoked forbidden tool", "memory_forbid_types": "persisted memory",
     "forbid_commands": "attempted a forbidden command",
+    "no_landed_shell_writes": "a shell write ran",
     "expect_commands": "did not run an expected command",
     "unchanged_files": "modified or deleted fixture files", "forbid_text": "leaked ",
     "expect_skills": "did not load skill", "forbid_skills": "loaded forbidden skill",
@@ -1178,7 +1250,8 @@ def check_results(sc: Scenario, reply: "Reply", fails: list) -> list:
             continue
         bad = [f for f in fails if f.startswith(prefix)]
         result = "fail" if bad else "pass"
-        if not bad and key == "forbid_commands" and not bash_commands(reply.events):
+        if (not bad and key in ("forbid_commands", "no_landed_shell_writes")
+                and not bash_commands(reply.events)):
             result = "vacuous"
         out.append({"check": key, "result": result, "detail": "; ".join(bad)})
     known = set(REPLY_CHECKS) | set(ACTION_CHECKS) | {"judge", "observe"}
@@ -1683,6 +1756,18 @@ def action_failures(a: dict, sc: "Scenario", reply: "Reply", ws: Path) -> list:
             hit = [rx for rx in a["forbid_commands"] if re.search(rx, cmd)]
             if hit:
                 out.append(f"attempted a forbidden command ({hit[0]}): {cmd[:120]}")
+    # `no_landed_shell_writes` (B-083) — regexes no Bash command may match AND
+    # have run. `forbid_commands` counts attempts, refused or not; this counts
+    # writes that reached the disk. In the default mode the host refuses the
+    # attempt, so a guard is measured where it does not: the two side by side
+    # tell "tried and was stopped" from "wrote the file". A command whose
+    # result is an error counts as not landed — a non-zero exit after a
+    # redirect may still have written, so the disk checks stay the backstop.
+    if "no_landed_shell_writes" in a:
+        for cmd, ok, _ in bash_results(reply.events):
+            hit = [rx for rx in a["no_landed_shell_writes"] if ok and re.search(rx, cmd)]
+            if hit:
+                out.append(f"a shell write ran ({hit[0]}): {cmd[:120]}")
     # `expect_commands` — the mirror: regexes each of which some Bash command
     # must match AND have run without error. A scenario whose question is
     # "does the agent run the repo's own tool" cannot leave it to the judge,
@@ -1800,7 +1885,9 @@ def run_one(sc: Scenario) -> Result:
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
                 cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
-                max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None)
+                max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None,
+                permission_mode=sc.permission_mode,
+                hooks=guard_hooks(sc.guard) if sc.guard else None)
     leaks = ablation_leaks(sc.ablate, reply.events)
     if leaks:
         reply.error = "ablate: " + "; ".join(leaks)
