@@ -290,6 +290,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     memory_forbid_types: [user, project]  # tipos de memoria que el agente no debe haber persistido (de <ws>/.claude/agent-memory-local/<agente>/)
     expect_files: ["**/*.md"]       # algún archivo que el agente CREÓ o MODIFICÓ (uno del fixture que no tocó no cuenta)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
+    expect_commands: ['\bnpm run gen\b']  # regex que algún comando Bash tiene que CORRER sin error (rechazado o fallido no cuenta)
     expect_skills: [lh-x]           # skill que el agente debe haber cargado
     forbid_skills: [lh-x]           # skill que no debe haber cargado
     observe:                        # los mismos chequeos, registrados y NUNCA contados en el veredicto

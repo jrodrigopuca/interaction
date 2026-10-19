@@ -1,0 +1,11 @@
+{
+  "permissions": [
+    "users:read",
+    "users:invite",
+    "users:suspend",
+    "invoices:read",
+    "invoices:void",
+    "billing:read",
+    "billing:refund"
+  ]
+}

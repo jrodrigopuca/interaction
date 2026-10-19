@@ -355,7 +355,7 @@ def failed_by(key: str, fails: list) -> list:
 
 def shown_value(key: str, val) -> str:
     if isinstance(val, list):
-        return "  ".join(f"/{v}/" if key in ("forbid_commands",) else str(v) for v in val)
+        return "  ".join(f"/{v}/" if key in ("forbid_commands", "expect_commands") else str(v) for v in val)
     if key == "matches":
         return f"/{val}/"
     return json.dumps(val, ensure_ascii=False) if isinstance(val, dict) else str(val)

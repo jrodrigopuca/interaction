@@ -806,6 +806,29 @@ def bash_commands(events: list) -> list:
     return out
 
 
+def bash_runs(events: list) -> list:
+    """(command, ok) for every Bash command that got a result, in every lane
+    that reached the stream. `ok` is False when the result is an error: the
+    host refused it ("requires approval") or it exited non-zero ("Exit code
+    N") — both come back as `is_error`. `bash_commands` is what the agent
+    TRIED; this is what actually RAN, which is what a positive check needs:
+    a refused `npm run gen` did not regenerate anything."""
+    cmds, out = {}, []
+    for ev in events or []:
+        msg = ev.get("message") if isinstance(ev, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and b.get("name") == "Bash":
+                cmds[b.get("id")] = (b.get("input") or {}).get("command", "")
+            elif b.get("type") == "tool_result" and b.get("tool_use_id") in cmds:
+                out.append((cmds.pop(b["tool_use_id"]), not b.get("is_error")))
+    return out
+
+
 def fixture_digests(sc: Scenario) -> dict:
     """{relative path: sha256} of the scenario's fixture, as seeded."""
     if not sc.workspace:
@@ -885,6 +908,7 @@ ACTION_CHECKS = {
     "max_tools": "used ", "expect_files": "no file matching",
     "forbidden_tools": "invoked forbidden tool", "memory_forbid_types": "persisted memory",
     "forbid_commands": "attempted a forbidden command",
+    "expect_commands": "did not run an expected command",
     "unchanged_files": "modified or deleted fixture files", "forbid_text": "leaked ",
     "expect_skills": "did not load skill", "forbid_skills": "loaded forbidden skill",
 }
@@ -1252,6 +1276,19 @@ def action_failures(a: dict, sc: "Scenario", reply: "Reply", ws: Path) -> list:
             hit = [rx for rx in a["forbid_commands"] if re.search(rx, cmd)]
             if hit:
                 out.append(f"attempted a forbidden command ({hit[0]}): {cmd[:120]}")
+    # `expect_commands` — the mirror: regexes each of which some Bash command
+    # must match AND have run without error. A scenario whose question is
+    # "does the agent run the repo's own tool" cannot leave it to the judge,
+    # which reads the reply and not the trace: a perfect hand edit narrated
+    # as "regeneré" and a real run narrated vaguely would swap verdicts.
+    if "expect_commands" in a:
+        runs = bash_runs(reply.events)
+        for rx in a["expect_commands"]:
+            if any(ok and re.search(rx, cmd) for cmd, ok in runs):
+                continue
+            tried = [cmd for cmd, ok in runs if re.search(rx, cmd)]
+            out.append(f"did not run an expected command (/{rx}/)"
+                       + (f"; tried, refused or failed: {tried[-1][:120]}" if tried else ""))
     if "unchanged_files" in a or "forbid_text" in a:
         edited, created = changed_files(ws, sc)
         globs = a.get("unchanged_files", [])
