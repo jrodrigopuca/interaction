@@ -303,6 +303,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   deny: "Bash(brew:*)"              # --disallowedTools: el agente NO VE la herramienta
   refuse: "Edit,Write"              # la ve, pero fuera de los permisos: al usarla recibe un rechazo
   memory: off                       # el agente sombra va SIN línea memory:, como en un host sin memoria
+  hide_commands: [rg]               # esos comandos no existen en el PATH del agente: "command not found"
   delegate: true                    # graba el árbol de subagentes
   timeout: 600                      # tope propio en segundos
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
@@ -335,6 +336,41 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   usuario dice que no en el aviso de permiso, la herramienta va en `refuse:`.
   Medido en B-066: con Edit escondido y la shell abierta, 6 de 6 muestras
   editaron por la shell sin intentar Edit ni una vez.
+  Esconder vale solo para una herramienta ENTERA (`Edit`, `Grep`, `Read`).
+  Un patrón de comando en `deny:` (`Bash(rg:*)`) no esconde nada: Bash sigue
+  a la vista y esa llamada vuelve rechazada, así que en la práctica es un
+  `refuse:`. Medido en la corrida 20261019-014136: con `deny: Bash(rg:*)`,
+  3 de 3 muestras leyeron el rechazo como un no a la búsqueda y no probaron
+  `git grep`, que es la regla de aprobación funcionando, no la de
+  herramientas.
+- **Para que un comando NO EXISTA, `hide_commands:`.** Lista de nombres
+  (`[ag]`). El harness arma una carpeta con un enlace a cada comando del
+  `PATH` salvo esos, en el orden de búsqueda de la shell, y se la da al
+  agente como `PATH` entero: el comando da "command not found" y `which` /
+  `command -v` fallan de verdad, que es como se ve un host sin la
+  herramienta. Sacar el directorio no sirve: muchas herramientas viven
+  juntas en `/opt/homebrew/bin`. Un valor que no sea una lista de nombres se
+  rechaza al cargar. Dos cosas más, aprendidas a la fuerza:
+  - **Ponelo también en `allow:`** (`Bash(ag:*)`). La sesión neutral rechaza
+    un comando no listado antes de correrlo (B-021), y el agente vería un
+    rechazo en lugar de "command not found".
+  - **No sirve para `rg`, `grep`, `find` ni `pkill`, y se rechazan al
+    cargar.** El snapshot de shell de Claude Code (2.1.303,
+    `~/.claude/shell-snapshots/`) los define como funciones: `rg` llama al
+    ripgrep embebido en claude cuando no está en el `PATH`; `grep` es
+    siempre el ugrep embebido con `--ignore-files` (respeta `.gitignore`);
+    `find` es siempre el bfs embebido (NO lo respeta: lista lo ignorado);
+    `pkill` está custodiado. `find … | xargs grep` corre el grep real. Con
+    esas sombras el host además saca Glob y Grep y le dice al agente que
+    busque con grep por Bash (leído en el binario). Medido en la corrida
+    20261019-020803: con `hide_commands: [rg]`, `rg` corrió en 2 de 3
+    muestras. Para cualquier otro nombre el ocultamiento se sostiene: el
+    snapshot exporta el `PATH` del proceso de claude (leído en el binario;
+    `ag` oculto da exit 127 reproduciendo el snapshot sin modelo). Si en la
+    transcripción de una muestra el comando oculto CORRIÓ, se filtró.
+  - **Al verificar un fixture a mano, usá lo que corre el agente.**
+    `/usr/bin/grep -r` ve `build/`; el `grep` del agente no. Un discriminador
+    probado con el binario del sistema puede no existir para el agente.
 - **`memory: off` simula un host sin memoria.** Por defecto el agente sombra
   lleva `memory: local` y lo que persiste queda en el workspace de la muestra
   (`memory_forbid_types` lo lee). Con `memory: off` la línea `memory:` se

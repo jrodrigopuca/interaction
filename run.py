@@ -177,6 +177,7 @@ class Scenario:
     deny: str = ""           # --disallowedTools, comma-separated: the tool is HIDDEN
     refuse: str = ""         # tools left visible but out of the permissions: a call is REFUSED
     memory: str = ""         # "off": the shadow agent carries no `memory:` line; see shadow_agents
+    hide_commands: tuple = ()  # commands absent from the agent's PATH; see path_without
     floor: str = ""          # smallest model family the rule was MEASURED to hold on
     budget: float = 0.0      # per-sample ceiling override (USD); see sample_budget
     fingerprint: str = ""    # hash of the YAML entry + its fixture; see load_scenarios
@@ -296,6 +297,7 @@ def load_scenarios() -> list:
                 deny=raw.get("deny", ""),
                 refuse=raw.get("refuse", "") or "",
                 memory=memory_mode(raw.get("memory"), raw["id"]),
+                hide_commands=hidden_commands(raw.get("hide_commands"), raw["id"]),
                 floor=raw.get("floor", "") or "",
                 budget=float(raw.get("budget", 0) or 0),
                 fingerprint=_digest(src),
@@ -381,11 +383,25 @@ def permissions_for(refuse: str = "") -> dict:
             "allow": [r for r in HARNESS_PERMISSIONS["allow"] if r.split("(")[0] not in gone]}
 
 
+def agent_env(neutral: bool, path: str = "") -> dict:
+    """The environment `claude -p` runs in. None means "inherit", as before
+    `hide_commands` existed; a `path` replaces PATH, and the Bash tool's shell
+    inherits it (see path_without)."""
+    if not neutral and not path:
+        return None
+    env = dict(os.environ)
+    if neutral:
+        env["CLAUDE_CODE_SHELL"] = NEUTRAL_SHELL
+    if path:
+        env["PATH"] = path
+    return env
+
+
 def ask(prompt: str, agent: str = "", model: str = "",
         forward_subagents: bool = False, timeout: int = 0,
         cwd: Path = None, allow: str = "", deny: str = "", refuse: str = "",
         safe_mode: bool = False, system: str = "", tools: str = None,
-        neutral: bool = False, max_budget: float = 0.0) -> Reply:
+        neutral: bool = False, max_budget: float = 0.0, path: str = "") -> Reply:
     """One `claude -p` call. Returns the final text plus the raw event stream.
 
     The stream is kept whole, not just the answer: `parent_tool_use_id` and the
@@ -436,7 +452,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
     # indistinguishable, at a glance, from an agent that ran and said nothing.
     cmd += ["--", prompt]
     limit = timeout or TIMEOUT
-    env = dict(os.environ, CLAUDE_CODE_SHELL=NEUTRAL_SHELL) if neutral else None
+    env = agent_env(neutral, path)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=limit,
                               cwd=str(cwd) if cwd else None, stdin=subprocess.DEVNULL,
@@ -1213,6 +1229,72 @@ def shadow_skills(ws: Path) -> None:
 AGENTS_DIR = Path.home() / ".claude" / "agents"
 
 
+# Names Claude Code's Bash snapshot defines as shell functions (2.1.303, read in
+# ~/.claude/shell-snapshots and the binary; reproduced without a model on
+# 2026-10-19): `rg` calls the embedded ripgrep whenever `hash rg` fails, `grep`
+# and `find` are always the embedded ugrep (--ignore-files) and bfs, `pkill` is
+# guarded. A PATH without them changes nothing the agent sees (run
+# 20261019-020803: rg ran in 2 of 3 samples under hide_commands: [rg]).
+HOST_SHADOWED = frozenset({"rg", "grep", "find", "pkill"})
+
+
+def hidden_commands(raw, scenario_id: str = "") -> tuple:
+    """The scenario's `hide_commands:` — a list of bare command names. A
+    string, a path or anything that is not a plain name would hide nothing
+    and the scenario would test a tool that is still there, so it is refused."""
+    if raw is None:
+        return ()
+    ok = (isinstance(raw, list) and raw
+          and all(isinstance(c, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", c) for c in raw))
+    if not ok:
+        sys.exit(f"{scenario_id}: hide_commands `{raw}` must be a non-empty list of "
+                 f"bare command names, e.g. [ag]")
+    shadowed = sorted(set(raw) & HOST_SHADOWED)
+    if shadowed:
+        sys.exit(f"{scenario_id}: hide_commands cannot hide {', '.join(shadowed)} — "
+                 f"Claude Code's Bash snapshot defines them as functions (rg falls back "
+                 f"to its embedded ripgrep, grep/find are its embedded ugrep/bfs), so "
+                 f"the agent would still have them; measure with a tool the host does "
+                 f"not shadow")
+    return tuple(raw)
+
+
+def path_without(hidden, path: str, dest: Path) -> str:
+    """A PATH on which the `hidden` commands do not exist (B-077).
+
+    `deny: Bash(rg:*)` does not make rg absent: Bash stays visible and the call
+    comes back REFUSED, and agents rightly read a refusal as a no to its effect
+    (run 20261019-014136: 0/3 fell back to grep, by the approval rule). What a
+    host without the tool looks like is "command not found" — and `which rg`
+    / `command -v rg` failing too, which a fake `rg` early on PATH would not
+    give. The tools share directories with ones the agent needs (rg, git, node
+    and fd all live in /opt/homebrew/bin here), so a directory cannot simply
+    be dropped. Instead `dest` gets one symlink per name found on PATH, first
+    directory wins — the shell's own lookup order — minus the hidden names,
+    and becomes the whole PATH. Not measured yet: that Claude Code's Bash
+    snapshot keeps the inherited PATH. Its login shell runs path_helper and
+    the user's profile, which here add no directory holding rg; a successful
+    rg in a sample's trace would say the hiding leaked."""
+    dest.mkdir(parents=True, exist_ok=True)
+    gone, seen = set(hidden), set()
+    for d in path.split(os.pathsep):
+        if not d or not os.path.isabs(d) or not os.path.isdir(d):
+            continue
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for name in names:
+            if name in gone or name in seen:
+                continue
+            src = os.path.join(d, name)
+            if os.path.isdir(src) and not os.path.islink(src):
+                continue
+            seen.add(name)
+            os.symlink(src, dest / name)
+    return str(dest)
+
+
 MEMORY_MODES = ("", "off")
 
 
@@ -1401,10 +1483,15 @@ def run_one(sc: Scenario) -> Result:
     # conceptual question opened with a survey of a repo that isn't the user's.
     # An empty cwd is the honest stage: nothing to explore, nothing to leak.
     ws = make_workspace(sc)
+    # Outside the workspace on purpose: inside it, thousands of links would
+    # count as files the agent created (`changed_files`).
+    path = (path_without(sc.hide_commands, os.environ.get("PATH", ""),
+                         ws.parent / f"{ws.name}.bin")
+            if sc.hide_commands else "")
     reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
                 cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
-                max_budget=sc.sample_budget)
+                max_budget=sc.sample_budget, path=path)
     if reply.error:
         res = Result(sc, reply, workspace=str(ws or ""))
         if reply.error.startswith("budget"):
