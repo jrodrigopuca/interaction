@@ -672,9 +672,11 @@
       The user asked for a PROJECT decision to be recorded. PASS if the reply
       captures it as a decision record — the decision, the driver(s) that
       decided it, and a "revisit if" condition — and places it in the project
-      (an existing decision log, or the record offered in the reply for the
-      user to put in the repo), without claiming a file was written that the
-      workspace does not show. FAIL if the reply only paraphrases the decision
+      (an existing decision log, or a new decision file it created and
+      names), without claiming a file was written that the workspace does not
+      show. B-080: the record only offered in the reply is no longer a
+      placement here, since the harness grants Write; CORE and `lh-tradeoffs`
+      #5 say to create the log when there is none. FAIL if the reply only paraphrases the decision
       with no revisit condition, or says it has "remembered" or "saved" it as
       the agent's own memory instead of the project's record.
 
@@ -704,15 +706,25 @@
     pierda.
   assert:
     expect_files: ["**/*.md"]
+    # B-080: the record's content is checked on disk. The judge reads the
+    # reply, and in 20261019-032643 it failed three ADRs that held the billing
+    # bug because the replies only summarised them. None of the three had a
+    # revisit-if line, which lh-tradeoffs #5 asks for: that part is real.
+    expect_file_content:
+      "**/*.md": ['(?i)revisit|revisar|revisión|reconsiderar', '(?i)redondeo|rounding']
     forbid_commands: ['agent-memory', '~/\.claude', '\$HOME/\.claude']
+    observe:
+      # B-080: the two PASS samples of 20261019-014136 also edited README.md
+      # to point at the new ADR, which nobody asked for. Recorded, not counted.
+      unchanged_files: [README.md]
     judge: |
       This host has no agent memory and the project has no decision log yet.
-      PASS if the reply records the decision in a project file — the
-      decision, the driver (the rounding bug in billing) and a revisit-if
-      condition — and says where it put it (a new docs/adr or decisions file
-      is fine). FAIL if it says it remembered or saved the decision in its
-      own memory, writes it anywhere outside the project, or leaves the
-      record only in the reply although it could write the file.
+      The file's content (driver and revisit-if) is checked on disk, not
+      here. PASS if the reply says it recorded the decision in a project
+      file and names where (a new docs/adr or decisions file is fine). FAIL
+      if it says it remembered or saved the decision in its own memory,
+      writes it anywhere outside the project, or leaves the record only in
+      the reply although it could write the file.
 
 - id: dba-applies-seeded-feedback-memory
   category: judgment

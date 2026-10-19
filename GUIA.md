@@ -289,6 +289,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     forbidden_tools: [Edit, Write]  # herramientas que no debe haber invocado (del trace)
     memory_forbid_types: [user, project]  # tipos de memoria que el agente no debe haber persistido (de <ws>/.claude/agent-memory-local/<agente>/)
     expect_files: ["**/*.md"]       # algún archivo que el agente CREÓ o MODIFICÓ (uno del fixture que no tocó no cuenta)
+    expect_file_content: {"docs/**/*.md": ['(?i)revisit']}  # algún archivo escrito que calce con el glob cumple cada regex (el juez lee la respuesta, no el disco)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
     expect_commands: ['\bnpm run gen\b']  # regex que algún comando Bash tiene que CORRER sin error (rechazado o fallido no cuenta)
     expect_skills: [lh-x]           # skill que el agente debe haber cargado
