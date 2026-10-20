@@ -36,6 +36,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -186,6 +187,7 @@ class Scenario:
     twin_key: str = ""       # hash of the entry minus id/ablate: the with/without pair shares it
     permission_mode: str = ""  # --permission-mode for the agent; see PERMISSION_MODES
     guard: str = ""          # a catalog hook in the session's --settings; see GUARDS
+    verify: str = ""         # B-084: the check the catalog's verify hook runs on Stop; see verify_hooks
 
     @property
     def is_routing(self) -> bool:
@@ -273,7 +275,9 @@ def host_fingerprints(scenarios: list) -> dict:
         "scenarios": {s.id: s.fingerprint for s in scenarios},
         # B-083: the guard's script is catalog code outside any agent file.
         "guards": {g: _digest(guard_script(g).read_bytes())
-                   for g in sorted({s.guard for s in scenarios if s.guard})} or None,
+                   for g in sorted({s.guard for s in scenarios if s.guard}
+                                   | ({VERIFY_GUARD} if any(s.verify for s in scenarios)
+                                      else set()))} or None,
     }
 
 
@@ -286,7 +290,7 @@ SCENARIO_KEYS = frozenset({
     "id", "category", "prompt", "agent", "expect", "assert", "delegate", "exec",
     "timeout", "manual", "experiment", "until", "workspace", "allow", "deny",
     "refuse", "memory", "hide_commands", "floor", "budget", "ablate",
-    "permission_mode", "guard"})
+    "permission_mode", "guard", "verify"})
 EXEC_KEYS = frozenset({"suite", "symbol", "from_file"})
 
 # `permission_mode:` (B-083) — the CLI's own choices, read from
@@ -304,7 +308,13 @@ PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontA
 # frontmatter: Claude Code skips a PROJECT agent's frontmatter hooks under
 # `-p` (documented), and the harness runs shadow copies inside the workspace.
 # Its hash enters the run's fingerprints.
-GUARDS = {"shell-writes": "scripts/shell_write_guard.py"}
+GUARDS = {"shell-writes": "scripts/shell_write_guard.py",
+          "verify": "scripts/verify_before_stop.py"}
+# `verify:` (B-084) — the command the catalog's verify hook runs when the
+# agent tries to finish; red blocks the stop once with the output. Not a
+# `guard:` name: the hook needs the command, which is the scenario's. Its
+# script hash enters `fingerprints.guards` under this name.
+VERIFY_GUARD = "verify"
 
 
 def catalog_root():
@@ -333,6 +343,27 @@ def guard_hooks(name: str) -> dict:
     command = f'python3 "{guard_script(name)}"'
     return {"PreToolUse": [{"matcher": "Bash",
                             "hooks": [{"type": "command", "command": command}]}]}
+
+
+def verify_hooks(check: str) -> dict:
+    """The `hooks` settings block for the verify hook: the check on argv,
+    under BOTH stop events — the sample's agent runs as the main session
+    (`Stop`) and anything it delegates to finishes as a subagent
+    (`SubagentStop`); the installer's frontmatter form gets that conversion
+    from Claude Code, a `--settings` hook does not."""
+    command = f'python3 "{guard_script(VERIFY_GUARD)}" {shlex.quote(check)}'
+    entry = [{"hooks": [{"type": "command", "command": command}]}]
+    return {"Stop": entry, "SubagentStop": entry}
+
+
+def session_hooks(sc) -> Optional[dict]:
+    """Every catalog hook a scenario asks for, merged into one settings block."""
+    hooks = {}
+    if sc.guard:
+        hooks.update(guard_hooks(sc.guard))
+    if sc.verify:
+        hooks.update(verify_hooks(sc.verify))
+    return hooks or None
 
 
 def unknown_keys(raw: dict) -> list:
@@ -450,6 +481,7 @@ def load_scenarios() -> list:
                 twin_key=twin_key(raw, ws_digest),
                 permission_mode=raw.get("permission_mode", "") or "",
                 guard=raw.get("guard", "") or "",
+                verify=raw.get("verify", "") or "",
             ))
     if unknown:
         sys.exit("unknown keys — the harness would ignore them and run as if they "
@@ -472,6 +504,8 @@ def load_scenarios() -> list:
                      f"{PERMISSION_MODES} (claude --help)")
         if s.guard and s.guard not in GUARDS:
             sys.exit(f"{s.id}: guard `{s.guard}` is not one of {sorted(GUARDS)}")
+        if s.verify is not None and not isinstance(s.verify, str):
+            sys.exit(f"{s.id}: `verify:` is the check as one shell string (`npm test`)")
     ids = [s.id for s in out]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
@@ -595,7 +629,7 @@ def ask(prompt: str, agent: str = "", model: str = "",
                                     "(not --user-session)")
     if hooks and not neutral:
         # The user's own hooks would run beside the guard, unmeasured.
-        return Reply(text="", error="`guard:` needs the neutral session (not --user-session)")
+        return Reply(text="", error="`guard:`/`verify:` need the neutral session (not --user-session)")
     if permission_mode:
         cmd += ["--permission-mode", permission_mode]
     if neutral:
@@ -1887,7 +1921,7 @@ def run_one(sc: Scenario) -> Result:
                 cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
                 max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None,
                 permission_mode=sc.permission_mode,
-                hooks=guard_hooks(sc.guard) if sc.guard else None)
+                hooks=session_hooks(sc))
     leaks = ablation_leaks(sc.ablate, reply.events)
     if leaks:
         reply.error = "ablate: " + "; ".join(leaks)

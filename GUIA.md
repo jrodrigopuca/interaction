@@ -315,6 +315,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   ablate: [lh-code-audit]           # skills fuera de la sesión: rama "sin" de una medición de valor (ver abajo)
   permission_mode: auto             # --permission-mode; solo los valores de `claude --help` (ver abajo)
   guard: shell-writes               # un hook del catálogo en el --settings de la sesión (ver abajo)
+  verify: npm test                  # B-084: el hook de verificación del catálogo corre esto cuando el agente quiere terminar (ver abajo)
 ```
 
 **El loader es estricto.** Una clave que el harness no conoce, arriba, en
@@ -383,6 +384,20 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   (`*-guard`) no contienen el id de su base, porque `--only` compara por
   substring y un gemelo que lo contuviera se correría, y se pagaría, cada
   vez que se pide la base.
+- **`verify: <comando>` mete el hook de verificación del catálogo (B-084).**
+  Es `scripts/verify_before_stop.py` del catálogo estampado, con el comando
+  en su argv, puesto como hook `Stop` Y `SubagentStop` en el mismo
+  `--settings`: el agente de la muestra corre como sesión principal (`Stop`)
+  y lo que delega termina como subagente (`SubagentStop`); la conversión que
+  Claude Code hace en el frontmatter del instalador no aplica a un hook por
+  `--settings`. Cuando el agente intenta terminar, el hook corre el comando
+  en la carpeta de trabajo; si falla, bloquea el cierre UNA vez y le entrega
+  al agente el exit code y la cola de la salida como siguiente instrucción;
+  con `stop_hook_active` ya en true deja pasar. El hash del script entra en
+  `fingerprints.guards` bajo `verify`; el comando ya está en la huella del
+  escenario. Necesita la sesión neutra. La señal de que el hook no se
+  disparó: una muestra con `verify:` cuya respuesta termina con la suite
+  roja y ningún evento de bloqueo en el stream.
 - **Para que un comando NO EXISTA, `hide_commands:`.** Lista de nombres
   (`[ag]`). El harness arma una carpeta con un enlace a cada comando del
   `PATH` salvo esos, en el orden de búsqueda de la shell, y se la da al
