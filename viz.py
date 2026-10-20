@@ -200,6 +200,9 @@ def run_warnings(meta: dict) -> list:
     # A reinstall mid-run mixes two catalog versions (B-052); it disqualifies
     # the run whatever else it recorded.
     out = ["Catalog changed during the run · invalid"] if meta.get("catalog_changed") else []
+    # B-038: the model alone. Its verdicts describe the model, not the catalog.
+    if meta.get("branch") == "without":
+        out.append("Without the catalog · not a baseline")
     # Stopped by its budget or the quota window (B-044): with --repeat the
     # passes are whole-suite, so a run cut in its second pass covers every ID
     # and would otherwise look complete.
@@ -313,7 +316,8 @@ def context(runs_dir: Path = RUNS_DIR) -> dict:
 def cost_estimate(runs: list, window: int = 10) -> dict | None:
     """Average cost of one scenario sample over the latest runs that recorded
     costs. A guide for deciding, not a quote: scenarios differ several-fold."""
-    paid = [r for r in runs if r["cost"] > 0][:window]
+    paid = [r for r in runs if r["cost"] > 0
+            and r["meta"].get("branch") != "without"][:window]
     samples = sum(r["samples"] for r in paid)
     if not samples:
         return None
@@ -2322,6 +2326,100 @@ def looks_for(spec: dict) -> str:
     return " · ".join(parts)
 
 
+def _frac(rec: dict):
+    """Share of samples that passed, or None when the record has no verdict."""
+    n = rec.get("repeat") or 1
+    if rec.get("passes") is not None and rec.get("repeat"):
+        return rec["passes"] / n
+    status = rec.get("status")
+    return None if status is None else (1.0 if status == "PASS" else 0.0)
+
+
+def delta_rows(runs: list) -> dict:
+    """B-038: the catalog's contribution, scenario by scenario.
+
+    `runs` are load_run results. Those with `branch: without` are the model
+    alone (SIN); every other run is the catalog's agent (CON). For each
+    scenario SIN ran, SIN and CON are the pass share of the latest record
+    given (later runs on the command line win), and the delta is CON - SIN.
+    Rolled up by category and by agent over the scenarios that have both. A
+    delta of 0 does not say the catalog adds nothing: it says this scenario
+    cannot tell (regla 17: reformulate it, or declare what it protects)."""
+    sin, con = {}, {}
+    for r in runs:
+        side = sin if (r.get("meta") or {}).get("branch") == "without" else con
+        for rec in r["scenarios"]:
+            side[rec["id"]] = (r["name"], rec)
+    rows = []
+    for sid, (srun, srec) in sin.items():
+        crun, crec = con.get(sid, (None, None))
+        s, c = _frac(srec), (_frac(crec) if crec else None)
+        rows.append({"id": sid, "agent": srec.get("agent") or "",
+                     "category": srec.get("category") or "",
+                     "sin": s, "sin_n": srec.get("repeat") or 1, "sin_run": srun,
+                     "con": c, "con_n": (crec or {}).get("repeat") or 1, "con_run": crun,
+                     "delta": None if (s is None or c is None) else c - s})
+    rows.sort(key=lambda x: (x["category"], x["agent"], x["id"]))
+
+    def rollup(key):
+        groups = {}
+        for x in rows:
+            if x["delta"] is not None:
+                groups.setdefault(x[key], []).append(x)
+        return [{key: k, "n": len(v), "con": sum(x["con"] for x in v) / len(v),
+                 "sin": sum(x["sin"] for x in v) / len(v),
+                 "delta": sum(x["delta"] for x in v) / len(v),
+                 "zero": sum(1 for x in v if x["delta"] == 0)}
+                for k, v in sorted(groups.items())]
+    return {"rows": rows, "by_category": rollup("category"), "by_agent": rollup("agent")}
+
+
+def _pct(x):
+    return "—" if x is None else f"{x:.0%}"
+
+
+def _signed(x):
+    return "—" if x is None else f"{x:+.0%}"
+
+
+def render_delta(runs: list) -> str:
+    """The CON / SIN / delta tables of --compare, empty when no run is a
+    branch without the catalog."""
+    if not any((r.get("meta") or {}).get("branch") == "without" for r in runs):
+        return ""
+    d = delta_rows(runs)
+
+    def table(title, key, rows):
+        body = "".join(
+            f"<tr><td>{esc(r[key])}</td><td>{r['n']}</td><td>{_pct(r['con'])}</td>"
+            f"<td>{_pct(r['sin'])}</td><td><b>{_signed(r['delta'])}</b></td>"
+            f"<td>{r['zero']}</td></tr>" for r in rows)
+        return (f"<h2>{title}</h2><table class=\"dl\"><thead><tr><th>{key}</th><th>scenarios</th>"
+                f"<th>WITH</th><th>WITHOUT</th><th>delta</th><th>delta = 0</th></tr></thead>"
+                f"<tbody>{body}</tbody></table>")
+
+    rows = "".join(
+        f"<tr><td>{esc(r['category'])}</td><td>{esc(r['agent'])}</td><td>{esc(r['id'])}</td>"
+        f"<td>{_pct(r['con'])} <small>({r['con_n']})</small></td>"
+        f"<td>{_pct(r['sin'])} <small>({r['sin_n']})</small></td>"
+        f"<td><b>{_signed(r['delta'])}</b>"
+        f"{' · N/3 in both before concluding' if r['delta'] == 0 else ''}</td></tr>"
+        for r in d["rows"])
+    return ("<style>table.dl{border-collapse:collapse;margin:0 0 24px}table.dl th,table.dl td"
+            "{border-bottom:1px solid #8884;padding:4px 10px;text-align:left}</style>"
+            "<h1>What the catalog adds</h1>"
+            "<p>WITH is the catalog's agent, WITHOUT is the same model alone in the same "
+            "neutral session. Delta = WITH - WITHOUT, over the scenarios both ran. A delta of 0 "
+            "does not mean the catalog adds nothing: it means that scenario cannot tell, and "
+            "must be reformulated or declare what it protects. Numbers in parentheses are "
+            "samples; one sample says little.</p>"
+            + table("By agent", "agent", d["by_agent"])
+            + table("By category", "category", d["by_category"])
+            + "<h2>By scenario</h2><table class=\"dl\"><thead><tr><th>category</th><th>agent</th>"
+              "<th>scenario</th><th>WITH</th><th>WITHOUT</th><th>delta</th></tr></thead>"
+              f"<tbody>{rows}</tbody></table>")
+
+
 def build_compare(runs: list) -> str:
     """--compare: the verdict table across runs, then the previous card view.
     Out of the redesign's scope; kept byte-for-byte in behaviour."""
@@ -2331,7 +2429,7 @@ def build_compare(runs: list) -> str:
             "icons": TOOL_ICON,
             "specs": {k: v for k, v in specs.items() if k in wanted},
             "catq": CATEGORY_QUESTION}
-    body = render_compare(runs) + render_overview(runs, specs)
+    body = render_delta(runs) + render_compare(runs) + render_overview(runs, specs)
     title = " vs ".join(r["name"] for r in runs)
     # A reply containing "</script>" would end the tag early and break the page.
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")

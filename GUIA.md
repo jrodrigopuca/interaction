@@ -316,6 +316,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   permission_mode: auto             # --permission-mode; solo los valores de `claude --help` (ver abajo)
   guard: shell-writes               # un hook del catálogo en el --settings de la sesión (ver abajo)
   verify: npm test                  # B-084: el hook de verificación del catálogo corre esto cuando el agente quiere terminar (ver abajo)
+  no_agent: "necesita el roster"    # B-038: por qué NO puede correr sin el catálogo (la rama sin agente lo saltea con ese motivo)
 ```
 
 **El loader es estricto.** Una clave que el harness no conoce, arriba, en
@@ -398,6 +399,29 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   escenario. Necesita la sesión neutra. La señal de que el hook no se
   disparó: una muestra con `verify:` cuya respuesta termina con la suite
   roja y ningún evento de bloqueo en el stream.
+- **`--branch without` mide al modelo solo (B-038).** Es la misma sesión
+  neutral, sin `--agent` y sin copiar agentes ni skills al workspace: lo que
+  hace Sonnet sin el catálogo, para ponerlo contra lo que hace el agente
+  (el Δ). Exige la sesión neutra: en la del usuario sus agentes y skills
+  siguen estando. Saltea, con el motivo en `run.json` (`without_skipped`) y
+  en pantalla, los escenarios que necesitan que el catálogo exista: las
+  categorías `routing`, `handoff`, `composition`, `inheritance`,
+  `skill-trigger`, `skill-value` y `build-quality`, los que delegan, los que
+  sacan una skill con `ablate:`, los que miran la carpeta de memoria del
+  agente o piden una skill cargada. Un escenario puede declarar su propio
+  motivo con `no_agent:`. Cada muestra se revisa: si el `init` ofrece una
+  skill o un agente del catálogo, o una herramienta leyó `~/.claude/agents`,
+  `~/.claude/skills` o el catálogo, la muestra es un ERROR y no un
+  veredicto, porque estaría midiendo "con" bajo el nombre de "sin". Medido
+  gratis (el `init` llega antes del modelo): sin catálogo 0 de 48 skills y 0
+  de 15 agentes; con catálogo, 48 y 15. La corrida queda con
+  `branch: without`: nunca es línea base ni veredicto vigente
+  (`--applicability` y el reporte la ignoran, y su costo no entra en la
+  estimación). Para ver el aporte:
+  `./viz.py runs/<con> runs/<sin> --compare` agrega, arriba de la tabla de
+  siempre, CON, SIN y Δ por agente, por categoría y por escenario. Un Δ de 0
+  no dice que el catálogo no aporta: dice que ese escenario no discrimina, y
+  pide N/3 en las dos ramas antes de reformularlo o declarar qué protege.
 - **Para que un comando NO EXISTA, `hide_commands:`.** Lista de nombres
   (`[ag]`). El harness arma una carpeta con un enlace a cada comando del
   `PATH` salvo esos, en el orden de búsqueda de la shell, y se la da al

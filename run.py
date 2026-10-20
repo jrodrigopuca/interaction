@@ -84,6 +84,7 @@ NEUTRAL_SESSION = ["--setting-sources", "project,local"]
 # bash's startup files here define no alias that shadows a command.
 NEUTRAL_SHELL = "/bin/bash"
 NEUTRAL = True   # --user-session turns it off, for experiments only
+BRANCH = "with"  # --branch without: the same session with no catalog (B-038); see no_agent_reason
 HARNESS_PERMISSIONS = {
     "allow": ["Read", "Edit", "Write", "Glob", "Grep",
               "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)",
@@ -188,6 +189,7 @@ class Scenario:
     permission_mode: str = ""  # --permission-mode for the agent; see PERMISSION_MODES
     guard: str = ""          # a catalog hook in the session's --settings; see GUARDS
     verify: str = ""         # B-084: the check the catalog's verify hook runs on Stop; see verify_hooks
+    no_agent: str = ""       # B-038: why the branch WITHOUT the catalog cannot run this scenario; see no_agent_reason
 
     @property
     def is_routing(self) -> bool:
@@ -290,7 +292,7 @@ SCENARIO_KEYS = frozenset({
     "id", "category", "prompt", "agent", "expect", "assert", "delegate", "exec",
     "timeout", "manual", "experiment", "until", "workspace", "allow", "deny",
     "refuse", "memory", "hide_commands", "floor", "budget", "ablate",
-    "permission_mode", "guard", "verify"})
+    "permission_mode", "guard", "verify", "no_agent"})
 EXEC_KEYS = frozenset({"suite", "symbol", "from_file"})
 
 # `permission_mode:` (B-083) — the CLI's own choices, read from
@@ -482,6 +484,7 @@ def load_scenarios() -> list:
                 permission_mode=raw.get("permission_mode", "") or "",
                 guard=raw.get("guard", "") or "",
                 verify=raw.get("verify", "") or "",
+                no_agent=raw.get("no_agent", "") or "",
             ))
     if unknown:
         sys.exit("unknown keys — the harness would ignore them and run as if they "
@@ -504,6 +507,9 @@ def load_scenarios() -> list:
                      f"{PERMISSION_MODES} (claude --help)")
         if s.guard and s.guard not in GUARDS:
             sys.exit(f"{s.id}: guard `{s.guard}` is not one of {sorted(GUARDS)}")
+        if not isinstance(s.no_agent, str):
+            sys.exit(f"{s.id}: `no_agent:` is the REASON the scenario cannot run without "
+                     f"the catalog, as one string")
         if s.verify is not None and not isinstance(s.verify, str):
             sys.exit(f"{s.id}: `verify:` is the check as one shell string (`npm test`)")
     ids = [s.id for s in out]
@@ -1496,6 +1502,8 @@ def make_workspace(sc: Scenario) -> Path:
     if sc.workspace:
         shutil.copytree(ROOT / sc.workspace, ws, dirs_exist_ok=True)
     git_root(ws)
+    if BRANCH == "without":
+        return ws          # B-038: no shadow agents, no shadow skills — the model alone
     gone = ablation_split(sc.ablate)[0]
     shadow_agents(ws, sc.memory, drop_skills=gone)
     shadow_skills(ws, skip=gone)
@@ -1582,6 +1590,80 @@ def catalog_skill_names() -> set:
                  f"install.py first; a neutral run copies only the catalog's skills")
     return ({p.parent.name for p in catalog.glob("*/skills/*/SKILL.md")}
             | {p.parent.name for p in catalog.glob("skills/*/SKILL.md")})
+
+
+def catalog_agent_names() -> set:
+    """Names of the catalog's agents, from the catalog the install came from."""
+    manifest = INSTALLED_AGENTS.parent / ".local-agents.json"
+    try:
+        catalog = Path(json.loads(manifest.read_text())["catalog_path"])
+    except (OSError, ValueError, KeyError):
+        sys.exit(f"no catalog path in {manifest} — a run without the catalog still "
+                 f"has to know which agents and skills are the catalog's")
+    return {p.parent.name for p in catalog.glob("*/AGENTS.md")}
+
+
+# B-038 — the branch WITHOUT the catalog: the same neutral session, no
+# `--agent`, and no shadow agents or skills in the workspace. What the model
+# does alone, to be set against what the catalog's agent does (the delta).
+# A scenario is skipped, with its reason in run.json, when the question it asks
+# needs the catalog to exist: someone to route to, a parent to inherit from, a
+# skill to load, an agent's memory folder.
+NO_AGENT_CATEGORIES = {
+    "routing": "picks among the roster's agents: with no roster there is nothing to pick",
+    "handoff": "asks where work goes next: it needs the other agents to exist",
+    "composition": "asks which set of specialists a job needs",
+    "inheritance": "checks that the installer's CORE arrived: there is no installed agent",
+    "skill-trigger": "measures when a catalog skill loads",
+    "skill-value": "compares the same task with and without a skill; the baseline is the catalog",
+    "build-quality": "compares solo, reviewed and team arms: the arms are agents",
+}
+
+
+def no_agent_reason(sc: Scenario) -> str:
+    """Why `sc` cannot run in the branch without the catalog, or "" when it can."""
+    if sc.no_agent:
+        return sc.no_agent
+    if sc.category in NO_AGENT_CATEGORIES:
+        return NO_AGENT_CATEGORIES[sc.category]
+    if sc.delegate:
+        return "records a delegation tree: it needs agents to delegate to"
+    if sc.ablate:
+        return "ablates a catalog skill: there is no catalog skill to take out"
+    if "memory_forbid_types" in sc.assertions or sc.memory:
+        return "checks the agent's memory folder, which only an installed agent has"
+    if sc.assertions.get("expect_skills") or sc.assertions.get("forbid_skills"):
+        return "asserts on a catalog skill load"
+    return ""
+
+
+def without_leaks(events: list) -> list:
+    """Ways the catalog still reached a sample of the branch WITHOUT it — each
+    makes the sample an ERROR, never a verdict: it would be measuring "with"
+    under the name "without".
+
+    - the init event offers a catalog skill or lists a catalog agent;
+    - a tool call reads the installed copies by path (the neutral session keeps
+      ~/.claude out of the listing, not out of the filesystem)."""
+    out = []
+    skills, agents = catalog_skill_names(), catalog_agent_names()
+    pat = re.compile(r"\.claude/(?:agents|skills)/|local-agents")
+    for ev in events or []:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "system" and ev.get("subtype") == "init":
+            offered = {str(s).rsplit(":", 1)[-1] for s in ev.get("skills") or []}
+            out += [f"skill `{n}` is offered to the model (init)" for n in sorted(offered & skills)]
+            out += [f"agent `{n}` is listed (init)" for n in sorted(set(ev.get("agents") or []) & agents)]
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and pat.search(json.dumps(b.get("input") or {}))):
+                out.append(f"the installed catalog was read by path ({b.get('name')})")
+    return sorted(set(out))
 
 
 def shadow_skills(ws: Path, skip=()) -> None:
@@ -1916,7 +1998,7 @@ def run_one(sc: Scenario) -> Result:
                          ws.parent / f"{ws.name}.bin")
             if sc.hide_commands else "")
     host_off = {n: "off" for n in ablation_split(sc.ablate)[1]}
-    reply = ask(prompt, "" if sc.is_routing else sc.agent, AGENT_MODEL,
+    reply = ask(prompt, "" if (sc.is_routing or BRANCH == "without") else sc.agent, AGENT_MODEL,
                 forward_subagents=sc.delegate, timeout=sc.limit,
                 cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
                 max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None,
@@ -1925,6 +2007,10 @@ def run_one(sc: Scenario) -> Result:
     leaks = ablation_leaks(sc.ablate, reply.events)
     if leaks:
         reply.error = "ablate: " + "; ".join(leaks)
+    if BRANCH == "without" and not reply.error:
+        leaks = without_leaks(reply.events)
+        if leaks:
+            reply.error = "without: " + "; ".join(leaks)
     if reply.error:
         res = Result(sc, reply, workspace=str(ws or ""))
         if reply.error.startswith("budget"):
@@ -2092,6 +2178,8 @@ def applicability_data(scenarios: list, model: str) -> list:
             meta = {}
         if is_experiment_run(meta):
             continue   # an experiment's verdicts describe the experiment, not the catalog
+        if meta.get("branch") == "without":
+            continue   # B-038: the model alone is never the catalog's verdict
         if meta.get("catalog_changed"):
             continue   # verdicts from two catalog versions describe neither (B-052)
         # A capped run (B-044) still holds whole verdicts, but a scenario its
@@ -2410,6 +2498,11 @@ def main():
     ap.add_argument("--experiment", metavar="WHAT", default=None,
                     help="declare this run an experiment and say what it tests; "
                          "recorded in run.json and shown as such in reports")
+    ap.add_argument("--branch", choices=("with", "without"), default="with",
+                    help="`without` (B-038): the same neutral session with no `--agent` and no "
+                         "catalog agents or skills in the workspace, to measure what the model does "
+                         "alone. Skips the scenarios that need the catalog to exist, with the reason "
+                         "in run.json. Never a baseline, never a current verdict")
     ap.add_argument("--user-session", action="store_true",
                     help="EXPERIMENTS ONLY: run the agent with the user's own settings, "
                          "CLAUDE.md, output style and shell instead of a neutral session; "
@@ -2448,8 +2541,12 @@ def main():
     args = ap.parse_args()
 
     AGENT_MODEL, JUDGE_MODEL = args.model, args.judge_model
-    global NEUTRAL
+    global NEUTRAL, BRANCH
     NEUTRAL = not args.user_session
+    BRANCH = args.branch
+    if BRANCH == "without" and not NEUTRAL:
+        sys.exit("--branch without needs the neutral session: in the user's own session "
+                 "their ~/.claude agents and skills are still there")
     TIMEOUT, DELEGATE_TIMEOUT = args.timeout, args.delegate_timeout
     if args.repeat < 1:
         sys.exit("--repeat must be at least 1")
@@ -2470,6 +2567,17 @@ def main():
         scenarios = [s for s in scenarios if not s.manual and not s.experiment]
     if not scenarios:
         sys.exit("no scenarios matched")
+    skipped = {}
+    if BRANCH == "without":
+        skipped = {s.id: no_agent_reason(s) for s in scenarios if no_agent_reason(s)}
+        scenarios = [s for s in scenarios if s.id not in skipped]
+        reasons = {}
+        for sid, why in skipped.items():
+            reasons.setdefault(why, []).append(sid)
+        for why, ids in sorted(reasons.items(), key=lambda kv: -len(kv[1])):
+            print(f"  skipped {len(ids):3} — {why}")
+        if not scenarios:
+            sys.exit("every selected scenario needs the catalog: nothing to run without it")
     for sc, item in expired_experiments(load_scenarios()):
         print(f"experiment expired: {sc.id} — {item} is closed. Promote it to the "
               f"suite (drop `experiment:`) or delete it.", file=sys.stderr)
@@ -2536,6 +2644,9 @@ def main():
     # An experiment is declared when it is created — what makes a run unusual is
     # its author's intent, not a rule the report could infer.
     stamp["experiment"] = args.experiment
+    stamp["branch"] = BRANCH
+    if skipped:
+        stamp["without_skipped"] = skipped
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     cat = stamp["catalog"] or {}
     print(f"catalog {cat.get('catalog_commit', '?')[:7]}"
@@ -2583,6 +2694,10 @@ def main():
               f"{b['samples_planned']} samples (overshoot ${b['overshoot_usd']:.2f}). "
               f"It is never a baseline; {len(scenarios) - len(aggs)} scenario(s) did not run.")
         code = code or 2
+    if BRANCH == "without":
+        print(f"\nWITHOUT-CATALOG RUN: the model alone, {len(skipped)} scenario(s) skipped "
+              f"because they need the catalog. Never a baseline and never a current "
+              f"verdict; `viz.py --compare` sets it against the runs WITH the catalog.")
     if changed:
         end = stamp["catalog_end"] or {}
         print(f"\nINVALID RUN: the catalog was reinstalled while it ran "
