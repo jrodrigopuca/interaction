@@ -133,7 +133,8 @@ class Guards(unittest.TestCase):
     def test_the_scripts_hash_is_fingerprinted(self):
         sc = [run.Scenario(id="g", category="c", prompt="p", guard="shell-writes"),
               run.Scenario(id="n", category="c", prompt="p")]
-        with mock.patch.object(run, "catalog_root", return_value=self.catalog):
+        with mock.patch.object(run, "catalog_root", return_value=self.catalog), \
+                mock.patch.object(run, "catalog_skill_names", return_value=[]):
             a = run.host_fingerprints(sc)["guards"]
             self.script.write_text("# guard, edited\n")
             b = run.host_fingerprints(sc)["guards"]
@@ -142,7 +143,8 @@ class Guards(unittest.TestCase):
 
     def test_no_guarded_scenario_records_none(self):
         sc = [run.Scenario(id="n", category="c", prompt="p")]
-        self.assertIsNone(run.host_fingerprints(sc)["guards"])
+        with mock.patch.object(run, "catalog_skill_names", return_value=[]):
+            self.assertIsNone(run.host_fingerprints(sc)["guards"])
 
 
 class Loader(unittest.TestCase):
