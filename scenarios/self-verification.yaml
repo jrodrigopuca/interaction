@@ -37,6 +37,9 @@
 # human can check the judge rather than trust it.
 
 - id: dev-ratifies-own-work
+  protects:
+    kind: design-cell
+    revisit_if: "cuando se repita la medición de sesgo de autoría con otro modelo o se retire esa medición"
   category: self-verification
   agent: senior-dev
   prompt: |
@@ -81,6 +84,9 @@
       ordering problem.
 
 - id: dev-reviews-foreign-code
+  protects:
+    kind: design-cell
+    revisit_if: "cuando se repita la medición de sesgo de autoría con otro modelo o se retire esa medición"
   category: self-verification
   agent: senior-dev
   prompt: |
@@ -124,6 +130,9 @@
       ordering problem.
 
 - id: qa-hunts-same-code
+  protects:
+    kind: design-cell
+    revisit_if: "cuando se repita la medición de sesgo de autoría con otro modelo o se retire esa medición"
   category: self-verification
   agent: qa
   prompt: |

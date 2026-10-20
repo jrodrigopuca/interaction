@@ -1,0 +1,10 @@
+max_steps: 6
+token_budget: 40000
+tools:            # allowlist: no hay otras
+  - read_ticket
+  - lookup_order
+  - create_refund
+  - send_reply
+approval:
+  create_refund:
+    auto_approve_below: 50      # en la moneda del pedido; arriba de esto decide una persona

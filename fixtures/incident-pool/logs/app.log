@@ -1,0 +1,30 @@
+2026-10-20 13:55:04 INFO  api  GET /checkout 200 100ms
+2026-10-20 13:55:21 INFO  api  GET /checkout 200 140ms
+2026-10-20 13:55:38 INFO  api  GET /checkout 200 89ms
+2026-10-20 13:55:52 INFO  api  GET /checkout 200 105ms
+2026-10-20 13:56:04 INFO  api  GET /checkout 200 121ms
+2026-10-20 13:56:21 INFO  api  GET /checkout 200 83ms
+2026-10-20 13:56:38 INFO  api  GET /checkout 200 84ms
+2026-10-20 13:56:52 INFO  api  GET /checkout 200 132ms
+2026-10-20 13:57:04 INFO  api  GET /checkout 200 114ms
+2026-10-20 13:57:21 INFO  api  GET /checkout 200 86ms
+2026-10-20 13:57:38 INFO  api  GET /checkout 200 103ms
+2026-10-20 13:57:52 INFO  api  GET /checkout 200 117ms
+2026-10-20 14:02:41 INFO  api  checkout_v2: 3 queries por request (antes 1)
+2026-10-20 14:03:07 WARN  db   pool 20/20 en uso, 14 conexiones esperando
+2026-10-20 14:03:20 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:03:26 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:03:32 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:03:38 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:03:44 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:03:50 ERROR api  POST /checkout 500 remaining connection slots are reserved
+2026-10-20 14:04:02 ERROR db   connection pool exhausted (max=20)
+2026-10-20 14:04:10 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:04:15 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:04:20 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:05:25 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:05:30 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:05:35 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:06:40 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:06:45 ERROR api  GET /cart 500 connection pool exhausted (max=20)
+2026-10-20 14:07:30 ERROR lb   health check failed api-1, api-2, api-3

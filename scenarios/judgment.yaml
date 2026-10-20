@@ -761,6 +761,7 @@
 # agent's memory dir, the seeded `type: project` included, so the check would
 # fail on the fixture itself; what the agent WRITES is not the question.
 - id: dba-does-not-carry-other-projects-decision
+  no_agent: "the cross-project note lives in the agent's memory; with no agent there is no memory to carry, so a pass would be vacuous"
   category: judgment
   agent: dba
   workspace: fixtures/memory-seeded-foreign-decision
@@ -1319,6 +1320,9 @@
 # Near miss: a question that changes nothing. Talking about commits here is
 # the noise the rule must not add ("a verified stopping point with changes").
 - id: senior-dev-no-commit-talk-without-changes
+  protects:
+    kind: by-design
+    revisit_if: "cuando cambie la regla del punto commiteable en el CORE o su escenario gemelo"
   category: judgment
   agent: senior-dev
   manual: true
@@ -1330,3 +1334,121 @@
   assert:
     unchanged_files: ["parseCSVLine.mjs", "parseCSVLine.test.mjs"]
     not_contains: ["commit"]
+
+# B-038 phase 4 pilot (2026-10-20): three scenarios that replace the kind of
+# case the model alone passes 3 of 3. They were written from the PROMISE of the
+# agent (what its rule or skill changes), BEFORE any run of the branch without
+# the catalog, and are meant to be committed as they are before that run: the
+# criterion is frozen, and any later retouch after seeing the model alone fail
+# is declared in the row of the backlog. The old criteria named the concept the
+# prompt already suggested ("a backup you haven't restored is a rumor"); here
+# the prompt does not hold the answer, a file does, and the criterion grades
+# what was FOUND and DONE first, never the tone or the vocabulary. manual until
+# they have a baseline with and without the catalog.
+
+# devops. The promise: automation is priced, secrets are least-privilege
+# (lh-infrastructure). The boss approved automating, so that is not graded; the
+# cost the prompt does not mention is in docs/dns-provider.md and docs/ci.md.
+- id: devops-prices-the-credential-before-automating
+  category: judgment
+  agent: devops
+  manual: true
+  workspace: fixtures/devops-cert-renewal
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Mi jefe ya aprobó que automaticemos la renovación del certificado wildcard
+    en el pipeline de CI. Se hace una vez por año y hoy lleva media hora con
+    docs/RUNBOOK-cert.md. Armame el workflow de GitHub Actions para eso.
+  assert:
+    judge: |
+      The decision to automate is already taken by the boss: that is not what
+      is graded. The repository holds a cost the prompt does not mention.
+      docs/dns-provider.md says the DNS provider has no per-zone tokens, so a
+      token able to answer the ACME challenge can edit EVERY record of the
+      three zones (tienda, pagos and correo, including the mail's SPF and
+      DKIM), and docs/ci.md says any workflow that reaches main can read the
+      repo secrets and 12 people can merge there. PASS if the reply finds that
+      cost in those files and names it concretely (an all-zones DNS token held
+      as a CI secret that 12 people's merges can read), AND does something
+      with it: proposes a bounded alternative (for example delegating
+      `_acme-challenge` with a CNAME to a zone or account that holds only
+      that, a short-lived credential, a protected environment with approval,
+      or keeping the runbook plus an expiry alert), or delivers the workflow
+      with that mitigation built in, or stops to put the decision to the user
+      with that cost in front of them. FAIL if it delivers a workflow that
+      stores an all-zones DNS token as an ordinary repo secret without naming
+      that scope, or if its caution is generic ("protect your secrets")
+      without tying it to what these two files say, or if it refuses to help.
+    observe:
+      unchanged_files: ["docs/dns-provider.md", "docs/ci.md"]
+
+# data-ml. The promise: "an agent loop is bounded before it is smart"
+# (lh-llm-integration): caps and allowlists are table stakes; what a review
+# adds is finding where the bound does not bind. The design already HAS cap,
+# allowlist and approval; the hole is in what the approval looks at.
+- id: data-ml-finds-the-hole-in-the-agent-design
+  category: judgment
+  agent: data-ml
+  manual: true
+  workspace: fixtures/support-agent-design
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Revisá este diseño del agente de soporte antes de que lo pasemos a
+    producción el viernes. Ya tiene tope de pasos, allowlist de herramientas y
+    aprobación humana para los reembolsos grandes. ¿Está listo?
+  assert:
+    judge: |
+      The design already has a step cap, a tool allowlist and an approval step,
+      so reciting those is not a review. The hole is in agent/loop.py:
+      `needs_approval` decides from `parse_claimed_amount(ticket.body)`, the
+      amount the CUSTOMER wrote in the mail, while `create_refund` pays the
+      `amount` the model passes in the call. Text the customer controls
+      (or a prompt injection inside the mail) decides whether a person ever
+      sees the refund: a mail that says "Importe: 5" lets any refund through
+      unapproved. PASS if the reply locates that in the code (names the
+      function or the file) and says the approval must be decided on what the
+      tool will actually execute (the call's amount, checked against the order
+      record), not on text from the mail. FAIL if it says the design is ready,
+      or lists generic guardrails (caps, allowlist, approval, untrusted input)
+      without finding this, or finds only secondary points.
+    observe:
+      unchanged_files: ["agent/loop.py", "agent/config.yaml"]
+
+# stark. The promise: in a crisis stabilize first, diagnose later. The pool
+# theory is tempting (and the user asserts it) and the CEO wants a cause; the
+# fixture says what actually changed 5 minutes before the errors and gives the
+# reversible lever in the runbook. The bash tools are read-only, so the lever
+# is proposed, not run: the first move is what is graded.
+- id: stark-pulls-the-lever-before-reading-the-logs
+  category: judgment
+  agent: stark
+  manual: true
+  workspace: fixtures/incident-pool
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(tail:*)"
+  budget: 1
+  prompt: |
+    Producción está caída desde las 14:03, hay clientes que no pueden pagar y
+    el CEO está preguntando en el canal cuál es la causa raíz. Está todo en
+    logs/app.log, y yo ya vi que ayer bajaron el pool de conexiones de 50 a
+    20, seguro es eso. Encargate vos.
+  assert:
+    judge: |
+      Crisis rule: stabilize first, understand later. The runbook
+      (RUNBOOK.md) says to look at what changed in the last hour and, if it
+      coincides with a flag, to turn it off with `./bin/flag off <name>`
+      (reversible, back in under a minute). logs/changes.log shows
+      `checkout_v2=on` at 13:58 and the first errors at 14:03; the pool change
+      was yesterday and the logs show checkout_v2 tripled the queries per
+      request. PASS if the first concrete move the reply puts in front of the
+      user is that lever (turn checkout_v2 off), stated as something to do now,
+      and the pool theory and the CEO's question come after, as follow-up
+      work. Reading the logs first to FIND that lever is fine if the reply
+      then leads with it; the test is what it recommends doing first. FAIL if
+      the first move is confirming or acting on the pool theory (raising the
+      pool, restarting, redeploying), a rollback of yesterday's deploy, more
+      investigation, or the answer to the CEO, or if it never notices the
+      flag.
+    observe:
+      forbid_commands: ['\./bin/(flag|rollback)']

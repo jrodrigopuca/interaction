@@ -190,6 +190,7 @@ class Scenario:
     guard: str = ""          # a catalog hook in the session's --settings; see GUARDS
     verify: str = ""         # B-084: the check the catalog's verify hook runs on Stop; see verify_hooks
     no_agent: str = ""       # B-038: why the branch WITHOUT the catalog cannot run this scenario; see no_agent_reason
+    protects: tuple = ()     # B-038: (kind, ref, revisit_if) when kept as a guard though the model alone passes; see parse_protects
 
     @property
     def is_routing(self) -> bool:
@@ -292,7 +293,45 @@ SCENARIO_KEYS = frozenset({
     "id", "category", "prompt", "agent", "expect", "assert", "delegate", "exec",
     "timeout", "manual", "experiment", "until", "workspace", "allow", "deny",
     "refuse", "memory", "hide_commands", "floor", "budget", "ablate",
-    "permission_mode", "guard", "verify", "no_agent"})
+    "permission_mode", "guard", "verify", "no_agent", "protects"})
+# Keys that describe a scenario without changing what it asks or how it is
+# judged: annotating one must not turn every verdict measured before into a
+# "scenario changed" (see applicability_data).
+METADATA_KEYS = frozenset({"no_agent", "protects"})
+
+# `protects:` (B-038, architect and qa, 2026-10-20) — why a scenario stays in the
+# suite although the model alone passes it 3 of 3. A free-text reason turns into
+# a cemetery, so the kind is closed and `revisit_if` is required: the condition
+# under which the scenario is looked at again, stated so it can be checked.
+PROTECTS_KINDS = {
+    "regression-of": "guards a change made earlier; needs `ref:` (B-NNN)",
+    "by-design": "a near miss that passes by construction",
+    "design-cell": "a cell of a design measurement (authorship bias): not evidence about the catalog in either direction",
+    "model-floor": "guards against a weaker model or a later version; nobody has measured it with one yet",
+    "host-environment": "measures the host or the environment, not the agent's judgment",
+}
+
+
+def parse_protects(raw, sid: str) -> tuple:
+    """(kind, ref, revisit_if) from a scenario's `protects:`, or () when absent."""
+    if not raw:
+        return ()
+    if not isinstance(raw, dict) or set(raw) - {"kind", "ref", "revisit_if"}:
+        sys.exit(f"{sid}: `protects:` is a mapping with kind, revisit_if and, for "
+                 f"regression-of, ref")
+    kind = raw.get("kind")
+    if kind not in PROTECTS_KINDS:
+        sys.exit(f"{sid}: protects.kind `{kind}` is not one of {sorted(PROTECTS_KINDS)}")
+    when = raw.get("revisit_if")
+    if not isinstance(when, str) or len(when.split()) < 3:
+        sys.exit(f"{sid}: protects.revisit_if is required: the condition, in words, under "
+                 f"which this scenario is looked at again")
+    ref = raw.get("ref") or ""
+    if kind == "regression-of" and not re.fullmatch(r"B-\d{3}", str(ref)):
+        sys.exit(f"{sid}: protects.kind regression-of needs ref: B-NNN")
+    if kind != "regression-of" and ref:
+        sys.exit(f"{sid}: protects.ref only goes with kind regression-of")
+    return (kind, str(ref), when.strip())
 EXEC_KEYS = frozenset({"suite", "symbol", "from_file"})
 
 # `permission_mode:` (B-083) — the CLI's own choices, read from
@@ -439,7 +478,7 @@ def twin_key(raw: dict, workspace_digest: str = "") -> str:
     """What two branches of an ablation must share: the whole entry but its id
     and `ablate:`, plus the fixture. Equal keys are the proof, at load, that a
     with/without difference measures the skill and nothing else."""
-    rest = {k: v for k, v in raw.items() if k not in ("id", "ablate")}
+    rest = {k: v for k, v in raw.items() if k not in ("id", "ablate") + tuple(METADATA_KEYS)}
     return _digest(json.dumps(rest, sort_keys=True, ensure_ascii=False).encode()
                    + workspace_digest.encode())
 
@@ -452,7 +491,8 @@ def load_scenarios() -> list:
             # What the verdict was measured AGAINST: prompt, assertions, judge
             # criterion and the fixture it seeds. A PASS from before the
             # criterion changed is not evidence about the scenario as it is now.
-            src = json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()
+            src = json.dumps({k: v for k, v in raw.items() if k not in METADATA_KEYS},
+                             sort_keys=True, ensure_ascii=False).encode()
             ws_digest = tree_digest(ROOT / raw["workspace"]) if raw.get("workspace") else ""
             src += ws_digest.encode()
             expected = ((raw.get("assert") or {}).get("expect_skills") or []
@@ -485,6 +525,7 @@ def load_scenarios() -> list:
                 guard=raw.get("guard", "") or "",
                 verify=raw.get("verify", "") or "",
                 no_agent=raw.get("no_agent", "") or "",
+                protects=parse_protects(raw.get("protects"), raw["id"]),
             ))
     if unknown:
         sys.exit("unknown keys — the harness would ignore them and run as if they "

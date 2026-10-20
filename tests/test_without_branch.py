@@ -75,6 +75,44 @@ class Loader(unittest.TestCase):
             self.load("  no_agent: [a, b]\n")
 
 
+class Protects(unittest.TestCase):
+
+    def load(self, extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "x.yaml").write_text("- id: x\n  category: c\n  prompt: p\n" + extra)
+            with mock.patch.object(run, "SCENARIOS", Path(tmp)):
+                return run.load_scenarios()[0]
+
+    WHEN = '    revisit_if: "cuando se mida con otro modelo"\n'
+
+    def test_a_kind_and_a_condition_load(self):
+        s = self.load("  protects:\n    kind: model-floor\n" + self.WHEN)
+        self.assertEqual(s.protects, ("model-floor", "", "cuando se mida con otro modelo"))
+        self.assertEqual(self.load("").protects, ())
+
+    def test_regression_of_needs_its_reference(self):
+        ok = self.load("  protects:\n    kind: regression-of\n    ref: B-073\n" + self.WHEN)
+        self.assertEqual(ok.protects[:2], ("regression-of", "B-073"))
+        for extra in ("  protects:\n    kind: regression-of\n" + self.WHEN,
+                      "  protects:\n    kind: by-design\n    ref: B-073\n" + self.WHEN):
+            with self.assertRaises(SystemExit):
+                self.load(extra)
+
+    def test_a_free_text_reason_unknown_kind_or_missing_condition_is_refused(self):
+        for extra in ("  protects: because it is nice\n",
+                      "  protects:\n    kind: whatever\n" + self.WHEN,
+                      "  protects:\n    kind: model-floor\n",
+                      '  protects:\n    kind: model-floor\n    revisit_if: "later"\n'):
+            with self.assertRaises(SystemExit, msg=extra):
+                self.load(extra)
+
+    def test_annotating_does_not_change_the_fingerprint(self):
+        a = self.load("")
+        b = self.load("  protects:\n    kind: model-floor\n" + self.WHEN)
+        c = self.load('  no_agent: "needs the roster"\n')
+        self.assertEqual({a.fingerprint}, {b.fingerprint, c.fingerprint})
+
+
 class Workspace(unittest.TestCase):
 
     def make(self, branch):
@@ -223,6 +261,16 @@ class Delta(unittest.TestCase):
         self.assertEqual((qa["n"], qa["delta"], qa["zero"]), (2, 0.5, 1))
         cat = d["by_category"][0]
         self.assertEqual((cat["category"], cat["n"]), ("judgment", 3))
+
+    def test_a_design_cell_counts_in_no_average_and_a_kept_zero_is_not_flagged(self):
+        d = viz.delta_rows(self.runs(), protects={"b": "design-cell", "c": "model-floor"})
+        qa = next(x for x in d["by_agent"] if x["agent"] == "qa")
+        self.assertEqual((qa["n"], qa["delta"]), (1, 1.0))      # "b" left out of the rollup
+        by_id = {r["id"]: r for r in d["rows"]}
+        self.assertEqual(by_id["b"]["kept"], "design-cell")
+        self.assertEqual(by_id["a"]["kept"], "")
+        html = viz.render_delta(self.runs())
+        self.assertIn("kept as", html)
 
     def test_the_page_names_a_zero_delta_and_needs_a_run_without(self):
         html = viz.render_delta(self.runs())

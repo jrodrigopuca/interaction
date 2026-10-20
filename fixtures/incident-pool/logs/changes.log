@@ -1,0 +1,2 @@
+2026-10-19 16:40  deploy  api v412  "pool de conexiones 50 -> 20 (bajar costo de la base)"
+2026-10-20 13:58  flag    checkout_v2=on  (por marta, rollout al 100%)

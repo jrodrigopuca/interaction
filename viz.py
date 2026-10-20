@@ -2335,7 +2335,16 @@ def _frac(rec: dict):
     return None if status is None else (1.0 if status == "PASS" else 0.0)
 
 
-def delta_rows(runs: list) -> dict:
+def protects_of() -> dict:
+    """{scenario id: kind} for the scenarios kept as guards (`protects:`)."""
+    try:
+        return {s.id: s.protects[0] for s in harness.load_scenarios() if s.protects} \
+            if harness else {}
+    except SystemExit:
+        return {}
+
+
+def delta_rows(runs: list, protects: dict = None) -> dict:
     """B-038: the catalog's contribution, scenario by scenario.
 
     `runs` are load_run results. Those with `branch: without` are the model
@@ -2345,6 +2354,7 @@ def delta_rows(runs: list) -> dict:
     Rolled up by category and by agent over the scenarios that have both. A
     delta of 0 does not say the catalog adds nothing: it says this scenario
     cannot tell (regla 17: reformulate it, or declare what it protects)."""
+    protects = protects_of() if protects is None else protects
     sin, con = {}, {}
     for r in runs:
         side = sin if (r.get("meta") or {}).get("branch") == "without" else con
@@ -2358,13 +2368,16 @@ def delta_rows(runs: list) -> dict:
                      "category": srec.get("category") or "",
                      "sin": s, "sin_n": srec.get("repeat") or 1, "sin_run": srun,
                      "con": c, "con_n": (crec or {}).get("repeat") or 1, "con_run": crun,
+                     "kept": protects.get(sid, ""),
                      "delta": None if (s is None or c is None) else c - s})
     rows.sort(key=lambda x: (x["category"], x["agent"], x["id"]))
 
     def rollup(key):
+        # A design cell (authorship bias) measures the design, not the catalog:
+        # it counts in no direction.
         groups = {}
         for x in rows:
-            if x["delta"] is not None:
+            if x["delta"] is not None and x["kept"] != "design-cell":
                 groups.setdefault(x[key], []).append(x)
         return [{key: k, "n": len(v), "con": sum(x["con"] for x in v) / len(v),
                  "sin": sum(x["sin"] for x in v) / len(v),
@@ -2403,7 +2416,8 @@ def render_delta(runs: list) -> str:
         f"<td>{_pct(r['con'])} <small>({r['con_n']})</small></td>"
         f"<td>{_pct(r['sin'])} <small>({r['sin_n']})</small></td>"
         f"<td><b>{_signed(r['delta'])}</b>"
-        f"{' · N/3 in both before concluding' if r['delta'] == 0 else ''}</td></tr>"
+        f"{' · N/3 in both before concluding' if r['delta'] == 0 and not r['kept'] else ''}</td>"
+        f"<td>{esc(r['kept'])}</td></tr>"
         for r in d["rows"])
     return ("<style>table.dl{border-collapse:collapse;margin:0 0 24px}table.dl th,table.dl td"
             "{border-bottom:1px solid #8884;padding:4px 10px;text-align:left}</style>"
@@ -2411,12 +2425,13 @@ def render_delta(runs: list) -> str:
             "<p>WITH is the catalog's agent, WITHOUT is the same model alone in the same "
             "neutral session. Delta = WITH - WITHOUT, over the scenarios both ran. A delta of 0 "
             "does not mean the catalog adds nothing: it means that scenario cannot tell, and "
-            "must be reformulated or declare what it protects. Numbers in parentheses are "
+            "must be reformulated or kept with `protects:` (its kind is the last column). "
+            "Design cells are left out of every average. Numbers in parentheses are "
             "samples; one sample says little.</p>"
             + table("By agent", "agent", d["by_agent"])
             + table("By category", "category", d["by_category"])
             + "<h2>By scenario</h2><table class=\"dl\"><thead><tr><th>category</th><th>agent</th>"
-              "<th>scenario</th><th>WITH</th><th>WITHOUT</th><th>delta</th></tr></thead>"
+              "<th>scenario</th><th>WITH</th><th>WITHOUT</th><th>delta</th><th>kept as</th></tr></thead>"
               f"<tbody>{rows}</tbody></table>")
 
 
