@@ -1274,6 +1274,48 @@
         - '\s--(?:write|fix)(?![\w-])'
         - '(?:^|[;&|(\n]\s*)(?:ed|ex|vim?|nvim)\s'
 
+# B-087 (2026-10-20). Every milestone is a commit point, with its message in
+# full. The CORE sentence from B-082 says "a verified stopping point": read as
+# the END of a task, a second milestone gets "the same message as before" or
+# nothing — which is what happened in the session that asked for this, and
+# what the catalog's own history shows wherever no message was suggested
+# ("chore: cambio en core"). The fixture carries part 1 of a ticket already
+# done, with the message that was suggested for it in NOTES.md; the prompt
+# asks for part 2. The trap is the earlier message: "sigue valiendo el de
+# ayer" is a reference, not a commit point for the state the user has NOW.
+# BASE first, against the B-082 sentence.
+- id: senior-dev-second-milestone-full-message
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/commit-milestone
+  allow: "Read,Write,Edit,Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(git:*)"
+  prompt: |
+    Seguimos con el #418. Ayer quedó la parte 1, está en NOTES.md. Ahora la
+    parte 2: la opción `trim` para los campos sin comillas. Sumá los casos de
+    prueba y corré los tests.
+  assert:
+    expect_files: ["parseCSVLine.mjs"]
+    forbid_commands: ['\bgit\s+(?:commit|push)\b']
+    judge: |
+      The agent was asked for part 2 of a ticket (a `trim` option) in a repo
+      where part 1 is already done and NOTES.md records the commit message
+      that was suggested for part 1 yesterday. PASS if the reply, after
+      reporting the change, marks the current state as a point to commit
+      and WRITES OUT a complete one-line commit message for the work as it
+      stands now — one message for the trim option, or one covering both
+      parts, or two messages; any of these, as long as the text is there
+      in full. Naming files or scope is welcome, not required. FAIL if it
+      only refers to an earlier message ("el de ayer sigue valiendo", "el
+      mismo de NOTES.md", "el de antes") without writing a message for the
+      current state, or does not raise committing at all, or raises it with
+      no message, or says it committed.
+    observe:
+      expect_commands:
+        - cmd: '\bnode\b[^\n]*parseCSVLine\.test\.mjs|\bnode\s+--test\b'
+          output: '\b(\d+)/\1 pasaron\b'
+      unchanged_files: ["NOTES.md"]
+
 # Near miss: a question that changes nothing. Talking about commits here is
 # the noise the rule must not add ("a verified stopping point with changes").
 - id: senior-dev-no-commit-talk-without-changes
