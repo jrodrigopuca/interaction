@@ -1701,3 +1701,142 @@
       adds changes the evidence does not support.
     observe:
       forbid_commands: ['\./bin/(set|restart)']
+
+# B-038 phase 4, architect (2026-10-21). Same method as stark: the five
+# scenarios come from architect's rules that go AGAINST the model's default,
+# written from the promise and before any run of the branch without the
+# catalog, committed as they are (criterion frozen; a later retouch is
+# declared). No criterion names another agent of the roster: a model without
+# the catalog cannot know it. manual until each has a base with and without
+# the catalog.
+
+# lh-tradeoffs #5: an accepted record is never edited; a changed decision is a
+# new record that supersedes it, and the old one only flips its status.
+- id: architect-supersedes-instead-of-editing-the-adr
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/adr-supersede
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Producto pidió poder saltar a la página N en el listado de pedidos.
+    Actualizá el ADR 0001 para que diga que volvemos a paginación con offset.
+  assert:
+    judge: |
+      docs/adr/0001-cursor-pagination.md is an ACCEPTED record whose "Revisit
+      if" line is exactly what product now asks for (jump to page N), and whose
+      driver is a number (12 million rows, page 400 took 6 s with OFFSET). The
+      user asks to edit it. PASS if the reply does not rewrite the accepted
+      record: it writes (or, if it stops first, says it will write) a NEW
+      record that supersedes 0001, flips only 0001's status to superseded, and
+      updates the index in docs/adr/README.md; and it says that 0001's revisit
+      condition is what fired, and carries the old driver forward (the 6 s on
+      12 million rows is the cost the new decision has to answer, or a
+      reason to propose something else). FAIL if it edits 0001's decision,
+      drivers or tradeoff in place, or deletes it, or ignores the 12-million
+      rows number.
+    observe:
+      expect_files: ["docs/adr/0002*.md"]
+
+# lh-tradeoffs #3: the boring option (status quo or simplest thing) is always a
+# real candidate, not only the two the user named.
+- id: architect-puts-the-boring-option-on-the-table
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/queue-choice
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    ¿Usamos Kafka o RabbitMQ para la cola de mails? Decidí vos.
+  assert:
+    judge: |
+      README.md and docs/mails.md give the drivers: one Postgres-backed
+      monolith on one server, a team of 3, about 2,000 mails a day, a mail may
+      leave up to 10 minutes late, and no other consumers. PASS if the reply
+      puts the boring option on the table as a real candidate (a jobs table in
+      the existing Postgres with a worker, or a background job, or the
+      framework's queue on the same database), compares the options on THOSE
+      drivers, and recommends one. Recommending Kafka or RabbitMQ is a PASS
+      only if it names a driver in these files that the boring option cannot
+      meet. FAIL if it compares only the two named brokers, or picks one
+      without weighing what it costs this team to run it.
+
+# lh-tradeoffs #4: recommend, always, with the driver that decides it and the
+# condition that would flip it.
+- id: architect-recommends-with-a-flip-condition
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/catalog-db-choice
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    ¿Postgres o Mongo para el catálogo de productos? Necesito una respuesta.
+  assert:
+    judge: |
+      The files give the drivers: a team of 4 that knows Postgres, 50,000
+      products in 40 categories with per-category attributes, sales reports
+      that join products with `orders` in Postgres, and 2 new categories a
+      quarter that today each need a migration. PASS if the reply picks ONE,
+      names the driver from these files that decides it, and states a
+      condition someone can check that would flip the choice (a number or an
+      event, such as "if the catalog stops being joined with orders" or "if
+      categories change weekly"). FAIL if it does not pick, if "it depends"
+      is not followed by what on, or if the pick comes with no flip condition.
+
+# lh-design-review #6: calibrate severity. Structural risk first, then
+# friction, and taste labeled as taste, even when the user asks for "the full
+# list".
+- id: architect-calibrates-severity-in-a-review
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/review-layering
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Revisá la arquitectura de este repo antes de que se sume gente al equipo.
+    Quiero la lista completa de problemas.
+  assert:
+    judge: |
+      The one structural risk is the dependency direction:
+      src/domain/pricing.mjs (business rules) imports
+      src/http/request-context.mjs and reads the currency from the HTTP
+      request, and the README says the nightly billing job and a support CLI
+      will also call the price, where there is no request. The rest is
+      friction or taste (the naming mix OrderController.mjs vs order-repo.mjs,
+      a two-function utils.mjs, a variable called `data`). PASS if the reply
+      leads with the dependency-direction problem as the structural finding,
+      with its consequence (the job and the CLI cannot price without an HTTP
+      request), and sorts the rest explicitly as lesser (friction, minor or
+      taste), even though the user asked for the full list. FAIL if the
+      dependency problem is not the first finding, or if everything comes as
+      one flat list of equal weight.
+
+# lh-mentoring #1, #4 and #6: unblock first, teach ONE lesson, check that it
+# landed with a question, and stop after asking.
+- id: architect-teaches-one-lesson-and-checks
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/money-float
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    El total del carrito a veces da cosas como 0.30000000000000004. Arreglalo.
+  assert:
+    judge: |
+      src/cart.mjs sums prices as floating-point pesos, and the test "0.1 +
+      0.2" fails. PASS if the reply first delivers the fix (money as integer
+      cents, or an equivalent exact representation, applied or concretely
+      written), then teaches ONE lesson, why binary floating point cannot hold
+      0.1 and money must not live in it, and ends with a question that checks
+      the user understood that concept, with nothing after the question (a
+      commit-point line placed BEFORE the question is fine: the CORE asks for
+      it, and a question is a full stop). FAIL if there is no fix, or it
+      teaches several separate lessons, or it ends
+      without a question that checks understanding (an offer such as "¿querés
+      que lo haga también en X?" is not one), or it keeps going after the
+      question.
