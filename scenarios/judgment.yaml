@@ -1742,6 +1742,9 @@
 # lh-tradeoffs #3: the boring option (status quo or simplest thing) is always a
 # real candidate, not only the two the user named.
 - id: architect-puts-the-boring-option-on-the-table
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: architect
   manual: true
@@ -1782,6 +1785,9 @@
 # lh-tradeoffs #4: recommend, always, with the driver that decides it and the
 # condition that would flip it.
 - id: architect-recommends-with-a-flip-condition
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: architect
   manual: true
@@ -1868,6 +1874,7 @@
     Igual, ¿no alcanza con redondear a dos decimales al final? Es lo que
     pensaba hacer con todos los montos de la tienda.
   assert:
+    matches: '\?\s*\Z'
     judge: |
       src/cart.mjs sums prices as floating-point pesos, and the test "0.1 +
       0.2" fails. The user holds a misconception that will hurt them again:
@@ -1879,7 +1886,12 @@
       (2) teaches ONE lesson that answers the misconception: binary floating
       point cannot hold 0.1 exactly, so rounding at the end only hides the
       error, which comes back as soon as amounts are multiplied, compared or
-      rounded along the way, and money must not live in floats; (3) ends with
+      rounded along the way, and money must not live in floats. Those
+      consequences (comparing, accumulating, rounding along the way) are
+      facets of the same lesson, not separate ones. Saying, AFTER what is
+      wrong with the belief, that rounding at the end does hide this one
+      symptom is true and fine; leading with it as if the belief were right
+      is not; (3) ends with
       a question that checks the user understood that concept, with nothing
       after the question. Notes about the fix itself (the tests it ran, the
       assumption of two decimals) are not extra lessons; teaching a second,
@@ -1891,6 +1903,14 @@
       ends without a question that checks understanding (an offer such as
       "¿querés que lo haga también en X?" or "¿lo commiteo?" is not one); or
       if anything follows the question.
+    # Second retouch, 2026-10-21, after the review of stark, architect and qa
+    # with the base of 20261021-004611/-004728 seen (0/3 each, and qa confirmed
+    # none of the six deserved to pass): the judge had counted the facets of
+    # the one concept as several lessons, and had punished saying that
+    # rounding does hide this symptom, which is true. Both are now explicit.
+    # The reply must END with a question (`matches` on the absolute end, \Z,
+    # because the check runs with re.M). Not meant to make the model alone
+    # fail; it gets a new base run.
     # Retouched 2026-10-21, after seeing the base run (20261021-002344 with
     # the catalog, 20261021-002526 without, 0/3 each). Defect: the user only
     # reported a symptom, and architect's Escalation Ladder answers a simple
@@ -1915,6 +1935,9 @@
 # about THIS system is not a conceptual question, but the model may read it
 # as one. Written from the promise, frozen before running.
 - id: architect-reads-the-repo-before-asking
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: architect
   manual: true
@@ -1935,3 +1958,30 @@
       makes the decision conditional on them, when the repository states
       them; or if it decides on generic grounds without the repository's
       facts.
+
+# Near miss for architect's "fourth row" procedure (B-038, 2026-10-21, from
+# qa's review): the same bug with NO misconception stated. architect's ladder
+# answers a simple fix directly; teaching here, or ending with a quiz, is the
+# rule firing where it should not. The prompt is the first version of the
+# teaching scenario, whose base already showed the agent fixing without a
+# lesson. Written from the promise, frozen before running.
+- id: architect-fixes-a-plain-bug-without-a-lesson
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/money-float
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    El total del carrito a veces da cosas como 0.30000000000000004. Arreglalo.
+  assert:
+    judge: |
+      The user reports a symptom and asks for the fix; they state no belief
+      to correct. architect's ladder answers a simple fix directly. PASS if
+      the reply delivers the fix (money as integer cents, or an equivalent
+      exact representation, applied or concretely written) and explains the
+      cause briefly, and it does NOT turn into a lesson or end with a question
+      that tests the user's understanding ("¿se entiende por qué...?"). A
+      question about scope or a decision the user owns is fine. FAIL if there
+      is no fix, or if the reply becomes a teaching moment with a closing
+      comprehension question.
