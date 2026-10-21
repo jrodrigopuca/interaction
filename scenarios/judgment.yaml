@@ -1745,23 +1745,41 @@
   category: judgment
   agent: architect
   manual: true
-  workspace: fixtures/queue-choice
-  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
   budget: 1
   prompt: |
-    ¿Usamos Kafka o RabbitMQ para la cola de mails? Decidí vos.
+    ¿Usamos Kafka o RabbitMQ para la cola de mails? Contexto: es un monolito
+    Node sobre una sola base Postgres, en un servidor. Somos 3 y ninguno operó
+    un broker. Mandamos unos 2.000 mails por día (confirmaciones y avisos de
+    envío). Hoy salen sincrónicos dentro del request, y cuando el proveedor
+    tarda, el checkout tarda. Un mail puede salir hasta 10 minutos tarde sin
+    problema, y no hay otros consumidores de esos eventos. Decidí vos.
   assert:
     judge: |
-      README.md and docs/mails.md give the drivers: one Postgres-backed
-      monolith on one server, a team of 3, about 2,000 mails a day, a mail may
-      leave up to 10 minutes late, and no other consumers. PASS if the reply
-      puts the boring option on the table as a real candidate (a jobs table in
-      the existing Postgres with a worker, or a background job, or the
-      framework's queue on the same database), compares the options on THOSE
-      drivers, and recommends one. Recommending Kafka or RabbitMQ is a PASS
-      only if it names a driver in these files that the boring option cannot
-      meet. FAIL if it compares only the two named brokers, or picks one
-      without weighing what it costs this team to run it.
+      The prompt gives every driver: one Node monolith on one Postgres database
+      and one server, a team of 3 that has never operated a broker, about
+      2,000 mails a day, a mail may leave up to 10 minutes late, no other
+      consumers, and the pain is the checkout waiting on the mail provider.
+      PASS if the reply puts the boring option on the table as a real
+      candidate, weighed against the brokers on THESE drivers (a jobs or
+      outbox table in the existing Postgres with a worker, a Postgres-backed
+      job library, or an equivalent background job that adds no new
+      infrastructure), and recommends one option. Recommending Kafka or
+      RabbitMQ is a PASS only if it names a driver from the prompt that the
+      boring option cannot meet. FAIL if it compares only the two named
+      brokers; or if the boring option appears only as an aside or as a
+      conditional on facts the prompt already gives ("si ya tenés Postgres",
+      "si el volumen es bajo"); or if it picks a broker without weighing what
+      running it costs this team of 3; or if it gives no recommendation.
+    # Retouched 2026-10-21, after seeing the base run (20261021-002344 with
+    # the catalog, 20261021-002526 without, 0/3 each). Defect: the drivers
+    # lived in fixtures/queue-choice and in no sample of either branch did the
+    # agent read them (zero tools in all six); the judge failed it for not
+    # using "the drivers in the files", so the scenario measured "reads the
+    # repo before a question that sounds conceptual", not lh-tradeoffs #3.
+    # The drivers now live in the prompt and the workspace is gone: one source
+    # for the facts, nothing to read, nothing for the criterion to point at.
+    # The change is meant to make the scenario measure the rule, not to make
+    # the model alone fail; it needs a new base run in both branches.
 
 # lh-tradeoffs #4: recommend, always, with the driver that decides it and the
 # condition that would flip it.
@@ -1769,22 +1787,45 @@
   category: judgment
   agent: architect
   manual: true
-  workspace: fixtures/catalog-db-choice
-  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
   budget: 1
   prompt: |
-    ¿Postgres o Mongo para el catálogo de productos? Necesito una respuesta.
+    ¿Postgres o Mongo para el catálogo de productos? Contexto: somos 4, todos
+    trabajamos con Postgres hace años y nadie operó Mongo. Son 50.000
+    productos en 40 categorías, y cada categoría tiene sus propios atributos
+    (talle, voltaje, material...). Hoy esos atributos están en columnas
+    sueltas, así que cada categoría nueva pide una migración, y se suman unas
+    2 por trimestre. Los reportes de ventas cruzan productos con `orders`, que
+    está en Postgres. Necesito una respuesta.
   assert:
     judge: |
-      The files give the drivers: a team of 4 that knows Postgres, 50,000
-      products in 40 categories with per-category attributes, sales reports
-      that join products with `orders` in Postgres, and 2 new categories a
-      quarter that today each need a migration. PASS if the reply picks ONE,
-      names the driver from these files that decides it, and states a
-      condition someone can check that would flip the choice (a number or an
-      event, such as "if the catalog stops being joined with orders" or "if
-      categories change weekly"). FAIL if it does not pick, if "it depends"
-      is not followed by what on, or if the pick comes with no flip condition.
+      The prompt gives every driver: a team of 4 that knows Postgres and has
+      never run Mongo, 50,000 products in 40 categories with per-category
+      attributes, a migration for each new category at about 2 a quarter,
+      and sales reports that join products with `orders` in Postgres. PASS if
+      the reply picks ONE, names the driver from the prompt that decides it,
+      and states a condition someone could check against this project that
+      would flip the choice: a number or an event tied to these drivers, such
+      as "si los reportes dejan de cruzar el catálogo con orders", "si las
+      categorías nuevas pasan de 2 por trimestre a varias por semana", or a
+      catalog size well past the 50,000. FAIL if it does not pick; if "it
+      depends" is not followed by what on; if the pick is made conditional on
+      data the prompt already gives (asking for the volume or the team);
+      if the deciding reason is only generic ("un catálogo es relacional")
+      with none of these drivers named; or if the flip condition is missing
+      or only generic and unmeasurable ("si los esquemas son radicalmente
+      distintos", "si necesitás escalar mucho") with no number or event that
+      applies to this case.
+    # Retouched 2026-10-21, after seeing the base run (20261021-002344 with
+    # the catalog 1/3, 20261021-002526 without 0/3). Defect: the drivers lived
+    # in fixtures/catalog-db-choice and no sample of either branch read them
+    # (zero tools in all six); every sample picked Postgres and most gave a
+    # flip condition, but the judge failed them for not citing "the drivers
+    # from the files". The scenario measured reading the repo, not
+    # lh-tradeoffs #4. The drivers now live in the prompt and the workspace is
+    # gone. The flip condition is now asked to be checkable against THIS case,
+    # which is the rule's own example ("if the write volume actually reaches
+    # X") and its "Revisit if" bar, not a new demand. Not meant to make the
+    # model alone fail; it needs a new base run in both branches.
 
 # lh-design-review #6: calibrate severity. Structural risk first, then
 # friction, and taste labeled as taste, even when the user asks for "the full
@@ -1826,17 +1867,41 @@
   budget: 1
   prompt: |
     El total del carrito a veces da cosas como 0.30000000000000004. Arreglalo.
+    Igual, ¿no alcanza con redondear a dos decimales al final? Es lo que
+    pensaba hacer con todos los montos de la tienda.
   assert:
     judge: |
       src/cart.mjs sums prices as floating-point pesos, and the test "0.1 +
-      0.2" fails. PASS if the reply first delivers the fix (money as integer
-      cents, or an equivalent exact representation, applied or concretely
-      written), then teaches ONE lesson, why binary floating point cannot hold
-      0.1 and money must not live in it, and ends with a question that checks
-      the user understood that concept, with nothing after the question (a
-      commit-point line placed BEFORE the question is fine: the CORE asks for
-      it, and a question is a full stop). FAIL if there is no fix, or it
-      teaches several separate lessons, or it ends
-      without a question that checks understanding (an offer such as "¿querés
-      que lo haga también en X?" is not one), or it keeps going after the
-      question.
+      0.2" fails. The user holds a misconception that will hurt them again:
+      that rounding to two decimals at the end makes floating-point money
+      safe, and they plan to do it for every amount. PASS if the reply, in
+      this order: (1) delivers the fix first, with money as integer cents or
+      an equivalent exact representation, applied or concretely written
+      (rounding the float at the end, the user's own idea, is not that fix);
+      (2) teaches ONE lesson that answers the misconception: binary floating
+      point cannot hold 0.1 exactly, so rounding at the end only hides the
+      error, which comes back as soon as amounts are multiplied, compared or
+      rounded along the way, and money must not live in floats; (3) ends with
+      a question that checks the user understood that concept, with nothing
+      after the question. Notes about the fix itself (the tests it ran, the
+      assumption of two decimals) are not extra lessons; teaching a second,
+      different concept is. Whether there is a commit-point line is not
+      judged; if there is one, BEFORE the question is fine and AFTER it is
+      text after the question. FAIL if there is no fix or the fix is only
+      rounding at the end; if the reply never says why rounding at the end
+      does not make it safe; if it teaches several separate lessons; if it
+      ends without a question that checks understanding (an offer such as
+      "¿querés que lo haga también en X?" or "¿lo commiteo?" is not one); or
+      if anything follows the question.
+    # Retouched 2026-10-21, after seeing the base run (20261021-002344 with
+    # the catalog, 20261021-002526 without, 0/3 each). Defect: the user only
+    # reported a symptom, and architect's Escalation Ladder answers a simple
+    # fix directly; a teachable moment needs a misconception that will hurt
+    # them again, and the old prompt showed none, so not teaching was the
+    # ladder working. The user now states the misconception ("¿no alcanza con
+    # redondear a dos decimales al final?") and that they would apply it to
+    # every amount. The commit-point line the CORE asks for is now explicitly
+    # out of the verdict except for its position (before the question), so a
+    # branch without the CORE is not judged on it. Not meant to make the
+    # model alone fail but to measure the rule; it needs a new base run in
+    # both branches.
