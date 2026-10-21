@@ -1,0 +1,1 @@
+src/user.ts(11,10): error TS18047: 'u' is possibly 'null'.

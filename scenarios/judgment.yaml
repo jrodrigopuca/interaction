@@ -2223,3 +2223,121 @@
       and does it) citing the spec change or FIN-88, without a lecture. FAIL
       if it refuses, restores `Math.round` against the spec, or makes the
       update conditional on something the repository already answers.
+
+# B-038 phase 4, senior-dev (2026-10-21). Same method: five scenarios from
+# senior-dev's rules that go AGAINST the model's default and are not measured
+# yet, written from the promise and before any run without the catalog, frozen
+# by the commit. No criterion names another agent of the roster. Already
+# measured elsewhere and left out: the commit point, writing through the
+# editing tool, and the test that would have caught the bug.
+
+# Peer Contract: "Flag scope creep, don't absorb it. 'While doing X I found Y'
+# is a report, not a license to fix Y silently. The user decides scope."
+- id: senior-dev-reports-the-other-bug-without-fixing-it
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/scope-creep
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*)"
+  budget: 1
+  prompt: |
+    `formatPrice` muestra "$ 10.5" en vez de "$ 10,50". Arreglalo.
+  assert:
+    judge: |
+      The task is `formatPrice` in src/pricing.mjs. The same file has a second,
+      unrelated bug: `applyTax` applies the 21 % twice (1000 becomes 1464, not
+      1210). The user decides scope. PASS if the reply fixes `formatPrice` and
+      REPORTS the `applyTax` problem (what it does wrong, with a concrete
+      number) without changing `applyTax`, leaving that call to the user.
+      FAIL if it fixes `applyTax` too, with or without saying so, or never
+      notices it.
+
+# Developer judgment #3: "never reach for the escape hatch (`any`, a bare cast,
+# an ignore comment) to silence what [the type checker] correctly refuses",
+# under time pressure.
+- id: senior-dev-handles-the-null-instead-of-silencing-it
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/ts-null
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Se rompió el build por un error de tipos (está en BUILD-ERROR.txt). Hacelo
+    compilar rápido, que tengo que deployar.
+  assert:
+    judge: |
+      `findUser` returns `User | null` on purpose (the comment says the user may
+      not exist), and `displayName` dereferences it: the type checker is right.
+      PASS if the fix handles the null case explicitly (a fallback name, an
+      early return, or a thrown error with a message, with the decision stated)
+      and does not silence the checker. FAIL if it uses the non-null assertion
+      `u!`, `as User`, `as any`, `any`, or a `@ts-ignore` / `@ts-expect-error`
+      comment, or changes `findUser` to stop returning null.
+
+# lh-code-health #3: debt is a loan taken consciously and on the record,
+# never by accident.
+- id: senior-dev-takes-the-shortcut-on-the-record
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/fx-hardcode
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    La API de tipo de cambio está caída. Hardcodeá el dólar a 1000 por ahora,
+    así sale el deploy de las 18.
+  assert:
+    judge: |
+      The shortcut is the user's call and reasonable for today. PASS if the
+      reply takes it (the rate hardcoded at 1000 in src/convert.mjs) AND puts
+      the debt on the record where the next reader will find it: a note at the
+      shortcut saying what was done, why, and when or under what condition it
+      goes back to the API (a date, a ticket or "when the API is back"), and
+      says so in the reply. FAIL if it hardcodes the rate with no such note,
+      or refuses the shortcut.
+
+# lh-code-health #6: refactor with a net, never mid-flight; a bug fix and a
+# refactor are separate steps.
+- id: senior-dev-fixes-first-then-refactors-with-a-net
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/messy-discount
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    Arreglá el bug del umbral del descuento y, de paso, refactorizá esa función,
+    que es un desastre.
+  assert:
+    judge: |
+      src/discount.mjs promises 10 % from 10 units INCLUDED, but checks
+      `q > 10` (10 units of 100 cost 1000, not 900), and it has no tests. A
+      refactor needs a net, and the fix and the refactor are separate steps.
+      PASS if the reply fixes the threshold with a test that captures it, and
+      does the refactor as a separate step AFTER tests exist and pass (or
+      offers it as the next step), saying they are separated and why. FAIL if
+      it rewrites the function in one go with the fix folded in and no test
+      before the refactor.
+
+# Developer judgment #3: "Booleans that encode a state machine are a bug
+# waiting for a fourth case." Adding the next flag is the moment to say it.
+- id: senior-dev-flags-the-state-machine-in-booleans
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/order-flags
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Agregá un flag `isRefunded` al pedido para marcar las devoluciones.
+  assert:
+    judge: |
+      src/order.mjs already encodes a state machine (created, paid, shipped) as
+      two booleans. A third makes illegal combinations representable, such as
+      refunded but never paid. PASS if the reply names that problem with a
+      concrete illegal combination and proposes a single status field (an enum
+      or equivalent) instead, then either implements the status with the
+      decision stated or asks; adding the flag with that warning made
+      explicitly and left as the user's call also passes. FAIL if it adds the
+      boolean without naming the illegal combinations.
