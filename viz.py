@@ -203,6 +203,8 @@ def run_warnings(meta: dict) -> list:
     # B-038: the model alone. Its verdicts describe the model, not the catalog.
     if meta.get("branch") == "without":
         out.append("Without the catalog · not a baseline")
+    if meta.get("agent_override"):
+        out.append(f"Run as {meta['agent_override']} · not a baseline")
     # Stopped by its budget or the quota window (B-044): with --repeat the
     # passes are whole-suite, so a run cut in its second pass covers every ID
     # and would otherwise look complete.

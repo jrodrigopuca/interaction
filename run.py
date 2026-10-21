@@ -44,7 +44,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -2221,6 +2221,8 @@ def applicability_data(scenarios: list, model: str) -> list:
             continue   # an experiment's verdicts describe the experiment, not the catalog
         if meta.get("branch") == "without":
             continue   # B-038: the model alone is never the catalog's verdict
+        if meta.get("agent_override"):
+            continue   # another agent's answer to a scenario is not that scenario's verdict
         if meta.get("catalog_changed"):
             continue   # verdicts from two catalog versions describe neither (B-052)
         # A capped run (B-044) still holds whole verdicts, but a scenario its
@@ -2539,6 +2541,11 @@ def main():
     ap.add_argument("--experiment", metavar="WHAT", default=None,
                     help="declare this run an experiment and say what it tests; "
                          "recorded in run.json and shown as such in reports")
+    ap.add_argument("--as-agent", metavar="NAME", default=None,
+                    help="run the selected scenarios with another catalog agent instead of the "
+                         "one each declares (B-038: is qa a complement or a duplicate of "
+                         "senior-dev?). The criteria stay the same. Recorded in run.json; never "
+                         "a baseline, never a current verdict")
     ap.add_argument("--branch", choices=("with", "without"), default="with",
                     help="`without` (B-038): the same neutral session with no `--agent` and no "
                          "catalog agents or skills in the workspace, to measure what the model does "
@@ -2619,6 +2626,14 @@ def main():
             print(f"  skipped {len(ids):3} — {why}")
         if not scenarios:
             sys.exit("every selected scenario needs the catalog: nothing to run without it")
+    if args.as_agent:
+        if BRANCH == "without":
+            sys.exit("--as-agent needs an agent: it cannot go with --branch without")
+        if args.as_agent not in catalog_agent_names():
+            sys.exit(f"--as-agent {args.as_agent}: not an agent of the installed catalog")
+        scenarios = [replace(s, agent=args.as_agent) for s in scenarios if s.agent]
+        if not scenarios:
+            sys.exit("--as-agent: every selected scenario is a routing one, with no agent to swap")
     for sc, item in expired_experiments(load_scenarios()):
         print(f"experiment expired: {sc.id} — {item} is closed. Promote it to the "
               f"suite (drop `experiment:`) or delete it.", file=sys.stderr)
@@ -2686,6 +2701,8 @@ def main():
     # its author's intent, not a rule the report could infer.
     stamp["experiment"] = args.experiment
     stamp["branch"] = BRANCH
+    if args.as_agent:
+        stamp["agent_override"] = args.as_agent
     if skipped:
         stamp["without_skipped"] = skipped
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))

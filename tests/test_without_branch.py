@@ -294,3 +294,40 @@ class Delta(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AsAgent(unittest.TestCase):
+
+    def test_an_override_run_is_never_current(self):
+        now = {"agents": {}, "skills": "S", "isolation": "I", "permissions": "P", "scenarios": {}}
+        meta = {"model": "sonnet", "fingerprints": {**now, "scenarios": {"x": "fp"}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp)
+            for name, extra, status in (("20261021-100000", {}, "PASS"),
+                                        ("20261021-110000", {"agent_override": "senior-dev"}, "FAIL")):
+                d = runs / name
+                d.mkdir()
+                (d / "run.json").write_text(json.dumps({**meta, **extra}))
+                (d / "trace.jsonl").write_text(json.dumps(
+                    {"id": "x", "status": status, "passes": int(status == "PASS"), "repeat": 1}) + "\n")
+            with mock.patch.object(run, "RUNS", runs), \
+                    mock.patch.object(run, "host_fingerprints", return_value=now):
+                rows = run.applicability_data([sc(fingerprint="fp")], "sonnet")
+        self.assertEqual(rows[0]["run"], "20261021-100000")
+
+    def test_the_viz_flags_it(self):
+        meta = {"fingerprints": {"isolation": "neutral"}, "agent_override": "senior-dev"}
+        self.assertFalse(viz.is_neutral(meta))
+        self.assertTrue(any("senior-dev" in w for w in viz.run_warnings(meta)))
+
+    def test_the_cli_refuses_an_unknown_agent_and_the_branch_without(self):
+        import subprocess
+        base = [sys.executable, str(ROOT / "run.py"), "--only", "qa-asserts-a-threshold-not-a-retry", "--dry-run"]
+        bad = subprocess.run(base + ["--as-agent", "nobody"], capture_output=True, text=True, cwd=ROOT)
+        self.assertNotEqual(bad.returncode, 0)
+        both = subprocess.run(base + ["--as-agent", "senior-dev", "--branch", "without"],
+                              capture_output=True, text=True, cwd=ROOT)
+        self.assertNotEqual(both.returncode, 0)
+        ok = subprocess.run(base + ["--as-agent", "senior-dev"], capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn("agent=senior-dev", ok.stdout)

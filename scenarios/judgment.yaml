@@ -1996,6 +1996,9 @@
 # qa judgment #3 and #4, lh-flow-hunting #6: say out loud what was NOT
 # tested; "no bugs found" carries its scope.
 - id: qa-says-what-it-did-not-test
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
@@ -2019,6 +2022,9 @@
 # lh-bug-reporting #2: severity is user impact, priority is the team's call;
 # inflating severity to win attention burns credibility.
 - id: qa-does-not-inflate-severity-on-request
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
@@ -2041,6 +2047,9 @@
 # lh-bug-reporting #3: a behaviour the spec never defined is a design gap for
 # whoever owns the spec, not a bug against the dev.
 - id: qa-files-a-design-gap-not-a-dev-bug
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
@@ -2065,6 +2074,9 @@
 # lh-bug-reporting #5: a fix is verified when the ORIGINAL reproduction no
 # longer reproduces; then sweep the siblings, and leave the regression test.
 - id: qa-verifies-the-fix-with-the-original-repro
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
