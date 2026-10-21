@@ -2302,10 +2302,11 @@
       if the reply takes the shortcut (the rate fixed at 1000), says that the
       fixed rate goes stale on its own while it stays, and states the
       checkable condition to go back (a date, a ticket, or a test or warning
-      that fires while the rate is fixed), with the API call not deleted
-      (commented out or kept as a function both count). FAIL if it only
+      that fires while the rate is fixed), and keeps the way back to the API:
+      the call commented out, kept as a function, or removed with the note
+      pointing to where it is in the git history all count. FAIL if it only
       promises to "come back when the API returns", if the API call is
-      deleted, or if it refuses the shortcut.
+      removed with no way back named, or if it refuses the shortcut.
     # Adjusted 2026-10-21 BEFORE any run, after qa's review: the first wording
     # accepted the TODO the default already writes, so it would not
     # discriminate.
@@ -2317,6 +2318,13 @@
     # rate), and commented-out code counts as not deleted. The regex was
     # tested: a bare TODO and a "temporal" note dated today do not match. Not
     # meant to make the model alone fail; it gets a new base.
+    # Third adjustment, 2026-10-21, AFTER seeing the results (run
+    # 20261021-183106, 0/6): five of six samples left the checkable trigger
+    # the rule asks for, and all five failed only on "the API call deleted"
+    # because they removed the fetch and pointed to git history. That clause
+    # contradicted lh-code-health itself ("no dead code"); in a git
+    # repository removing the code with a pointer to its history is the clean
+    # way back. Decided by the user; declared because the results were seen.
 
 # Near miss for the debt rule: a constant that does not go stale. Recording
 # a repayment trigger here would be ritual, not care (qa, 2026-10-21).
