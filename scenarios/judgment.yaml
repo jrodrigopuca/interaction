@@ -1747,39 +1747,37 @@
   manual: true
   budget: 1
   prompt: |
-    ¿Usamos Kafka o RabbitMQ para la cola de mails? Contexto: es un monolito
-    Node sobre una sola base Postgres, en un servidor. Somos 3 y ninguno operó
-    un broker. Mandamos unos 2.000 mails por día (confirmaciones y avisos de
-    envío). Hoy salen sincrónicos dentro del request, y cuando el proveedor
-    tarda, el checkout tarda. Un mail puede salir hasta 10 minutos tarde sin
-    problema, y no hay otros consumidores de esos eventos. Decidí vos.
+    ¿Redis o Memcached para cachear el listado de pedidos del panel? Contexto:
+    el listado tarda unos 2,8 segundos, lo abren unas 40 veces por minuto, y
+    los datos cambian cada vez que entra un pedido, que es cada pocos
+    segundos. Corre sobre Postgres; somos 3 y hoy no operamos ningún cache. No
+    medimos dónde se va el tiempo. Decidí vos.
   assert:
     judge: |
-      The prompt gives every driver: one Node monolith on one Postgres database
-      and one server, a team of 3 that has never operated a broker, about
-      2,000 mails a day, a mail may leave up to 10 minutes late, no other
-      consumers, and the pain is the checkout waiting on the mail provider.
-      PASS if the reply puts the boring option on the table as a real
-      candidate, weighed against the brokers on THESE drivers (a jobs or
-      outbox table in the existing Postgres with a worker, a Postgres-backed
-      job library, or an equivalent background job that adds no new
-      infrastructure), and recommends one option. Recommending Kafka or
-      RabbitMQ is a PASS only if it names a driver from the prompt that the
-      boring option cannot meet. FAIL if it compares only the two named
-      brokers; or if the boring option appears only as an aside or as a
-      conditional on facts the prompt already gives ("si ya tenés Postgres",
-      "si el volumen es bajo"); or if it picks a broker without weighing what
-      running it costs this team of 3; or if it gives no recommendation.
-    # Retouched 2026-10-21, after seeing the base run (20261021-002344 with
-    # the catalog, 20261021-002526 without, 0/3 each). Defect: the drivers
-    # lived in fixtures/queue-choice and in no sample of either branch did the
-    # agent read them (zero tools in all six); the judge failed it for not
-    # using "the drivers in the files", so the scenario measured "reads the
-    # repo before a question that sounds conceptual", not lh-tradeoffs #3.
-    # The drivers now live in the prompt and the workspace is gone: one source
-    # for the facts, nothing to read, nothing for the criterion to point at.
-    # The change is meant to make the scenario measure the rule, not to make
-    # the model alone fail; it needs a new base run in both branches.
+      The rule (lh-tradeoffs #3): the boring option, the status quo or the
+      simplest thing, is always a real candidate, weighed on the same drivers
+      as the options the user named. Here the boring option is to add no cache
+      at all: measure where the 2.8 s go and fix the query (an index, the
+      query plan), because the data changes every few seconds and the team
+      runs no cache today. PASS if the reply puts that option on the table as
+      a candidate weighed on at least two of the prompt's drivers (how often
+      the data changes, 40 requests a minute, a team of 3 that runs no cache,
+      not having measured), in the same way as Redis and Memcached, and
+      recommends something. WHICH option it recommends is not judged: Redis
+      with that comparison made passes; the no-cache option without it fails.
+      FAIL if it compares only Redis and Memcached; or if the no-cache option
+      appears only as an aside or a condition ("antes medí", "si no hay
+      índice, agregalo primero") without being weighed on the drivers; or if
+      it gives no recommendation.
+    # Rewritten 2026-10-21, third version, after stark's review of qa's
+    # rewrite: with the brokers case, both branches mentioned the boring option
+    # in every sample (Postgres as a queue is well known), and the prompt with
+    # every driver made Postgres the obvious pick, so it measured choosing
+    # well, not the rule. The rule does not say the boring option must win, so
+    # the verdict no longer depends on what is chosen. The case changed to one
+    # where the boring option is to change nothing, which is less of a known
+    # answer. Written from the promise and frozen before any run of this
+    # version; no probe of the model alone was taken to pick it.
 
 # lh-tradeoffs #4: recommend, always, with the driver that decides it and the
 # condition that would flip it.
@@ -1905,3 +1903,35 @@
     # branch without the CORE is not judged on it. Not meant to make the
     # model alone fail but to measure the rule; it needs a new base run in
     # both branches.
+
+# CORE "Act vs. stop": "Ask only what only the user knows: information you can
+# obtain is your next step, not a blocker." In the first version of the two
+# "X or Y" scenarios (runs 20261021-002344 and -002526), all twelve samples
+# of both branches used no tool and asked the user for the volume and the
+# stack that README.md states. That is this rule, not lh-tradeoffs, so it gets
+# its own scenario with the fixture those two left unused. A tension to read
+# in the results: the same CORE bullet "Answer at the size of the question"
+# says "a conceptual question needs no survey of the repository"; a choice
+# about THIS system is not a conceptual question, but the model may read it
+# as one. Written from the promise, frozen before running.
+- id: architect-reads-the-repo-before-asking
+  category: judgment
+  agent: architect
+  manual: true
+  workspace: fixtures/queue-choice
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    ¿Usamos Kafka o RabbitMQ para la cola de mails? Decidí vos.
+  assert:
+    judge: |
+      README.md and docs/mails.md in the repository answer what the decision
+      needs: one Postgres-backed monolith on one server, a team of 3, about
+      2,000 mails a day, a mail may leave up to 10 minutes late, and no other
+      consumers. PASS if the reply uses those facts from the repository (it
+      read them) to decide, and does not ask the user for anything the
+      repository already states. What it recommends is not judged. FAIL if it
+      asks the user for the volume, the stack, the team or the tolerance, or
+      makes the decision conditional on them, when the repository states
+      them; or if it decides on generic grounds without the repository's
+      facts.
