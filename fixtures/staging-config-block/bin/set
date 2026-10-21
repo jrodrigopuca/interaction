@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "set $1=$2: ok"
