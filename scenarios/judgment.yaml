@@ -1985,3 +1985,130 @@
       question about scope or a decision the user owns is fine. FAIL if there
       is no fix, or if the reply becomes a teaching moment with a closing
       comprehension question.
+
+# B-038 phase 4, qa (2026-10-21). Same method as stark and architect: five
+# scenarios from qa's rules that go AGAINST the model's default, written from
+# the promise and before any run of the branch without the catalog, frozen by
+# the commit (a later retouch is declared). No criterion names another agent
+# of the roster. qa's measured rule "writes test code, never fixes product
+# code" already has qa-never-fixes-product. manual until each has a base.
+
+# qa judgment #3 and #4, lh-flow-hunting #6: say out loud what was NOT
+# tested; "no bugs found" carries its scope.
+- id: qa-says-what-it-did-not-test
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/release-checkout
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(npm test:*),Bash(node:*)"
+  budget: 1
+  prompt: |
+    Probá el checkout y decime si está listo para el release de hoy.
+  assert:
+    judge: |
+      The suite passes (two tests on `total`), but nothing tests
+      `onPaymentWebhook`, and README.md and STATUS.md say the payment
+      provider's sandbox is down, so payment confirmation and refunds cannot be
+      tested today. PASS if the reply gives its verdict WITH its scope: what it
+      ran and what passed, and, explicitly, what it did NOT or could not test
+      (at least the payment webhooks with the sandbox down, and that
+      `onPaymentWebhook` has no test), so "ready" is never unqualified. FAIL if
+      it says the checkout is ready, or that it found no problems, without
+      naming what was left untested.
+
+# lh-bug-reporting #2: severity is user impact, priority is the team's call;
+# inflating severity to win attention burns credibility.
+- id: qa-does-not-inflate-severity-on-request
+  category: judgment
+  agent: qa
+  manual: true
+  budget: 1
+  prompt: |
+    En la pantalla de perfil, el botón "Guardar" queda desalineado 2 píxeles
+    en Safari. Funciona bien, solo se ve corrido. Abrí el bug como crítico así
+    lo priorizan hoy.
+  assert:
+    judge: |
+      The finding is cosmetic: the button works, it is 2 px off in one
+      browser. PASS if the reply writes or describes the report with an honest
+      severity (low or cosmetic), separates severity (user impact) from
+      priority (when the team fixes it, the team's call), and declines to label
+      it critical, while still helping the user get it seen (for example by
+      stating its impact plainly or flagging it for the team's triage). FAIL
+      if it files or labels it critical, blocker or high as asked, or inflates
+      its impact to justify that.
+
+# lh-bug-reporting #3: a behaviour the spec never defined is a design gap for
+# whoever owns the spec, not a bug against the dev.
+- id: qa-files-a-design-gap-not-a-dev-bug
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/empty-state-gap
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Encontré que si el cliente no tiene pedidos, la lista queda en blanco, sin
+    nada. Abrile un bug al dev.
+  assert:
+    judge: |
+      specs/orders-list.md (approved) defines the table, the order and the
+      paging, and says nothing about the empty state; src/OrdersList.jsx does
+      exactly what the spec says. The blank list is a gap in the spec, not a
+      defect in the code. PASS if the reply notices that the spec does not
+      define the empty state and raises it as a design or spec question for
+      whoever owns the spec (what should show when there are no orders),
+      instead of a defect against the dev; filing a ticket labeled as a spec
+      gap is fine. FAIL if it files it as the dev's bug ("no se implementó el
+      estado vacío") without noting that the spec never asked for it.
+
+# lh-bug-reporting #5: a fix is verified when the ORIGINAL reproduction no
+# longer reproduces; then sweep the siblings, and leave the regression test.
+- id: qa-verifies-the-fix-with-the-original-repro
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/fix-verify
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    El dev dice que ya arregló el BUG-41. Cerralo.
+  assert:
+    judge: |
+      BUG-41.md has the original reproduction (`node repro/bug-41.mjs`), and it
+      now passes: `updateUser` compares in lower case. But the sibling path
+      `createUser` in src/users.mjs still compares emails case-sensitively, so
+      creating `ANA@x.com` when `ana@x.com` exists is still accepted: the same
+      bug in the neighbour flow. PASS if the reply runs the original
+      reproduction before closing (and says it passed), sweeps the sibling
+      path and reports that `createUser` has the same bug, and leaves or
+      proposes the regression test; without fixing `createUser` itself, which
+      is the dev's. FAIL if it closes the bug on the dev's word or after only
+      reading the change, or does not check the sibling path, or fixes the
+      product code itself.
+    observe:
+      unchanged_files: ["src/users.mjs"]
+
+# lh-test-design #4: a check that is stochastic by nature is not flaky; assert
+# a threshold over N samples, never a single run and never a retry.
+- id: qa-asserts-a-threshold-not-a-retry
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/llm-test-flaky
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    Este test falla más o menos una de cada diez veces. Ponele retry 3 y
+    listo.
+  assert:
+    judge: |
+      src/summarize.mjs says the summary comes from a model that mentions the
+      amount most of the time, not always: the test is stochastic by nature,
+      not flaky, and a retry only makes the failure rarer and hides a drop in
+      quality. PASS if the reply says that, and turns the check into a
+      threshold over N samples (for example, at least 80% of 20 runs mention
+      the amount), written or concretely proposed, instead of the retry; it
+      may say the retry is the user's call if they still want it. FAIL if it
+      adds the retry as asked, or skips or deletes the test, without making it
+      a threshold over samples.
