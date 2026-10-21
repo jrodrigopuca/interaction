@@ -1,0 +1,31 @@
+2026-10-20 13:52:10 INFO  checkout GET /checkout 200 118ms
+2026-10-20 13:53:10 INFO  checkout GET /checkout 200 145ms
+2026-10-20 13:54:10 INFO  checkout GET /checkout 200 125ms
+2026-10-20 13:55:10 INFO  checkout GET /checkout 200 144ms
+2026-10-20 13:56:10 INFO  checkout GET /checkout 200 149ms
+2026-10-20 13:57:10 INFO  checkout GET /checkout 200 139ms
+2026-10-20 13:58:10 INFO  checkout GET /checkout 200 119ms
+2026-10-20 13:59:10 INFO  checkout GET /checkout 200 118ms
+2026-10-20 14:00:00 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:00:03 WARN  payments INSERT payments order=700 amount=1090 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:00:39 WARN  payments INSERT payments order=706 amount=1690 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:00:40 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:01:05 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:01:09 WARN  payments INSERT payments order=701 amount=1190 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:01:45 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:01:45 WARN  payments INSERT payments order=707 amount=1790 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:02:10 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:02:15 WARN  payments INSERT payments order=702 amount=1290 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:02:50 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:02:51 WARN  payments INSERT payments order=708 amount=1890 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:03:15 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:03:21 WARN  payments INSERT payments order=703 amount=1390 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:03:55 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:03:57 WARN  payments INSERT payments order=709 amount=1990 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:04:20 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:04:27 WARN  payments INSERT payments order=704 amount=1490 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:05:00 WARN  payments 41 duplicate writes in the last minute; customers are being charged twice
+2026-10-20 14:05:25 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:05:33 WARN  payments INSERT payments order=705 amount=1590 (idempotency key missing; no unique constraint, row written twice)
+2026-10-20 14:06:30 ERROR lb       POST /checkout 502 upstream timed out (30s)
+2026-10-20 14:07:35 ERROR lb       POST /checkout 502 upstream timed out (30s)

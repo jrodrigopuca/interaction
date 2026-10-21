@@ -1,0 +1,5 @@
+2026-10-20 15:10:02 WARN  api p99 3400ms (normal 180ms)
+2026-10-20 15:10:09 WARN  db  pool 20/20 en uso, 17 esperando
+2026-10-20 15:10:15 INFO  cache hit ratio 0.94 (normal 0.93)
+2026-10-20 15:10:21 INFO  api memoria 61% (normal 58%)
+2026-10-20 15:10:30 WARN  db  pool 20/20 en uso, 22 esperando

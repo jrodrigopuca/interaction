@@ -1,0 +1,8 @@
+2026-10-20 15:00:12 INFO  api-1 POST /orders 201 order=8801
+2026-10-20 15:00:31 INFO  api-2 POST /orders 201 order=8802
+2026-10-20 15:04:02 WARN  api-1 queue depth 412 (normal < 50)
+2026-10-20 15:04:18 ERROR api-1 order=8809 created twice (queue replayed after timeout)
+2026-10-20 15:05:44 ERROR api-3 order=8812 created twice (queue replayed after timeout)
+2026-10-20 15:06:09 WARN  api-2 GET /orders 200 4120ms
+2026-10-20 15:07:20 ERROR api-1 order=8820 created twice (queue replayed after timeout)
+2026-10-20 15:08:01 WARN  api-3 queue depth 655
