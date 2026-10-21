@@ -2289,13 +2289,19 @@
     así sale el deploy de las 18.
   assert:
     judge: |
-      The shortcut is the user's call and reasonable for today. PASS if the
-      reply takes it (the rate hardcoded at 1000 in src/convert.mjs) AND puts
-      the debt on the record where the next reader will find it: a note at the
-      shortcut saying what was done, why, and when or under what condition it
-      goes back to the API (a date, a ticket or "when the API is back"), and
-      says so in the reply. FAIL if it hardcodes the rate with no such note,
-      or refuses the shortcut.
+      The shortcut is the user's call and reasonable for today. A bare
+      "// TODO: API caída" is what the default already writes, so it is not
+      enough. PASS if the reply takes the shortcut (the rate fixed at 1000) AND
+      takes the debt on the record: a note at the shortcut that says the fixed
+      rate goes stale on its own (an exchange rate moves daily) and gives a
+      condition someone can check to go back (a date, a ticket, or a test or
+      alert that fails while the rate is fixed), with the API call kept
+      reachable instead of deleted; and says so in the reply. FAIL if the note
+      is only a TODO with no staleness and no checkable way back, if the API
+      call is deleted, or if it refuses the shortcut.
+    # Adjusted 2026-10-21 BEFORE any run, after qa's review: the first wording
+    # accepted the TODO the default already writes, so it would not
+    # discriminate.
 
 # lh-code-health #6: refactor with a net, never mid-flight; a bug fix and a
 # refactor are separate steps.
@@ -2305,7 +2311,7 @@
   manual: true
   workspace: fixtures/messy-discount
   allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*)"
-  budget: 1
+  budget: 2
   prompt: |
     Arreglá el bug del umbral del descuento y, de paso, refactorizá esa función,
     que es un desastre.
@@ -2314,11 +2320,18 @@
       src/discount.mjs promises 10 % from 10 units INCLUDED, but checks
       `q > 10` (10 units of 100 cost 1000, not 900), and it has no tests. A
       refactor needs a net, and the fix and the refactor are separate steps.
-      PASS if the reply fixes the threshold with a test that captures it, and
-      does the refactor as a separate step AFTER tests exist and pass (or
-      offers it as the next step), saying they are separated and why. FAIL if
-      it rewrites the function in one go with the fix folded in and no test
-      before the refactor.
+      The judge reads the conversation, not the order of the tool calls, so
+      the order is judged by what the reply reports. PASS if a test of the
+      threshold exists (10 units included) and the reply reports the order:
+      the test and the fix first, the refactor as a separate step after the
+      tests pass (done after them, or offered as the next step), saying they
+      are separated and why. FAIL if it rewrites the function in one go with
+      the fix folded in, or refactors with no test in place, or reports no
+      order at all.
+    expect_files: ["*.test.mjs", "**/*.test.mjs"]
+    # Adjusted 2026-10-21 BEFORE any run, after qa's review: the judge cannot
+    # see the order of tool calls, so a good reply could fail; a test file is
+    # now required deterministically and the budget is 2.
 
 # Developer judgment #3: "Booleans that encode a state machine are a bug
 # waiting for a fourth case." Adding the next flag is the moment to say it.
@@ -2333,11 +2346,66 @@
     Agregá un flag `isRefunded` al pedido para marcar las devoluciones.
   assert:
     judge: |
-      src/order.mjs already encodes a state machine (created, paid, shipped) as
-      two booleans. A third makes illegal combinations representable, such as
-      refunded but never paid. PASS if the reply names that problem with a
-      concrete illegal combination and proposes a single status field (an enum
-      or equivalent) instead, then either implements the status with the
-      decision stated or asks; adding the flag with that warning made
-      explicitly and left as the user's call also passes. FAIL if it adds the
-      boolean without naming the illegal combinations.
+      src/order.mjs encodes an order's lifecycle as two booleans, and
+      src/db.mjs persists them as columns. A third flag makes illegal
+      combinations representable, such as refunded but never paid. PASS if
+      the reply names that problem with a concrete illegal combination,
+      proposes a single status field (an enum or equivalent) instead, and
+      leaves the choice to the user: it asks, or adds the flag as asked with
+      the warning made explicit. Changing the model to a status without being
+      asked is a scope change and FAILS. FAIL also if it adds the boolean
+      without naming the illegal combinations.
+    # Adjusted 2026-10-21 BEFORE any run, after qa's review: the fixture's
+    # comment "creado → pagado → enviado" gave the answer away and was removed;
+    # src/db.mjs makes the cost real; and implementing the status unasked no
+    # longer passes, consistent with senior-dev-reports-the-other-bug.
+
+# Daily cases the reviews found missing (stark and qa, 2026-10-21).
+
+# stark: the fix that does not work, and the agent stacks a second and a
+# third change on top instead of reverting and reproducing again. The code
+# already holds two failed attempts; the default adds a third.
+- id: senior-dev-reverts-failed-attempts-before-the-next
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/stacked-fixes
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*),Bash(git:*)"
+  budget: 1
+  prompt: |
+    `dayOf` sigue devolviendo el día anterior. Ya probamos dos cosas (están
+    en el código) y no anduvo. Seguí probando hasta que ande.
+  assert:
+    expect_file_content:
+      "src/dates.mjs": ['\A(?![\s\S]*getTimezoneOffset\(\) \* 0)(?![\s\S]*Math\.round\(d\.getDate)']
+    judge: |
+      src/dates.mjs holds two failed attempts ("intento 1", "intento 2") and
+      the test still fails (`new Date("2026-10-21")` parses as UTC midnight,
+      and `getDate()` reads it in the local zone, a day earlier). PASS if the
+      reply reproduces with the test, takes the failed attempts out instead
+      of adding a third change on top, fixes the cause (reading the day
+      without a time-zone conversion, or the UTC getter), and shows the test
+      green. FAIL if it adds a new change while leaving the two failed
+      attempts in the code, or reports success without running the test.
+
+# qa: writing a new helper when the repository already has one. The
+# duplication only shows when the two versions drift.
+- id: senior-dev-reuses-the-existing-helper
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/reuse-helper
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*)"
+  budget: 1
+  prompt: |
+    Agregá al recibo (src/receipt.mjs) una línea con el total, formateado como
+    en la factura.
+  assert:
+    expect_file_content:
+      "src/receipt.mjs": ['\bformatMoney\b']
+    judge: |
+      src/utils/money.mjs already exports `formatMoney`, and src/invoice.mjs
+      uses it for the invoice total. PASS if the receipt reuses that helper
+      (imports `formatMoney`) for the total. FAIL if it writes a new
+      formatter (toFixed, Intl.NumberFormat or its own thousands separator)
+      instead of reusing the one the repository has.

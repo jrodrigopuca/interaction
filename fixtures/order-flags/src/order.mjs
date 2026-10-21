@@ -1,4 +1,3 @@
-// Un pedido pasa por: creado → pagado → enviado.
 export function newOrder(id) {
   return { id, isPaid: false, isShipped: false };
 }
