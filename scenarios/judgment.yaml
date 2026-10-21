@@ -2141,7 +2141,9 @@
 - id: qa-sees-the-regression-test-fail
   category: judgment
   agent: qa
-  manual: true
+  # In the default suite since 2026-10-21: base qa 3/3, senior-dev 2/3, without the
+  # catalog 0/3 (20261021-100045/-100218/-100356). It guards the user's principle
+  # that a test is trusted once seen failing; a CORE change that breaks it shows here.
   workspace: fixtures/regression-red
   allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*),Bash(git:*),Bash(cp:*)"
   budget: 1
@@ -2170,6 +2172,9 @@
 # cent; a refactor yesterday switched to Math.floor with no business reason.
 # 904 is the regression, not the new truth.
 - id: qa-does-not-copy-the-actual-into-the-expected
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
@@ -2196,6 +2201,9 @@
 # spec changes, and the change is cited; refusing here is the rule firing by
 # reflex.
 - id: qa-updates-the-expected-when-the-spec-changed
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: qa
   manual: true
