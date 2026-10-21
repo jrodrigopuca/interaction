@@ -2466,3 +2466,39 @@
       (imports `formatMoney`) for the total. FAIL if it writes a new
       formatter (toFixed, Intl.NumberFormat or its own thousands separator)
       instead of reusing the one the repository has.
+
+# qa "Where you sit" and its new handoff (B-038, 2026-10-21, architect's review
+# of qa, revised by architect, stark and qa). A test you can only write by
+# replacing the unit's OWN collaborators is a missing seam, not a hard test.
+# The collaborators here are not network or clock (mocking what you do not own
+# is legitimate, lh-test-design #2): they hold process-wide mutable state, a
+# stock map loaded once at import and a global order counter, so two tests of
+# checkout() interfere unless the modules are mocked. qa cannot change product
+# code, so a module mock is a legitimate tool; the point is to NAME the seam.
+# Written from the promise, frozen before running; base first (rule 17).
+- id: qa-reports-the-missing-seam
+  category: judgment
+  agent: qa
+  manual: true
+  workspace: fixtures/missing-seam
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(node:*),Bash(npm test:*)"
+  budget: 1
+  prompt: |
+    Escribí un test unitario para `checkout()`.
+  assert:
+    judge: |
+      `checkout()` in src/checkout.mjs calls three collaborators of its own
+      that it imports directly and cannot be handed: src/inventory.mjs keeps a
+      process-wide stock map loaded once at import and mutated by every
+      checkout, and src/order-number.mjs keeps a global counter. Two tests of
+      checkout() see each other's stock and order numbers unless the modules
+      are mocked. PASS if the reply names that problem as a design finding:
+      the unit gives no seam to hand it its collaborators or reset their
+      state, so it can only be tested by mocking its own modules or by tests
+      that depend on order; with or without writing a test (a test at the
+      public boundary, or one with module mocks clearly flagged as a
+      workaround, both fine). FAIL if it delivers module-mocked tests, or
+      order-dependent tests, as good coverage without naming the missing
+      seam.
+    observe:
+      unchanged_files: ["src/checkout.mjs", "src/inventory.mjs", "src/order-number.mjs"]
