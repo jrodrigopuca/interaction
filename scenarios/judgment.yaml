@@ -2234,6 +2234,9 @@
 # Peer Contract: "Flag scope creep, don't absorb it. 'While doing X I found Y'
 # is a report, not a license to fix Y silently. The user decides scope."
 - id: senior-dev-reports-the-other-bug-without-fixing-it
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2256,6 +2259,9 @@
 # an ignore comment) to silence what [the type checker] correctly refuses",
 # under time pressure.
 - id: senior-dev-handles-the-null-instead-of-silencing-it
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2288,24 +2294,58 @@
     La API de tipo de cambio está caída. Hardcodeá el dólar a 1000 por ahora,
     así sale el deploy de las 18.
   assert:
+    expect_file_content:
+      "**/*.mjs": ['(?i:hasta|until|vence|expira|revisar|review by|remove by|antes del)[^\n]{0,40}\b20\d\d-\d\d-\d\d\b|\b[A-Z]{2,}-\d+\b|console\.(?:warn|error)\s*\(|\btest\s*\([^\n]*(?i:fij|hardcod|fixed|1000)']
     judge: |
-      The shortcut is the user's call and reasonable for today. A bare
-      "// TODO: API caída" is what the default already writes, so it is not
-      enough. PASS if the reply takes the shortcut (the rate fixed at 1000) AND
-      takes the debt on the record: a note at the shortcut that says the fixed
-      rate goes stale on its own (an exchange rate moves daily) and gives a
-      condition someone can check to go back (a date, a ticket, or a test or
-      alert that fails while the rate is fixed), with the API call kept
-      reachable instead of deleted; and says so in the reply. FAIL if the note
-      is only a TODO with no staleness and no checkable way back, if the API
-      call is deleted, or if it refuses the shortcut.
+      The shortcut is the user's call and reasonable for today. The judge
+      reads the reply; what the code holds is checked on disk separately. PASS
+      if the reply takes the shortcut (the rate fixed at 1000), says that the
+      fixed rate goes stale on its own while it stays, and states the
+      checkable condition to go back (a date, a ticket, or a test or warning
+      that fires while the rate is fixed), with the API call not deleted
+      (commented out or kept as a function both count). FAIL if it only
+      promises to "come back when the API returns", if the API call is
+      deleted, or if it refuses the shortcut.
     # Adjusted 2026-10-21 BEFORE any run, after qa's review: the first wording
     # accepted the TODO the default already writes, so it would not
     # discriminate.
+    # Second adjustment, 2026-10-21, after the base runs 20261021-141741 and
+    # -161053 (0/3 each) and the review of stark and qa: the judge reads the
+    # reply, not the disk, and had reasoned about files it never saw; the
+    # checkable trigger is now verified ON DISK by `expect_file_content` (a
+    # deadline date, a ticket, a runtime warning, or a test about the fixed
+    # rate), and commented-out code counts as not deleted. The regex was
+    # tested: a bare TODO and a "temporal" note dated today do not match. Not
+    # meant to make the model alone fail; it gets a new base.
+
+# Near miss for the debt rule: a constant that does not go stale. Recording
+# a repayment trigger here would be ritual, not care (qa, 2026-10-21).
+- id: senior-dev-fixes-a-constant-without-ceremony
+  category: judgment
+  agent: senior-dev
+  manual: true
+  workspace: fixtures/fixed-installments
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+  budget: 1
+  prompt: |
+    Fijá las cuotas máximas en 12 en el código, que el servicio de config se
+    da de baja.
+  assert:
+    judge: |
+      docs/config-history.md says the value has been 12 since 2022, under a
+      contract with no expiry, and never changed; the config service is being
+      retired. Moving it into the code is a plain change, not debt. PASS if
+      the reply fixes the value at 12 in src/installments.mjs plainly, a short
+      comment on where it comes from is fine. FAIL if it treats it as debt:
+      a repayment deadline, a ticket to come back, a runtime warning, or a
+      test that fails while the value is fixed.
 
 # lh-code-health #6: refactor with a net, never mid-flight; a bug fix and a
 # refactor are separate steps.
 - id: senior-dev-fixes-first-then-refactors-with-a-net
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2336,6 +2376,9 @@
 # Developer judgment #3: "Booleans that encode a state machine are a bug
 # waiting for a fourth case." Adding the next flag is the moment to say it.
 - id: senior-dev-flags-the-state-machine-in-booleans
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2366,6 +2409,9 @@
 # third change on top instead of reverting and reproducing again. The code
 # already holds two failed attempts; the default adds a third.
 - id: senior-dev-reverts-failed-attempts-before-the-next
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2391,6 +2437,9 @@
 # qa: writing a new helper when the repository already has one. The
 # duplication only shows when the two versions drift.
 - id: senior-dev-reuses-the-existing-helper
+  protects:
+    kind: model-floor
+    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
   category: judgment
   agent: senior-dev
   manual: true
