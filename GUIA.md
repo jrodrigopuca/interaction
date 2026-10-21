@@ -317,6 +317,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   guard: shell-writes               # un hook del catálogo en el --settings de la sesión (ver abajo)
   verify: npm test                  # B-084: el hook de verificación del catálogo corre esto cuando el agente quiere terminar (ver abajo)
   no_agent: "necesita el roster"    # B-038: por qué NO puede correr sin el catálogo (la rama sin agente lo saltea con ese motivo)
+  protects: {kind: model-floor, revisit_if: "cuando ..."}  # B-038: se queda aunque el modelo solo lo pase (ver abajo)
 ```
 
 **El loader es estricto.** Una clave que el harness no conoce, arriba, en
@@ -422,6 +423,26 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   siempre, CON, SIN y Δ por agente, por categoría y por escenario. Un Δ de 0
   no dice que el catálogo no aporta: dice que ese escenario no discrimina, y
   pide N/3 en las dos ramas antes de reformularlo o declarar qué protege.
+- **`protects:` deja un escenario como guardia (B-038).** Para un escenario que
+  el modelo solo pasa 3 de 3 y que igual vale tener. Lleva `kind` cerrado y
+  `revisit_if` obligatorio, la condición verificable para volver a mirarlo, así
+  no se vuelve el lugar donde mueren los escenarios que nadie reformula:
+  `regression-of` (guardián de un cambio anterior; con `ref: B-NNN`),
+  `by-design` (un casi-acierto que pasa por construcción), `design-cell` (celda
+  de una medición de diseño, como la de sesgo de autoría: no es evidencia del
+  catálogo y `--compare` la deja fuera de todo promedio), `model-floor` (guardia
+  contra un modelo más débil o una versión nueva, que nadie midió todavía) y
+  `host-environment` (mide el host o el entorno, no el juicio). El loader
+  rechaza un motivo libre, un kind desconocido o una condición vacía.
+  `protects:` y `no_agent:` no entran en la huella: anotar no invalida un
+  veredicto medido. `viz.py --compare` muestra el kind en la última columna y
+  junta las muestras de todas las corridas de la misma rama que se le pasen
+  (dales solo corridas comparables: misma instalación y mismo modelo); los
+  escenarios marcados `no_agent:` quedan fuera de la tabla.
+- **Un criterio no nombra a otro agente del roster** si el escenario corre sin
+  catálogo: el modelo solo no sabe que existe `dba`, así que "derivá a dba"
+  lo hace fallar por construcción. Se escribe en roles ("quien maneja el
+  esquema; dba en este catálogo"), y el nombre del agente cuenta igual.
 - **Para que un comando NO EXISTA, `hide_commands:`.** Lista de nombres
   (`[ag]`). El harness arma una carpeta con un enlace a cada comando del
   `PATH` salvo esos, en el orden de búsqueda de la shell, y se la da al

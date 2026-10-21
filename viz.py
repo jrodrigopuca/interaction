@@ -2344,30 +2344,62 @@ def protects_of() -> dict:
         return {}
 
 
-def delta_rows(runs: list, protects: dict = None) -> dict:
+def no_agent_of() -> dict:
+    """{scenario id: reason} for the scenarios that cannot run without the catalog."""
+    try:
+        return {s.id: harness.no_agent_reason(s) for s in harness.load_scenarios()
+                if harness.no_agent_reason(s)} if harness else {}
+    except SystemExit:
+        return {}
+
+
+def _tally(rec: dict) -> tuple:
+    """(passes, samples) of one record; a record with no verdict counts as none."""
+    n = rec.get("repeat") or 1
+    if rec.get("passes") is not None and rec.get("repeat"):
+        return rec["passes"], n
+    status = rec.get("status")
+    return (0, 0) if status is None else (int(status == "PASS"), 1)
+
+
+def delta_rows(runs: list, protects: dict = None, skip: dict = None) -> dict:
     """B-038: the catalog's contribution, scenario by scenario.
 
     `runs` are load_run results. Those with `branch: without` are the model
-    alone (SIN); every other run is the catalog's agent (CON). For each
-    scenario SIN ran, SIN and CON are the pass share of the latest record
-    given (later runs on the command line win), and the delta is CON - SIN.
+    alone (SIN); every other run is the catalog's agent (CON). Samples are
+    POOLED per branch: every run given adds its passes and its samples, so a
+    branch measured in several batches reads as one N. Give only runs that
+    are comparable (same install, same model). For each scenario SIN ran, SIN
+    and CON are pass shares over the pooled samples, and the delta is
+    CON - SIN. Scenarios that now declare they cannot run without the catalog
+    (`no_agent`) are left out: they have no delta.
     Rolled up by category and by agent over the scenarios that have both. A
     delta of 0 does not say the catalog adds nothing: it says this scenario
     cannot tell (regla 17: reformulate it, or declare what it protects)."""
     protects = protects_of() if protects is None else protects
-    sin, con = {}, {}
+    skip = no_agent_of() if skip is None else skip
+    sides = {"sin": {}, "con": {}}
     for r in runs:
-        side = sin if (r.get("meta") or {}).get("branch") == "without" else con
+        side = sides["sin" if (r.get("meta") or {}).get("branch") == "without" else "con"]
         for rec in r["scenarios"]:
-            side[rec["id"]] = (r["name"], rec)
+            p, n = _tally(rec)
+            e = side.setdefault(rec["id"], {"p": 0, "n": 0, "runs": [], "rec": rec})
+            e["p"] += p
+            e["n"] += n
+            e["runs"].append(r["name"])
     rows = []
-    for sid, (srun, srec) in sin.items():
-        crun, crec = con.get(sid, (None, None))
-        s, c = _frac(srec), (_frac(crec) if crec else None)
-        rows.append({"id": sid, "agent": srec.get("agent") or "",
-                     "category": srec.get("category") or "",
-                     "sin": s, "sin_n": srec.get("repeat") or 1, "sin_run": srun,
-                     "con": c, "con_n": (crec or {}).get("repeat") or 1, "con_run": crun,
+    for sid, se in sides["sin"].items():
+        if sid in skip:
+            continue
+        ce = sides["con"].get(sid)
+        s = se["p"] / se["n"] if se["n"] else None
+        c = ce["p"] / ce["n"] if ce and ce["n"] else None
+        rec = se["rec"]
+        rows.append({"id": sid, "agent": rec.get("agent") or "",
+                     "category": rec.get("category") or "",
+                     "sin": s, "sin_n": se["n"], "sin_run": ",".join(se["runs"]),
+                     "con": c, "con_n": ce["n"] if ce else 0,
+                     "con_run": ",".join(ce["runs"]) if ce else None,
                      "kept": protects.get(sid, ""),
                      "delta": None if (s is None or c is None) else c - s})
     rows.sort(key=lambda x: (x["category"], x["agent"], x["id"]))

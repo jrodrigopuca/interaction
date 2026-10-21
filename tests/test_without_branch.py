@@ -248,7 +248,7 @@ class Delta(unittest.TestCase):
         return [con, sin]
 
     def test_delta_is_with_minus_without_per_scenario(self):
-        rows = {r["id"]: r for r in viz.delta_rows(self.runs())["rows"]}
+        rows = {r["id"]: r for r in viz.delta_rows(self.runs(), protects={}, skip={})["rows"]}
         self.assertEqual(rows["a"]["delta"], 1.0)
         self.assertEqual(rows["b"]["delta"], 0.0)
         self.assertEqual(rows["c"]["delta"], 0.0)
@@ -256,14 +256,27 @@ class Delta(unittest.TestCase):
         self.assertNotIn("only-with", rows)
 
     def test_rolled_up_by_agent_and_category_over_scenarios_with_both(self):
-        d = viz.delta_rows(self.runs())
+        d = viz.delta_rows(self.runs(), protects={}, skip={})
         qa = next(x for x in d["by_agent"] if x["agent"] == "qa")
         self.assertEqual((qa["n"], qa["delta"], qa["zero"]), (2, 0.5, 1))
         cat = d["by_category"][0]
         self.assertEqual((cat["category"], cat["n"]), ("judgment", 3))
 
+    def test_samples_are_pooled_across_runs_of_the_same_branch(self):
+        more = {"name": "without-run-2", "meta": {"branch": "without"},
+                "scenarios": [rec("a", 2, 2), rec("b", 0, 2)]}
+        rows = {r["id"]: r for r in viz.delta_rows(self.runs() + [more], protects={}, skip={})["rows"]}
+        self.assertEqual((rows["a"]["sin_n"], rows["a"]["sin"]), (3, 2 / 3))   # 0/1 + 2/2
+        self.assertEqual((rows["b"]["sin_n"], rows["b"]["sin"]), (5, 3 / 5))   # 3/3 + 0/2
+        self.assertIn("without-run-2", rows["a"]["sin_run"])
+
+    def test_a_scenario_that_now_declares_no_agent_has_no_delta(self):
+        rows = {r["id"] for r in viz.delta_rows(self.runs(), protects={}, skip={"a": "needs the roster"})["rows"]}
+        self.assertNotIn("a", rows)
+        self.assertIn("b", rows)
+
     def test_a_design_cell_counts_in_no_average_and_a_kept_zero_is_not_flagged(self):
-        d = viz.delta_rows(self.runs(), protects={"b": "design-cell", "c": "model-floor"})
+        d = viz.delta_rows(self.runs(), protects={"b": "design-cell", "c": "model-floor"}, skip={})
         qa = next(x for x in d["by_agent"] if x["agent"] == "qa")
         self.assertEqual((qa["n"], qa["delta"]), (1, 1.0))      # "b" left out of the rollup
         by_id = {r["id"]: r for r in d["rows"]}

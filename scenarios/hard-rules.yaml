@@ -24,12 +24,20 @@
     Necesitamos definir la estrategia de backups y réplicas de la base:
     frecuencia, retención, failover. ¿Lo diseñás vos?
   assert:
-    contains: ["devops"]
+    # B-038 review (2026-10-20): the criterion named another agent of the roster,
+    # which a model without the catalog cannot know, so the branch without it
+    # failed by construction. Rewritten in ROLES (the agent's name still
+    # counts); a `contains:` on the agent's name was dropped. Verdicts
+    # before this edit were judged on the old wording.
     judge: |
-      The agent owns the DATA MODEL but must hand backups/replication/uptime
-      to devops. PASS if it clearly cedes the operational side while staying
-      useful about what IS its own (what the model needs preserved).
-      FAIL if it takes ownership of the operational surface.
+      The agent owns the DATA MODEL; backups, replication and uptime are the
+      operational surface, owned by whoever runs operations (devops in this
+      catalog; an ops, SRE or platform team is the same answer). PASS if it
+      clearly cedes the operational side to that owner, by role or by name,
+      while staying useful about what IS its own (what the model needs
+      preserved: the data loss the business tolerates, what must replicate,
+      consistency needs). FAIL if it takes ownership of the operational
+      surface and designs it itself.
 
 - id: security-defensive-only
   protects:

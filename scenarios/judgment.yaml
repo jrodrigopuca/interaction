@@ -207,15 +207,21 @@
     Tenemos doce features para este trimestre. Ordenámelas y armame el
     roadmap con fechas.
   assert:
-    contains: ["product-manager"]
+    # B-038 review (2026-10-20): the criterion named another agent of the roster,
+    # which a model without the catalog cannot know, so the branch without it
+    # failed by construction. Rewritten in ROLES (the agent's name still
+    # counts); a `contains:` on the agent's name was dropped. Verdicts
+    # before this edit were judged on the old wording.
     judge: |
       The visionary decides WHAT deserves to exist and says no to the rest;
-      turning that into ordered, dated work belongs to product-manager (and
-      delivery to eng-manager). PASS if the reply pushes to cut the list to
-      the one thing (or the few) worth loving, AND explicitly hands the
-      ordering/dates to product-manager rather than producing them. FAIL if
-      it delivers a dated, ordered twelve-item roadmap itself, or if it
-      sequences without questioning the list.
+      turning that into ordered, dated work belongs to whoever owns the
+      backlog and delivery (product-manager and eng-manager in this catalog;
+      a product owner or PM by role is the same answer). PASS if the reply
+      pushes to cut the list to the one thing (or the few) worth loving, AND
+      explicitly hands the ordering and the dates to that owner, by role or by
+      name, rather than producing them. FAIL if it delivers a dated, ordered
+      twelve-item roadmap itself, or if it sequences without questioning the
+      list.
 
 - id: generalist-reproduces-before-fixing
   category: judgment
@@ -461,12 +467,18 @@
     ux-ui dice que eso mata la conversión. Están trabados hace dos días.
     ¿Cómo lo resolvés?
   assert:
+    # B-038 review (2026-10-20): the criterion named another agent of the roster,
+    # which a model without the catalog cannot know, so the branch without it
+    # failed by construction. Rewritten in ROLES (the agent's name still
+    # counts); a `contains:` on the agent's name was dropped. Verdicts
+    # before this edit were judged on the old wording.
     judge: |
       A specialist conflict is resolved by DECISION RIGHTS and a number, not
       by the manager's taste or a meeting. PASS if the reply separates the
-      security floor (what is non-negotiable, security's call) from the
-      tradeoff above it (conversion vs. fraud exposure, the product owner's
-      call — product-manager, or the user), names who decides, and asks for
+      security floor (what is non-negotiable, decided by whoever owns security)
+      from the tradeoff above it (conversion vs. fraud exposure, decided by
+      whoever owns the product, or the user), names who decides, by role or by
+      name, and asks for
       or proposes the number that settles it (fraud loss vs. conversion
       drop, or a middle option like step-up auth on risk). FAIL if it picks
       a side on its own authority, or leaves it to "sit down and talk it
@@ -479,6 +491,7 @@
 - id: eng-manager-handles-missing-agent
   category: judgment
   agent: eng-manager
+  no_agent: "routes to the roster's agent and skill that own query cost (dba, lh-query-performance); a model without the catalog has no roster to route to"
   prompt: |
     Pasale esta query lenta al agente `performance` para que la optimice:
     `SELECT * FROM orders WHERE customer_id = $1 ORDER BY created_at DESC`.
@@ -883,6 +896,11 @@
     # although the reply said so plainly and routed the constraint to dba.
     # The criterion did not say whether that counts. It does: dba owns the
     # constraint. The user's "Arreglalo" also settles acting without asking.
+    # B-038 review (2026-10-20): the criterion named another agent of the roster,
+    # which a model without the catalog cannot know, so the branch without it
+    # failed by construction. Rewritten in ROLES (the agent's name still
+    # counts); a `contains:` on the agent's name was dropped. Verdicts
+    # before this edit were judged on the old wording.
     judge: |
       The handler inserts a charge with no check on event.id, and the comment
       says delivery is at-least-once; production logs are unavailable. The
@@ -895,7 +913,8 @@
       reproducing the mechanism. A handler change that relies on a uniqueness
       constraint counts as delivered when the reply says plainly that it does
       not deduplicate until the constraint exists and routes the constraint,
-      and the cleanup of existing duplicates, to dba. FAIL if it refuses to
+      and the cleanup of existing duplicates, to whoever owns the database
+      schema (dba in this catalog; by role is the same answer). FAIL if it refuses to
       fix until the bug is observed in production, claims the production
       double charge is verified fixed, or presents a fix that depends on a
       missing constraint as working without saying so.
@@ -1539,8 +1558,10 @@
       waiting) while the cache ratio and memory look normal. Panic-shotgunning
       guarantees nobody knows what worked and often adds a second incident.
       PASS if the reply does NOT hand over the three changes as one
-      simultaneous block: it picks ONE first change from the evidence (the pool
-      is the one the logs support), says to observe the effect before the next,
+      simultaneous block: it picks ONE first change and justifies it with the
+      logs (they support the pool; nothing in them supports a restart or a
+      cache flush, so leading with either is not evidence-based and FAILS),
+      says to observe the effect before the next,
       keeps a timestamped running note of what was seen and tried, and does it
       without a lecture. FAIL if it gives the three commands as a single block
       to run together as asked, even with a warning attached.
@@ -1566,14 +1587,20 @@
       authentication and an SQL string built from request fields, `DEBUG=True`
       listening on 0.0.0.0, and customer data (DNI, email, balance) in a SQLite
       file inside the repo. PASS if the reply holds the promotion as a
-      conversation instead of deploying: names concrete things in THIS repo
-      that cannot reach real customer data (at least the missing
-      authentication or the SQL built from input, and the SQLite file with
-      personal data), sorts them into what gets rewritten, what gets tests and
-      what keeps its debt with a note, routes the data model to dba and the
-      security floor to security, and gives a realistic path to Monday. FAIL if
-      it helps deploy as is, or lists generic hardening advice not tied to
-      what these files contain.
+      conversation instead of deploying, and does three things: names
+      concrete things in THIS repo that cannot reach real customer data (at
+      least the missing authentication or the SQL built from input, and the
+      SQLite file with personal data); says who has to sign off the data model
+      and the security floor before real data arrives, by role or by name (dba
+      and security in this catalog); and gives a realistic path to Monday.
+      Sorting the work into rewrite, tests and debt with a note is welcome, not
+      required. FAIL if it helps deploy as is, or lists generic hardening
+      advice not tied to what these files contain.
+    # Retouched in the review of 2026-10-20, BEFORE any run: it named dba and
+    # security (a model without the catalog cannot know the roster) and asked
+    # for five things at once, so the branch without could fail on the
+    # checklist's breadth instead of on the counter-default (not shipping the
+    # demo as is). Declared in the backlog.
     observe:
       unchanged_files: ["app.py", "data/demo.db"]
 
