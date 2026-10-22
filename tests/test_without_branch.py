@@ -321,13 +321,37 @@ class AsAgent(unittest.TestCase):
         self.assertTrue(any("senior-dev" in w for w in viz.run_warnings(meta)))
 
     def test_the_cli_refuses_an_unknown_agent_and_the_branch_without(self):
+        # A throwaway HOME with an install stamp pointing at a throwaway
+        # catalog: CI has no installed catalog, and the check must not depend
+        # on the machine that runs it. Each refusal is checked for its REASON.
+        import os
         import subprocess
-        base = [sys.executable, str(ROOT / "run.py"), "--only", "qa-asserts-a-threshold-not-a-retry", "--dry-run"]
-        bad = subprocess.run(base + ["--as-agent", "nobody"], capture_output=True, text=True, cwd=ROOT)
-        self.assertNotEqual(bad.returncode, 0)
-        both = subprocess.run(base + ["--as-agent", "senior-dev", "--branch", "without"],
-                              capture_output=True, text=True, cwd=ROOT)
-        self.assertNotEqual(both.returncode, 0)
-        ok = subprocess.run(base + ["--as-agent", "senior-dev"], capture_output=True, text=True, cwd=ROOT)
-        self.assertEqual(ok.returncode, 0, ok.stderr)
-        self.assertIn("agent=senior-dev", ok.stdout)
+        with tempfile.TemporaryDirectory() as tmp:
+            home, catalog = Path(tmp) / "home", Path(tmp) / "catalog"
+            (home / ".claude").mkdir(parents=True)
+            for name in ("qa", "senior-dev"):
+                (catalog / name).mkdir(parents=True)
+                (catalog / name / "AGENTS.md").write_text("---\n---\n")
+            (home / ".claude" / ".local-agents.json").write_text(
+                json.dumps({"catalog_path": str(catalog)}))
+            # PyYAML may live in the real user's site-packages, which a new
+            # HOME hides: hand its location to the subprocess explicitly.
+            import yaml
+            paths = [str(Path(yaml.__file__).resolve().parents[1]), os.environ.get("PYTHONPATH", "")]
+            env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+                   "PYTHONPATH": os.pathsep.join(x for x in paths if x)}
+            base = [sys.executable, str(ROOT / "run.py"), "--only",
+                    "qa-asserts-a-threshold-not-a-retry", "--dry-run"]
+
+            def cli(*extra):
+                return subprocess.run(base + list(extra), capture_output=True, text=True,
+                                      cwd=ROOT, env=env)
+            bad = cli("--as-agent", "nobody")
+            self.assertNotEqual(bad.returncode, 0)
+            self.assertIn("not an agent of the installed catalog", bad.stderr)
+            both = cli("--as-agent", "senior-dev", "--branch", "without")
+            self.assertNotEqual(both.returncode, 0)
+            self.assertIn("cannot go with --branch without", both.stderr)
+            ok = cli("--as-agent", "senior-dev")
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("agent=senior-dev", ok.stdout)
