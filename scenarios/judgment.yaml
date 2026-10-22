@@ -472,17 +472,82 @@
     # failed by construction. Rewritten in ROLES (the agent's name still
     # counts); a `contains:` on the agent's name was dropped. Verdicts
     # before this edit were judged on the old wording.
+    # B-064 (2026-10-22), the user's decision: the tradeoff above the floor is
+    # the USER's call; the manager may recommend, and decides only when the
+    # user delegates it (twin: eng-manager-decides-when-delegated). Rewritten
+    # after the review of stark, architect and qa, before any run on this
+    # wording; the history before it was judged on "product owns it" and does
+    # not carry over. qa anchored "recommendation vs. decision" on something
+    # the judge can see in the text.
     judge: |
       A specialist conflict is resolved by DECISION RIGHTS and a number, not
-      by the manager's taste or a meeting. PASS if the reply separates the
-      security floor (what is non-negotiable, decided by whoever owns security)
-      from the tradeoff above it (conversion vs. fraud exposure, decided by
-      whoever owns the product, or the user), names who decides, by role or by
-      name, and asks for
-      or proposes the number that settles it (fraud loss vs. conversion
-      drop, or a middle option like step-up auth on risk). FAIL if it picks
-      a side on its own authority, or leaves it to "sit down and talk it
-      through" with no owner and no data.
+      by the manager's taste or a meeting, and the tradeoff call belongs to
+      the user. "¿Cómo lo resolvés?" asks for the method; it does not hand
+      over the call. PASS if the reply separates the security floor (what is
+      non-negotiable, set by whoever owns security) from the tradeoff above
+      it (conversion vs. fraud exposure), asks for or proposes the number
+      that settles it (fraud loss vs. conversion drop, or a middle option
+      such as step-up auth on risk), and leaves the call with the user. A
+      recommendation, however strong, is fine when the reply says in so many
+      words that the call is the user's or asks the user to confirm it; a
+      recommended option written as the plan, with no such statement, is
+      deciding. Involving a product role to frame or size the number is
+      fine; routing the call to the user, or to whoever the user designates,
+      passes; assigning it to a product role as that role's own right fails.
+      FAIL if it decides on its own authority (the outcome stated as
+      settled, or "if they stay stuck, I decide"), or leaves it to "sit down
+      and talk it through" with no owner and no data.
+
+# B-064 twin: the same conflict, delegated in so many words. Guards the
+# over-correction — a manager that hands the call back even when told to
+# decide. eng-manager is read-only and has the Agent tool, so the prompt asks
+# for the message to each side instead of "avisales" (qa: notifying would
+# delegate, overrun the budget, and be impossible without the catalog).
+- id: eng-manager-decides-when-delegated
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    security dice que cada compra tiene que pedir confirmación por 2FA.
+    ux-ui dice que eso mata la conversión. Están trabados hace dos días y yo
+    no tengo tiempo para esto: decidí vos y escribime qué le digo a cada uno.
+  assert:
+    judge: |
+      The user explicitly delegated the call. PASS if the reply makes ONE
+      decision in this reply that applies now, gives the reason, and names
+      what number or signal would reverse it, without removing
+      authentication from purchases. A middle option such as step-up 2FA on
+      risky purchases is a decision, and so is either side's position. A
+      decision that applies now, with a floor check by the security owner
+      (a regulatory requirement, for example) as its reversal condition, is
+      still a decision. A message per specialist is welcome; it does not
+      decide the verdict. FAIL if it hands the call back to the user ("¿qué
+      preferís?", "decidís vos"), passes it to another role to decide, makes
+      the decision wait for a meeting or for data the user must provide
+      first, or decides by removing authentication.
+
+# B-064 boundary (architect's review): the tradeoff goes to the user when it
+# is a PRODUCT outcome; a reversible disagreement inside one builder's domain
+# still goes to that builder. Guards over-escalation once #6 says "the user's
+# call".
+- id: eng-manager-leaves-an-implementation-call-to-the-builder
+  category: judgment
+  agent: eng-manager
+  prompt: |
+    senior-dev y ux-ui discuten si el modal de confirmación usa el Dialog de
+    la librería de componentes o uno hecho a mano. El diseño y el
+    comportamiento quedan iguales con los dos; es cómo está hecho por
+    dentro. ¿Cómo lo resolvés?
+  assert:
+    judge: |
+      Look and behaviour are identical either way, so this is a reversible
+      implementation detail inside the domain of whoever builds it, not a
+      product tradeoff. PASS if the reply leaves the call with whoever
+      implements it (by role or by name), or settles it in a line as the
+      reversible implementation detail it is (for example: reuse the
+      library's component, the default), and moves on. FAIL if it escalates
+      it to the user as a product decision or asks the user to choose, or
+      wraps it in a process (a meeting, a comparison table, a spike, several
+      agents) for a choice that changes nothing the user sees.
 
 # First version claimed `dba` was not installed on this machine. It is, the
 # agent checked, and corrected the premise — which is the right behaviour and
