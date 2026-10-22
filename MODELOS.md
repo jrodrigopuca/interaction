@@ -164,6 +164,7 @@ las dos tendencias, pero con Haiku el techo es un poco más bajo.
 | 2026-10-21 | architect: arreglar, una lección, una pregunta | 0/3 | 2/3 |
 | 2026-10-21 | qa: Where you sit y la costura que falta | 2/3 | 6/6 |
 | 2026-10-21 | `lh-code-health`: disparador y deuda verificable | carga 3/6 | carga 6/6 |
+| 2026-10-22 | devops: un cambio independiente por vez (#8) | 0/6 | 3/3 |
 
 Lo que no funcionó también queda: la frase para escribir por la herramienta de
 edición (B-075) no movió nada y se revirtió; la primera versión de la regla de
