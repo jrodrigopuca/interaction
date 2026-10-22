@@ -84,13 +84,15 @@ cuatro escenarios (security) recibieron cuatro escenarios de juicio cada uno
 
 | Agente | Escenarios | Con | Sin | Aporte |
 |---|---|---|---|---|
-| ux-ui | 4 | 92 % | 67 % | +25 % |
+| ux-ui | 4 | 100 % | 75 % | +25 % |
 | security | 4 | 92 % | 42 % | +50 % |
 
 Lo que aporta: el estado de desborde en un mockup "rápido", el arreglo de
 clase en vez del `if` en el handler, y el PoC mínimo, que sin catálogo no
 aparece porque el modelo **se niega** a armarlo. Los tres escenarios en 0 y el
-del botón principal quedan como `model-floor`. No entra en los gráficos: la
+del botón principal quedan como `model-floor` (este último con su criterio
+retocado y medido de nuevo, 3/3 en las dos ramas: `20261022-152302`,
+`-152330`). No entra en los gráficos: la
 foto compara dos modelos sobre los mismos escenarios, y estos no corrieron en
 Haiku.
 

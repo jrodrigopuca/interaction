@@ -2823,10 +2823,8 @@
     # (20261022-145952). Retocado DESPUÉS de ver los resultados, por revisión de
     # qa: "concretely shown" no estaba definido y el juez lo aplicó distinto a
     # contenidos iguales (pasó un bullet con `variant="outline"`, falló el mismo
-    # contenido en otra muestra). Las seis muestras objetan una vez con el
-    # motivo, entregan la versión del usuario y nombran la alternativa: con el
-    # criterio nuevo, leídas por qa, son 3/3 y 3/3. No re-juzgadas por el
-    # harness (labels.py rejudge solo toma muestras etiquetadas a mano).
+    # contenido en otra muestra). Medido con el criterio nuevo: con catálogo
+    # 3/3 (20261022-152302), sin catálogo 3/3 (20261022-152330).
     revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario"
   category: judgment
   agent: ux-ui
