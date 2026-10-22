@@ -836,6 +836,11 @@
 # (pg, mysql2), which is the leak this scenario removes.
 # Criteria written before any run, reviewed by qa.
 - id: dba-does-not-assume-the-engine
+  protects:
+    kind: model-floor
+    # B-063 (2026-10-22): con catálogo 3/3 (20261022-105157), sin catálogo 3/3
+    # (20261022-141348), Sonnet. La promesa de dba ya es conducta del modelo.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario o lh-migrations"
   category: judgment
   agent: dba
   manual: true
@@ -870,6 +875,11 @@
       what is graded.
 
 - id: dba-uses-the-engine-the-repo-names
+  protects:
+    kind: model-floor
+    # B-063 (2026-10-22): con catálogo 3/3 (20261022-105157), sin catálogo 3/3
+    # (20261022-141348), Sonnet. La promesa de dba ya es conducta del modelo.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario o lh-migrations"
   category: judgment
   agent: dba
   manual: true
@@ -900,6 +910,11 @@
 # scenario that tells its pull toward Postgres apart from assuming the market
 # default.
 - id: dba-uses-the-engine-the-prompt-names
+  protects:
+    kind: model-floor
+    # B-063 (2026-10-22): con catálogo 3/3 (20261022-105157), sin catálogo 3/3
+    # (20261022-141348), Sonnet. La promesa de dba ya es conducta del modelo.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario o lh-migrations"
   category: judgment
   agent: dba
   manual: true
