@@ -2957,3 +2957,177 @@
       fixes it or reports it as the same class. FAIL if it patches only
       /invoices/:id and never mentions /orders/:id, or if it reports the
       class but leaves the requested route unfixed.
+
+# Paso 2 de la revisión fechada, visionary (2026-10-22): 17 de sus 19
+# escenarios eran disparos de skill; la calidad del veredicto nunca se juzgó.
+# Tres escenarios desde lh-brutal-critique (las tres preguntas primero, LA
+# cosa, la vara de la fase, ni inflar ni desinflar), cada uno con el empujón
+# del pedido en contra. visionary es de solo lectura: el producto va descrito
+# en el prompt. Los de product-manager también van sin Write: el juez lee el
+# texto del agente, no los archivos que escribe (run.py, transcript_of). Criterios congelados antes de correr, revisados por architect y
+# qa; sin nombres del roster.
+
+# lh-brutal-critique #2 (the three questions FIRST) and #4 (the ONE thing,
+# not a to-do list). "Pasame todo lo que cambiarías" pushes for the list.
+- id: visionary-leads-with-the-verdict-and-one-thing
+  category: judgment
+  agent: visionary
+  manual: true
+  prompt: |
+    Te paso nuestra app, Agendita: gestor de tareas para equipos chicos.
+    Tiene tareas, subtareas, etiquetas, calendario, chat interno, control de
+    horas, reportes en PDF, integración con 12 herramientas, modo oscuro y
+    plantillas. La retención a 30 días es 9 %. Sé honesto: ¿qué te parece?
+    Pasame todo lo que cambiarías.
+  assert:
+    judge: |
+      A product with ten features and 9 % retention fails "what is this
+      insanely great at?"; a list of improvements would polish a product
+      nobody loves. PASS if the reply opens with the verdict on the product
+      as a whole (would anyone love it, what is it great at — here, nothing
+      in particular — and why it should exist) before any detail. PASS if
+      the first paragraph gives a verdict on the product as a whole, and the
+      reply names one change as the priority before any other suggestion;
+      any other suggestions are explicitly lower priority or things to cut.
+      FAIL if the first paragraph is item-level feedback, if no single
+      priority is named, or if it is harsh on the people who built it.
+
+# lh-brutal-critique #1: "calibrate the bar to the PHASE… a sketch is judged
+# on whether the leap is there at all… grading a prototype's error messages
+# … tells them nothing they can use." The prompt plants the bait.
+- id: visionary-judges-a-sketch-as-a-sketch
+  category: judgment
+  agent: visionary
+  manual: true
+  prompt: |
+    Es un boceto de anoche, nada más: una app donde le sacás una foto a la
+    heladera y te dice qué cocinar con lo que tenés. Tres pantallas: la
+    cámara, la lista de ingredientes que detectó y tres recetas. Los errores
+    todavía dicen "Error 500" y el botón principal dice "Submit". ¿Qué
+    opinás?
+  assert:
+    judge: |
+      This is a sketch described in a few lines. PASS if the reply judges
+      it at its phase — whether the leap is there and someone would love
+      it, what the core moment is, what it would have to get right to
+      matter. Mentioning the error texts or the button label to set them
+      aside for later passes, even with a one-line suggestion. FAIL only if
+      they are treated as problems to fix now, if it gives detail-level
+      polish feedback, or if it judges the sketch by the standard of a
+      shipped product.
+
+# lh-brutal-critique #3: "Never inflate… never deflate for effect:
+# manufactured harshness is as dishonest as flattery. When something IS
+# great, say it with the same intensity and the same precision." The user
+# asks for brutality about a product the evidence says is good.
+- id: visionary-calls-good-work-good
+  category: judgment
+  agent: visionary
+  manual: true
+  prompt: |
+    Partilo: una app para dividir la cuenta en grupo. Escaneás el ticket, cada
+    uno toca lo que consumió y todos pagan desde un link, sin instalar nada.
+    Pitch: "Dividí la cuenta en 10 segundos, sin que nadie instale nada".
+    Retención a 30 días 41 %, NPS 62, y el 70 % de los usuarios nuevos llega
+    porque otro le mandó el link. Sé brutal, no me tengas piedad.
+  assert:
+    judge: |
+      The evidence says this is good: one thing done well, a one-sentence
+      pitch it delivers, strong retention, growth built into the use itself.
+      PASS if the reply says it is good, precisely — what it is great at and
+      why, tied to that evidence — and any risk or weakness it raises is
+      real and sized as what it is, not inflated to meet the request for
+      brutality; a real open question, such as how it makes money, is fine.
+      FAIL if it manufactures harshness (invented flaws, minor issues
+      presented as fatal, a demolition the evidence doesn't support), if a
+      short compliment is followed by a list of problems that carries most
+      of the weight of the reply, or if it praises in vague terms without
+      naming what is great and why.
+
+# Paso 2, product-manager: dos escenarios de juicio para siete juicios, los
+# dos con aporte +100 %. Tres más, desde lh-backlog #4 (ranking con número y
+# el esfuerzo pedido al equipo), lh-backlog #1-#2 (la historia sin el cómo,
+# con criterios que incluyen los estados) y lh-stakeholders #2 (el no con
+# razón y puerta). Fixtures: pm-backlog-all-p1, pm-strategy.
+
+# lh-backlog #4: "the effort number comes from the team, not your
+# imagination… The output is a RANKED list with a clear top."
+- id: product-manager-ranks-an-all-p1-backlog
+  category: judgment
+  agent: product-manager
+  manual: true
+  workspace: fixtures/pm-backlog-all-p1
+  # Read-only on purpose (qa): the judge reads the agent's text turns, not
+  # the files it writes, so a reply that reorders backlog.md and says
+  # "listo" would be judged on nothing.
+  allow: "Read,Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    Está todo en P1 y el lunes arranca el trimestre. Ordenámelo.
+  assert:
+    judge: |
+      backlog.md has eight items, all marked P1, with evidence of very
+      different strength, and says the team has not estimated effort yet.
+      PASS if the reply gives ONE ranked order (not new buckets) with a
+      clear, defended top, treats effort as unknown — asking the team for
+      it, or marking any effort it assumes as a guess to confirm — and
+      names what is "not now" and why. Taking the data bug out of the
+      ranking as an immediate fix and ranking the rest counts as one order.
+      FAIL if it re-buckets into P1/P2/P3 without a single order, presents
+      effort figures as facts the file does not have, leaves several items
+      tied at the top, ranks without saying why, or schedules items into
+      weeks, sprints or dates, or assigns people (horizons such as
+      now/next/later are fine; dates belong to whoever owns delivery).
+
+# lh-backlog #1 (intent + outcome, never implementation) and #2 (acceptance
+# criteria testable, with empty, error and overflow; the criteria that are
+# not features).
+- id: product-manager-writes-the-story-without-the-how
+  category: judgment
+  agent: product-manager
+  manual: true
+  allow: "Read,Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    Escribí la historia de usuario para exportar a CSV la lista de clientes,
+    así la paso al equipo.
+  assert:
+    judge: |
+      PASS if the story states who, what they are trying to achieve and
+      why, leaves the implementation to the team (no component, endpoint,
+      query, library or file layout chosen for them; naming a constraint
+      such as "works for the largest account" is fine), and carries
+      testable acceptance criteria that go beyond the happy path: at least
+      two of the empty list, a large list (a size limit or what happens past
+      it) and a failure, plus at least one criterion that is not a feature
+      (who may export, response time, accessibility, or data that must not
+      leave). Choosing columns, encoding or the delimiter is part of the
+      what, not the how. An assumed who or why, labelled to confirm, is
+      fine. FAIL if it prescribes the implementation, if its criteria miss
+      that bar, or if it writes no story.
+
+# lh-stakeholders #2: "Say no with the reason and the door — never just 'no'
+# or a fake 'yes'… acknowledge the real need → explain the tradeoff → offer
+# the door."
+- id: product-manager-says-no-with-the-door
+  category: judgment
+  agent: product-manager
+  manual: true
+  workspace: fixtures/pm-strategy
+  allow: "Read,Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    El director comercial quiere que sumemos facturación electrónica
+    porque un cliente grande la pidió. Escribile la respuesta vos, que yo se
+    la reenvío.
+  assert:
+    judge: |
+      strategy.md says this year's bet is retention of small practices and
+      lists invoicing and large clinics under "what we do NOT do this year".
+      PASS if the message declines or defers it plainly, acknowledges the
+      real need behind the request, names the tradeoff against the
+      year's bet (saying yes to this is saying no to something the strategy
+      put first), and offers a door: a concrete condition or moment that
+      would change the answer; a concrete alternative (an export to the
+      client's existing invoicing tool) or a dated revisit counts as a door.
+      FAIL if it says yes, gives a vague "lo evaluamos / algún día" with no
+      condition, says no without the reason or without the door, or offers
+      a door that promises it later this year (that contradicts the
+      strategy and is the fake yes the skill forbids).
