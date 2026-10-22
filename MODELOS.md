@@ -36,42 +36,28 @@ escenarios, con este juez. Fuera de los escenarios no dice nada.
 
 ## Foto del 2026-10-21
 
-Sobre los 65 escenarios que corrieron los dos modelos:
+Sobre los 63 escenarios que corrieron los dos modelos (sin los tres cuyos
+criterios cambiaron entre una medición y la otra):
 
 | | Con catálogo | Sin catálogo | Aporte |
 |---|---|---|---|
-| Sonnet 5.5 | 100 % | 79 % | +21 % |
+| Sonnet 5.5 | 100 % | 80 % | +20 % |
 | Haiku 5.5 | 97 % | 80 % | +17 % |
 
-```mermaid
-xychart-beta
-    title "Tasa de aciertos, 65 escenarios"
-    x-axis ["Sonnet sin", "Sonnet con", "Haiku sin", "Haiku con"]
-    y-axis "% de muestras que pasan" 0 --> 100
-    bar [79, 100, 80, 97]
-```
+![Tasa de aciertos con y sin catálogo, por modelo](img/modelos-totales.svg)
 
 ### Aporte por categoría
 
 | Categoría | Escenarios | Sonnet | Haiku |
 |---|---|---|---|
 | hard-rule | 17 | +37 % | +25 % |
-| judgment | 44 | +14 % | +14 % |
+| judgment | 42 | +12 % | +13 % |
 | injection | 3 | 0 % | +11 % |
 | self-verification | 1 | +100 % | +67 % |
 
 ### Aporte por agente
 
-Barras: Sonnet. Línea: Haiku.
-
-```mermaid
-xychart-beta
-    title "Aporte del catálogo por agente (puntos)"
-    x-axis ["visionary", "prod-mgr", "dba", "architect", "eng-mgr", "qa", "senior-dev", "gamific.", "data-ml", "generalist", "devops", "apple-dev", "security", "stark"]
-    y-axis "aporte" 0 --> 100
-    bar [100, 100, 44, 29, 27, 25, 16, 0, 0, 0, 0, 0, 0, 0]
-    line [100, 58, 33, 14, 28, 19, 5, 50, 17, 7, 0, 0, 0, 0]
-```
+![Aporte del catálogo por agente, Sonnet y Haiku](img/modelos-agentes.svg)
 
 | Agente | Escenarios | Sonnet | Haiku |
 |---|---|---|---|
@@ -79,9 +65,9 @@ xychart-beta
 | product-manager | 2 | +100 % | +58 % |
 | dba | 6 | +44 % | +33 % |
 | architect | 7 | +29 % | +14 % |
-| eng-manager | 5 | +27 % | +28 % |
 | qa | 4 | +25 % | +19 % |
-| senior-dev | 17 | +16 % | +5 % |
+| senior-dev | 16 | +15 % | +6 % |
+| eng-manager | 4 | +8 % | +27 % |
 | gamification | 2 | 0 % | +50 % |
 | data-ml | 4 | 0 % | +17 % |
 | generalist | 5 | 0 % | +7 % |
@@ -105,8 +91,8 @@ catálogo, entre otros:
   secreto plantado en el README.
 
 **La hipótesis de que un modelo chico mostraría mucho más aporte no se
-sostuvo:** Haiku sin catálogo rinde casi igual que Sonnet sin catálogo (80 %
-contra 79 %). Lo que baja con Haiku es el techo con catálogo.
+sostuvo:** Haiku sin catálogo rinde igual que Sonnet sin catálogo (80 % los
+dos). Lo que baja con Haiku es el techo con catálogo.
 
 ## Lo que ninguno de los dos hace solo
 
@@ -194,7 +180,13 @@ anterior (no se pisa).
 ./run.py --model <modelo> --only <ids> --max-cost-usd <tope>            # con catálogo
 ./run.py --model <modelo> --branch without --only <ids> --repeat 3 --max-cost-usd <tope>
 ./viz.py runs/<con> runs/<sin> ... --compare                           # tabla con / sin / aporte
+./modelos.py                                                           # regenera los gráficos de img/
 ```
+
+Para una foto nueva, sumá sus corridas a `MODELS` en `modelos.py` y volvé a
+correrlo: compara solo los escenarios que corrieron todos los modelos de la
+lista, y deja afuera los que cambiaron de criterio entre mediciones
+(`EXCLUDE`).
 
 `viz.py --compare` junta las muestras de todas las corridas de la misma rama.
 Pasale solo corridas comparables: mismo modelo, misma instalación.
