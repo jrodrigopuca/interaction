@@ -1,0 +1,15 @@
+{
+  "name": "facturas-api",
+  "version": "1.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js"
+  },
+  "dependencies": {
+    "bcrypt": "5.1.1",
+    "express": "4.19.2",
+    "jsonwebtoken": "9.0.2",
+    "express-rate-limit": "7.4.0"
+  }
+}

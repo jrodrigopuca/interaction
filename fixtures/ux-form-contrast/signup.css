@@ -1,0 +1,11 @@
+body { font-family: Georgia, serif; background: #ffffff; color: #222222; }
+.card { max-width: 420px; margin: 64px auto; padding: 28px; border-radius: 3px;
+        box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+h1 { font-size: 40px; margin: 0 0 20px; }
+label { display: block; margin-top: 18px; font-weight: 600; color: #222222; }
+input { width: 100%; padding: 10px; border: 1px solid #cccccc; border-radius: 6px; }
+input::placeholder { color: #9a9a9a; }
+.help { margin: 6px 0 0; font-size: 13px; color: #9a9a9a; }
+button { margin-top: 24px; width: 100%; padding: 12px; border: 0; border-radius: 12px;
+         background: #3b5bdb; color: #ffffff; font-size: 16px; }
+.secondary { display: block; margin-top: 12px; text-align: center; color: #3b5bdb; }
