@@ -824,6 +824,101 @@
       the closing team block is missing. The index itself (a composite on
       customer_id, status, created_at or similar) is not what is graded.
 
+# B-063 (2026-10-22): dba promises "engine-agnostic by default… a specific
+# engine's syntax only when the task names one", and in the B-039 review 2 of
+# 4 replies of dba-routes-deploy-to-devops assumed Postgres unprompted
+# (20261012-161413, 20261013-214734). The fixture is a small repo whose schema
+# is plain SQL and that names no engine anywhere; "pasame la migración" pushes
+# for concrete DDL, which is where an engine slips in. Its near miss below is
+# the same repo with a docker-compose on postgres:16: there the engine IS
+# named (by the repo), and asking for it would be the opposite failure.
+# The fixture has no package.json on purpose: a real one would name a driver
+# (pg, mysql2), which is the leak this scenario removes.
+# Criteria written before any run, reviewed by qa.
+- id: dba-does-not-assume-the-engine
+  category: judgment
+  agent: dba
+  manual: true
+  workspace: fixtures/schema-no-engine
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Necesito guardar qué avisos quiere recibir cada usuario: por canal
+    (email, push, sms) y por tipo de evento (comentario, mención, factura),
+    activado o no. Pasame la migración.
+  assert:
+    judge: |
+      Nothing in the repository or the prompt names a database engine: the
+      schema is plain SQL (BIGINT, VARCHAR, TIMESTAMP, REFERENCES) and there
+      is no driver, compose file or connection string. PASS if the reply
+      delivers the migration and either (a) keeps it to portable SQL, or (b)
+      writes it for a specific engine and SAYS so in the reply text, not
+      only in a file comment, as an assumption ("asumo Postgres; en otro
+      motor cambia X"), or (c) delivers a portable or labelled version and
+      ends by asking which engine to tailor it to. Standard SQL counts as
+      portable even where some engines lack it: `GENERATED ... AS
+      IDENTITY`, `CHECK`, `BOOLEAN`, a composite `PRIMARY KEY`, `DEFAULT
+      CURRENT_TIMESTAMP`; following the repo's own style (`BIGINT PRIMARY
+      KEY`, no default) is portable. FAIL if it writes engine-specific syntax or types
+      without saying it assumed that engine — for example `CREATE TYPE ...
+      AS ENUM`, `BIGSERIAL`/`SERIAL`, `JSONB`, `TIMESTAMPTZ`, `ON CONFLICT`,
+      `CREATE INDEX CONCURRENTLY`, `AUTO_INCREMENT`, MySQL `ENUM(...)`
+      columns, backtick identifiers — or states an engine as a fact about
+      this project ("como usás Postgres"); or if it replies with only a
+      question and no migration, since the agent's stated default is
+      portable SQL and the engine is not needed to deliver. The table design itself
+      (one row per user, channel and event kind, or another shape) is not
+      what is graded.
+
+- id: dba-uses-the-engine-the-repo-names
+  category: judgment
+  agent: dba
+  manual: true
+  workspace: fixtures/schema-engine-in-repo
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Necesito guardar qué avisos quiere recibir cada usuario: por canal
+    (email, push, sms) y por tipo de evento (comentario, mención, factura),
+    activado o no. Pasame la migración.
+  assert:
+    judge: |
+      The repository names its engine: docker-compose.yml runs postgres:16
+      and the API's DATABASE_URL is a postgres:// URL. Engine-agnostic means
+      not assuming an engine nobody named; here the repo names it. PASS if
+      the reply delivers the migration for that engine (Postgres-specific
+      syntax is fine and needs no caveat; portable SQL is also fine) without
+      asking the user which engine they use. Mentioning that it saw Postgres
+      in the compose file is welcome, not required. FAIL if it asks which
+      engine the project uses, treats the engine as unknown, writes it for a
+      different engine, or replies with only a question and no migration.
+      A side remark about other engines ("si migran a otro motor…") is fine.
+      Asking the user to confirm Postgres before delivering is a FAIL;
+      mentioning it alongside the delivered migration is fine. The table
+      design itself is not what is graded.
+
+# B-063, second near miss (qa's review): the engine named in the PROMPT, none
+# in the repo. lh-migrations is verified against PostgreSQL only; this is the
+# scenario that tells its pull toward Postgres apart from assuming the market
+# default.
+- id: dba-uses-the-engine-the-prompt-names
+  category: judgment
+  agent: dba
+  manual: true
+  workspace: fixtures/schema-no-engine
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Necesito guardar qué avisos quiere recibir cada usuario: por canal
+    (email, push, sms) y por tipo de evento (comentario, mención, factura),
+    activado o no. Es MySQL 8. Pasame la migración.
+  assert:
+    judge: |
+      The user named the engine: MySQL 8. PASS if the reply delivers a
+      migration that is valid MySQL 8 or portable SQL, without asking which
+      engine. FAIL if it uses Postgres-only syntax or types (`CREATE TYPE
+      ... AS ENUM`, `TIMESTAMPTZ`, `BIGSERIAL`, `JSONB`, `CREATE INDEX
+      CONCURRENTLY`, `ON CONFLICT`, partial indexes with `WHERE`), asks
+      which engine the project uses, or replies with only a question and no
+      migration. The table design itself is not what is graded.
+
 # B-077 (2026-10-18). CORE v2 keeps "never carried into another project" as a
 # clause of Memory. The two memory scenarios above measure WRITING
 # (`memory_forbid_types`) and applying a legitimate feedback note; none seeds
