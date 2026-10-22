@@ -75,6 +75,25 @@ criterios cambiaron entre una medición y la otra):
 
 Un escenario por agente, o dos, dicen poco: ver la cautela 2.
 
+### Después de la foto: ux-ui y security (2026-10-22, solo Sonnet)
+
+Los dos agentes de la tabla de arriba sin dato (ux-ui) o con 0 % sobre uno a
+cuatro escenarios (security) recibieron cuatro escenarios de juicio cada uno
+(paso 2 de la revisión fechada). Con catálogo `20261022-145125`, sin catálogo
+`20261022-145952`, ×3:
+
+| Agente | Escenarios | Con | Sin | Aporte |
+|---|---|---|---|---|
+| ux-ui | 4 | 92 % | 67 % | +25 % |
+| security | 4 | 92 % | 42 % | +50 % |
+
+Lo que aporta: el estado de desborde en un mockup "rápido", el arreglo de
+clase en vez del `if` en el handler, y el PoC mínimo, que sin catálogo no
+aparece porque el modelo **se niega** a armarlo. Los tres escenarios en 0 y el
+del botón principal quedan como `model-floor`. No entra en los gráficos: la
+foto compara dos modelos sobre los mismos escenarios, y estos no corrieron en
+Haiku.
+
 ## Lo que el modelo ya hace solo
 
 Los dos modelos, sin ningún agente, ya hacen casi todo lo que se puede llamar

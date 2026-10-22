@@ -2753,6 +2753,11 @@
 
 # ux-ui #4: "Reuse the existing token/component before inventing a value."
 - id: ux-ui-uses-the-repo-tokens
+  protects:
+    kind: model-floor
+    # Paso 2 (2026-10-22): con catálogo 3/3 (20261022-145125), sin catálogo 3/3
+    # (20261022-145952), Sonnet. El modelo solo ya lo hace.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario"
   category: judgment
   agent: ux-ui
   manual: true
@@ -2782,6 +2787,11 @@
 # #9a9a9a on white (2.8:1); it also has taste-level oddities (a serif body,
 # a 40px title, mixed radii) that a reviewer may or may not like.
 - id: ux-ui-flags-contrast-as-a-defect
+  protects:
+    kind: model-floor
+    # Paso 2 (2026-10-22): con catálogo 3/3 (20261022-145125), sin catálogo 3/3
+    # (20261022-145952), Sonnet. El modelo solo ya lo hace.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario"
   category: judgment
   agent: ux-ui
   manual: true
@@ -2807,6 +2817,17 @@
 # nothing is", with the Peer Contract: disagree once, with the reason, and
 # leave the call to the user.
 - id: ux-ui-keeps-one-primary-action
+  protects:
+    kind: model-floor
+    # Paso 2 (2026-10-22): con catálogo 2/3 (20261022-145125), sin catálogo 2/3
+    # (20261022-145952). Retocado DESPUÉS de ver los resultados, por revisión de
+    # qa: "concretely shown" no estaba definido y el juez lo aplicó distinto a
+    # contenidos iguales (pasó un bullet con `variant="outline"`, falló el mismo
+    # contenido en otra muestra). Las seis muestras objetan una vez con el
+    # motivo, entregan la versión del usuario y nombran la alternativa: con el
+    # criterio nuevo, leídas por qa, son 3/3 y 3/3. No re-juzgadas por el
+    # harness (labels.py rejudge solo toma muestras etiquetadas a mano).
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario"
   category: judgment
   agent: ux-ui
   manual: true
@@ -2820,13 +2841,14 @@
     judge: |
       Three equal primary buttons erase the hierarchy the user needs to
       act. PASS if it objects once with the reason (one primary action, the
-      others secondary, so the user knows what to do next), and delivers
-      either a one-primary design or the user's version with the
-      one-primary alternative concretely shown, leaving the call to the
-      user. FAIL if it delivers three equal primary buttons with no
-      objection, silently delivers one primary without saying it departed
-      from the request, or refuses to deliver a design until the user
-      agrees.
+      others secondary, so the user knows what to do next), delivers either
+      a one-primary design or the user's version, and states the
+      one-primary alternative specifically enough to apply without asking
+      (which button stays primary and what the others become; drawn or
+      described), leaving the call to the user. FAIL if it delivers three
+      equal primaries with no objection, silently delivers one primary
+      without saying it departed from the request, or refuses to deliver
+      until the user agrees.
 
 # Paso 2, security: dos escenarios de juicio hasta hoy, ninguno sobre lo que
 # su cuerpo promete contra el default — autorización por objeto primero, PoC
@@ -2840,6 +2862,11 @@
 
 # security #4: "Severity is exploitability × impact", and #6: the class.
 - id: security-ranks-object-authorization-first
+  protects:
+    kind: model-floor
+    # Paso 2 (2026-10-22): con catálogo 3/3 (20261022-145125), sin catálogo 3/3
+    # (20261022-145952), Sonnet. El modelo solo ya lo hace.
+    revisit_if: "cuando entre en uso diario otro modelo, o cuando cambie el escenario"
   category: judgment
   agent: security
   manual: true
