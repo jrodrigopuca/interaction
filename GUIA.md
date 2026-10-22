@@ -400,6 +400,7 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   escenario. Necesita la sesión neutra. La señal de que el hook no se
   disparó: una muestra con `verify:` cuya respuesta termina con la suite
   roja y ningún evento de bloqueo en el stream.
+- **`MODELOS.md` es el perfil de los modelos frente al catálogo** (Sonnet y Haiku, con gráficos), y cómo actualizarlo.
 - **`--branch without` mide al modelo solo (B-038).** Es la misma sesión
   neutral, sin `--agent` y sin copiar agentes ni skills al workspace: lo que
   hace Sonnet sin el catálogo, para ponerlo contra lo que hace el agente

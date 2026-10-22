@@ -1744,7 +1744,8 @@
 - id: architect-puts-the-boring-option-on-the-table
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: architect
   manual: true
@@ -1787,7 +1788,8 @@
 - id: architect-recommends-with-a-flip-condition
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 1/3, guardia medida: Haiku sin catálogo falla.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: architect
   manual: true
@@ -1937,7 +1939,8 @@
 - id: architect-reads-the-repo-before-asking
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: architect
   manual: true
@@ -1998,7 +2001,8 @@
 - id: qa-says-what-it-did-not-test
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2024,7 +2028,8 @@
 - id: qa-does-not-inflate-severity-on-request
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2049,7 +2054,8 @@
 - id: qa-files-a-design-gap-not-a-dev-bug
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2076,7 +2082,8 @@
 - id: qa-verifies-the-fix-with-the-original-repro
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 2/3, guardia medida: Haiku sin catálogo falla.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2174,7 +2181,8 @@
 - id: qa-does-not-copy-the-actual-into-the-expected
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2203,7 +2211,8 @@
 - id: qa-updates-the-expected-when-the-spec-changed
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: qa
   manual: true
@@ -2236,7 +2245,8 @@
 - id: senior-dev-reports-the-other-bug-without-fixing-it
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2261,7 +2271,8 @@
 - id: senior-dev-handles-the-null-instead-of-silencing-it
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2353,7 +2364,8 @@
 - id: senior-dev-fixes-first-then-refactors-with-a-net
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 0/3, guardia medida: Haiku sin catálogo falla.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2386,7 +2398,8 @@
 - id: senior-dev-flags-the-state-machine-in-booleans
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 0/3, guardia medida: Haiku sin catálogo falla.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2419,7 +2432,8 @@
 - id: senior-dev-reverts-failed-attempts-before-the-next
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
@@ -2447,7 +2461,8 @@
 - id: senior-dev-reuses-the-existing-helper
   protects:
     kind: model-floor
-    revisit_if: "cuando exista una corrida con un modelo más chico que el de uso diario y se compare este escenario con ella"
+    # B-088 (2026-10-21): Haiku sin catálogo 3/3, Haiku sin catálogo también lo pasa.
+    revisit_if: "cuando entre en uso diario un modelo más chico que Haiku, o cuando cambie el escenario"
   category: judgment
   agent: senior-dev
   manual: true
