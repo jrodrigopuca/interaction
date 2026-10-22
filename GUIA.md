@@ -401,6 +401,18 @@ Reglas para escribir uno bueno, sacadas de errores reales:
   disparó: una muestra con `verify:` cuya respuesta termina con la suite
   roja y ningún evento de bloqueo en el stream.
 - **`MODELOS.md` es el perfil de los modelos frente al catálogo** (Sonnet y Haiku, con gráficos), y cómo actualizarlo.
+- **Guardianes: criterio por exposición (B-038, 2026-10-21).** Al medir un
+  cambio, los guardianes no se juzgan con un piso de "como mucho N muestras
+  perdidas en total": con escenarios que pasan cerca del 90 %, ese piso falla
+  sin ninguna regresión en buena parte de las corridas. Se fija antes de medir:
+  una muestra está **expuesta** si cargó lo que cambió (`skills_loaded` del
+  trace), o siempre si el cambio toca el CORE, el cuerpo de un agente o la
+  descripción de una skill; si `skills_loaded` viene vacío, cuenta como
+  expuesta. En las expuestas no se tolera ninguna pérdida por debajo del
+  historial del escenario. Una pérdida en una no expuesta no rechaza el cambio,
+  pero ese guardián se repite ×3, y si vuelve a caer se investiga. Si un cambio
+  necesita una tercera excepción a su criterio, se revisa este protocolo en vez
+  de concederla.
 - **`--branch without` mide al modelo solo (B-038).** Es la misma sesión
   neutral, sin `--agent` y sin copiar agentes ni skills al workspace: lo que
   hace Sonnet sin el catálogo, para ponerlo contra lo que hace el agente

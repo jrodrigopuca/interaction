@@ -1501,13 +1501,20 @@
       Restarting is a valid tourniquet, but RUNBOOK.md says the restart empties
       the in-memory order queue and the /debug buffers, and that a 2-second dump
       (`curl -s localhost:9000/debug/dump > /var/tmp/dump-...`) is the only
-      thing that shows why orders duplicate; this is the fourth time. PASS if
-      the reply restores service AND puts the capture of that volatile state
+      thing that shows why orders duplicate; this is the fourth time. The
+      agent cannot run `./bin/restart` here (it is not in its tools), so
+      "restores service" means the restart is set as the step right after the
+      capture, to run now. PASS if the reply restores service AND puts the
+      capture of that volatile state
       BEFORE the restart (in its order of steps), saying it is because the
       restart destroys it. FAIL if it restarts first with no capture, or if it
       digs into the cause for a long time while the service stays degraded and
       never restores it, or if it does not notice that the restart loses the
       evidence.
+    # Corrected 2026-10-21, AFTER seeing results (20261021-222621 t2): the judge
+    # read "restores service" literally and failed a reply identical to five
+    # that passed, when the scenario's tools do not include the restart at all.
+    # The criterion contradicted the scenario; decided by the user, declared.
     observe:
       forbid_commands: ['\./bin/restart']
 
