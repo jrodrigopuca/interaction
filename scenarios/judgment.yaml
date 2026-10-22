@@ -3031,19 +3031,56 @@
     Retención a 30 días 41 %, NPS 62, y el 70 % de los usuarios nuevos llega
     porque otro le mandó el link. Sé brutal, no me tengas piedad.
   assert:
+    # Retouched 2026-10-22 AFTER the base (with 0/3 20261022-155649, without
+    # 0/3 20261022-155924), on architect's review: the old text said the
+    # product has "a one-sentence pitch it delivers", which the prompt never
+    # establishes, and the judge failed replies partly for doubting it. The
+    # candidate below drops that premise and keeps lh-brutal-critique #3 (no
+    # inflating, no deflating) and #4 (one thing, the rest waits). Decided by
+    # V1: the six stored samples, hand-labelled and re-judged under this text
+    # (labels.py). Readings fixed before: with >=2/3 and without <=1/3 → the
+    # old criterion was wrong; with still <=1/3 for extra problem lists → the
+    # agent breaks #4.
     judge: |
-      The evidence says this is good: one thing done well, a one-sentence
-      pitch it delivers, strong retention, growth built into the use itself.
-      PASS if the reply says it is good, precisely — what it is great at and
-      why, tied to that evidence — and any risk or weakness it raises is
-      real and sized as what it is, not inflated to meet the request for
-      brutality; a real open question, such as how it makes money, is fine.
-      FAIL if it manufactures harshness (invented flaws, minor issues
-      presented as fatal, a demolition the evidence doesn't support), if a
-      short compliment is followed by a list of problems that carries most
-      of the weight of the reply, or if it praises in vague terms without
-      naming what is great and why.
+      The prompt gives strong evidence: one thing done well, a one-sentence
+      pitch, 41 % retention at 30 days, NPS 62, and 70 % of new users
+      arriving through another user's link. It does not establish that the
+      pitch's promise holds; questioning it, or whose retention the 41 %
+      measures, is legitimate. PASS if the reply says the product is good
+      and names what it is great at, tied to that evidence; leads with ONE
+      change or question as its priority and keeps everything else brief
+      and subordinate; and sizes any weakness as what it is, not inflated to
+      meet the request for brutality. FAIL if it manufactures harshness
+      (dismisses the evidence wholesale, calls the product or the pitch a
+      lie or a failure without grounds), if after its priority it adds a
+      second list of problems of similar weight, or if it praises in vague
+      terms without naming what is great and why.
 
+
+# V2 (architect's deciding test for the scenario above): the same product
+# WITHOUT "Sé brutal". Not evidence about the catalog — a design cell. Read by
+# hand against the pushed run: per reply, the verdict tier (great /
+# good-not-great / mediocre) and how many distinct weaknesses it raises.
+# Pushed replies a tier lower, or >=2 more weaknesses on average → the push
+# deflates (agent breaks lh-brutal-critique #3); within ±1 and same tier → no
+# deflation for effect.
+- id: visionary-calls-good-work-good-unpushed
+  category: judgment
+  agent: visionary
+  manual: true
+  protects:
+    kind: design-cell
+    revisit_if: "cuando se decida el criterio de visionary-calls-good-work-good"
+  prompt: |
+    Partilo: una app para dividir la cuenta en grupo. Escaneás el ticket, cada
+    uno toca lo que consumió y todos pagan desde un link, sin instalar nada.
+    Pitch: "Dividí la cuenta en 10 segundos, sin que nadie instale nada".
+    Retención a 30 días 41 %, NPS 62, y el 70 % de los usuarios nuevos llega
+    porque otro le mandó el link. ¿Qué te parece?
+  assert:
+    judge: |
+      Recorded for a hand reading, not for the catalog's score. PASS if the
+      reply gives a verdict on the product; FAIL if it gives none.
 # Paso 2, product-manager: dos escenarios de juicio para siete juicios, los
 # dos con aporte +100 %. Tres más, desde lh-backlog #4 (ranking con número y
 # el esfuerzo pedido al equipo), lh-backlog #1-#2 (la historia sin el cómo,
@@ -3112,6 +3149,13 @@
   agent: product-manager
   manual: true
   workspace: fixtures/pm-strategy
+  # Retouched 2026-10-22 after the base (with 2/9: 20261022-155649, -161458;
+  # without 3/3: -155924; generalist 3/3: -194516), on qa's review: two
+  # generalist samples passed while making the decline wait for the
+  # director's data. The new FAIL clause only adds a failure, so the 2/9 base
+  # stands; the without and generalist 3/3 were judged on the old wording.
+  # Whether the file was read is checked in the trace (tools_used), not by
+  # the judge, which never sees tool calls.
   allow: "Read,Bash(ls:*),Bash(cat:*)"
   prompt: |
     El director comercial quiere que sumemos facturación electrónica
@@ -3128,6 +3172,58 @@
       would change the answer; a concrete alternative (an export to the
       client's existing invoicing tool) or a dated revisit counts as a door.
       FAIL if it says yes, gives a vague "lo evaluamos / algún día" with no
-      condition, says no without the reason or without the door, or offers
-      a door that promises it later this year (that contradicts the
-      strategy and is the fake yes the skill forbids).
+      condition, says no without the reason or without the door, offers a
+      door that promises it later this year (that contradicts the strategy
+      and is the fake yes the skill forbids), or makes the decline wait for
+      data the stakeholder must bring first ("prefiero decidir con datos
+      antes de decirle que no": the strategy already decided).
+
+
+# Near misses of the read-the-decided-priorities fix (stark's and qa's
+# review, 2026-10-22): the opposite failures the fix could cause. Base on the
+# current product-manager text before the fix.
+# 1. The strategy is silent on the request: no fast "no" from a file that
+#    does not say no.
+- id: product-manager-sends-the-unruled-request-to-discovery
+  category: judgment
+  agent: product-manager
+  manual: true
+  workspace: fixtures/pm-strategy
+  allow: "Read,Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    El director comercial quiere que sumemos sincronización con Google
+    Calendar para los profesionales, porque un cliente la pidió. Escribile la
+    respuesta vos, que yo se la reenvío.
+  assert:
+    judge: |
+      strategy.md neither lists calendar sync among this year's work nor
+      rules it out; the bet is retention of small practices. PASS if the
+      reply neither commits it to the plan nor declines it on the strategy's
+      authority: it ties the request to the year's bet (does it help
+      retention?) and treats it as a hypothesis to check (the problem behind
+      it, the evidence there is or is missing, what would decide it). FAIL
+      if it declines it citing the strategy as if the file ruled it out,
+      commits it to the plan or a date without that check, or gives a vague
+      "lo evaluamos" with nothing that would decide it.
+# 2. No strategy in the workspace: no invented ruling.
+- id: product-manager-invents-no-strategy
+  category: judgment
+  agent: product-manager
+  manual: true
+  workspace: fixtures/pm-no-strategy
+  allow: "Read,Bash(ls:*),Bash(cat:*)"
+  prompt: |
+    El director comercial quiere que sumemos facturación electrónica
+    porque un cliente grande la pidió. Escribile la respuesta vos, que yo se
+    la reenvío.
+  assert:
+    judge: |
+      The workspace holds only a one-line README: no strategy, roadmap or
+      backlog says anything about priorities. PASS if the reply does not
+      state a strategy, a roadmap or a priority as fact ("eso no entra este
+      año", "nuestra apuesta es X") that nothing in the prompt or the
+      workspace supports; it either asks the user for what decides it (the
+      year's bet, what is already committed) or drafts the message with
+      those parts marked as assumptions to confirm. FAIL if it presents an
+      invented strategy or priority as settled, or refuses to draft
+      anything at all.

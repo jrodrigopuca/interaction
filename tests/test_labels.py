@@ -54,6 +54,19 @@ class Samples(unittest.TestCase):
         self.assertTrue(got[0]["old_version"])
 
 
+    def test_every_sample_of_a_repeat_run_with_its_own_key(self):
+        trials = [{"judge": {"verdict": True}, "graded": "lead"},
+                  {"judge": {"verdict": False, "why": "no"}, "graded": "second"},
+                  {"judge": {"verdict": None}, "graded": "unjudged"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            write_run(Path(tmp), "20261001-000000", [
+                {"id": "a", "assert": {"judge": "PASS if X"}, "judge": {"verdict": True},
+                 "events": EVENTS, "reply": "done", "trials": trials}])
+            got = labels.judged_samples(Path(tmp))
+        self.assertEqual([s["key"] for s in got], ["20261001-000000/a", "20261001-000000/a#2"])
+        self.assertEqual((got[1]["graded"], got[1]["_verdict"]), ("second", "FAIL"))
+
+
 class Pick(unittest.TestCase):
 
     def pool(self):

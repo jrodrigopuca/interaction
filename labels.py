@@ -85,7 +85,7 @@ def judged_samples(runs_dir: Path) -> list:
             if not criterion or not rec.get("events") or verdict is None:
                 continue
             graded = run.transcript_of(rec["events"], rec.get("reply") or "") or rec.get("reply", "")
-            out.append({
+            lead = {
                 "key": key_of(trace.parent.name, rec["id"]),
                 "run": trace.parent.name, "id": rec["id"],
                 "category": rec.get("category", ""), "agent": rec.get("agent", ""),
@@ -94,7 +94,18 @@ def judged_samples(runs_dir: Path) -> list:
                 "old_version": bool(meta.get("experiment")),
                 "_verdict": "PASS" if verdict else "FAIL",
                 "_why": (rec.get("judge") or {}).get("why", ""),
-            })
+            }
+            out.append(lead)
+            # The other samples of a --repeat run: the trace keeps each one's
+            # graded text and verdict, against the same criterion. Keyed
+            # "run/id#k" so the lead keeps the key every earlier label uses.
+            for k, t in enumerate(rec.get("trials") or [], start=1):
+                tv = (t.get("judge") or {}).get("verdict")
+                if k == 1 or tv is None or not t.get("graded"):
+                    continue
+                out.append(dict(lead, key=f"{lead['key']}#{k}", graded=t["graded"],
+                                _verdict="PASS" if tv else "FAIL",
+                                _why=(t.get("judge") or {}).get("why", "")))
     return out
 
 
@@ -149,7 +160,7 @@ def more(pool: list, chosen: list, human: list, n: int, rng: random.Random) -> l
     exactly where a lenient judge would hide."""
     taken = {c["key"] for c in chosen}
     seen = {(c["id"], hashlib.sha256(c["graded"].encode()).hexdigest()) for c in chosen}
-    failed = {h["key"].split("/", 1)[1] for h in human if h["label"] == "FAIL"}
+    failed = {h["key"].split("/", 1)[1].split("#")[0] for h in human if h["label"] == "FAIL"}
     tiers = ([], [], [])
     for s in pool:
         sig = (s["id"], hashlib.sha256(s["graded"].encode()).hexdigest())
@@ -366,12 +377,16 @@ def cmd_add(args) -> int:
     if meta.get("split_by") != "scenario":
         sys.exit("splits are still per sample: run `./labels.py resplit` first")
     rng = random.Random(args.seed)
-    new = more(judged_samples(args.runs), candidates, human, args.n, rng)
+    pool = judged_samples(args.runs)
+    if getattr(args, "only", ""):
+        ids = {i.strip() for i in args.only.split(",") if i.strip()}
+        pool = [s for s in pool if s["id"] in ids]
+    new = more(pool, candidates, human, args.n, rng)
     if not new:
         sys.exit("no judged sample left to add")
     splits = meta["scenario_splits"]
     fresh = {s["id"]: False for s in new if s["id"] not in splits}
-    splits.update(split_scenarios(fresh, rng, set()))
+    splits.update(split_scenarios(fresh, rng, set(fresh) if getattr(args, "dev", False) else set()))
     for s in new:
         s["split"] = splits[s["id"]]
     write_jsonl(CANDIDATES, candidates + [public(s) for s in new])
@@ -539,6 +554,9 @@ def cmd_rejudge(args) -> int:
     candidates = {c["key"]: c for c in read_jsonl(CANDIDATES)}
     keys = ([r["key"] for r in read_jsonl(HUMAN) if not r.get("excluded")] if not args.all
             else list(candidates))
+    if getattr(args, "only", ""):
+        ids = {i.strip() for i in args.only.split(",") if i.strip()}
+        keys = [k for k in keys if k in candidates and candidates[k]["id"] in ids]
     if args.judge_cli == "claude":
         if args.max_cost_usd is None:
             sys.exit("--max-cost-usd is required for a claude judge")
@@ -659,6 +677,10 @@ def main() -> int:
     p.add_argument("--n", type=int, default=20)
     p.add_argument("--seed", type=int, default=40)
     p.add_argument("--runs", type=Path, default=run.RUNS)
+    p.add_argument("--only", default="", metavar="IDS",
+                   help="comma-separated scenario ids: add only their samples")
+    p.add_argument("--dev", action="store_true",
+                   help="new scenarios go to dev: their criterion is being fixed, not scored")
     sub.add_parser("refresh", help="take each scenario's current criterion from scenarios/")
     p = sub.add_parser("page", help="write labels/label.html")
     p.add_argument("--only-stale", action="store_true", help="only labels made against an older criterion")
@@ -673,6 +695,8 @@ def main() -> int:
     p.add_argument("--ambiguous", action="store_true",
                    help="codex judge may answer AMBIGUOUS; report counts it as an abstention")
     p.add_argument("--all", action="store_true", help="every candidate, labelled or not")
+    p.add_argument("--only", default="", metavar="IDS",
+                   help="comma-separated scenario ids: judge only their samples")
     p.add_argument("--resume", metavar="FILE",
                    help="a cut run of the same judge: keep its verdicts, judge the rest")
     p = sub.add_parser("report", help="TPR and TNR per split")

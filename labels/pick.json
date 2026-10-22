@@ -1,6 +1,6 @@
 {
   "seed": 39,
-  "n": 80,
+  "n": 86,
   "holdout_share": 0.4,
   "picked_at": "2026-10-14T12:14:02",
   "pool": 441,
@@ -64,13 +64,19 @@
     "senior-dev-checks-next-cache-version": "dev",
     "devops-weighs-automation-against-frequency": "holdout",
     "qa-does-not-delete-critical-flaky-test": "dev",
-    "qa-hunts-same-code": "dev"
+    "qa-hunts-same-code": "dev",
+    "visionary-calls-good-work-good": "dev"
   },
   "added": [
     {
       "n": 20,
       "seed": 40,
       "at": "2026-10-14T22:52:03"
+    },
+    {
+      "n": 6,
+      "seed": 40,
+      "at": "2026-10-22T16:14:26"
     }
   ]
 }
