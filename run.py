@@ -1619,6 +1619,13 @@ def git_root(ws: Path) -> None:
     git("commit", "-q", "--allow-empty", "-m", "fixture")
 
 
+def only_matches(sid: str, wanted: list) -> bool:
+    """`--only`: an entry matches ids that contain it; an entry starting with
+    `=` matches that id exactly. A twin's id extends its base's
+    (`value-x-1-without`), so a substring alone cannot pick the base."""
+    return any(sid == w[1:] if w.startswith("=") else w in sid for w in wanted)
+
+
 def catalog_skill_names() -> set:
     """Names of the catalog's skills, read from the catalog the install came
     from (its path is in the installer's stamp). Without it there is no way to
@@ -2535,7 +2542,7 @@ def main():
     global AGENT_MODEL, JUDGE_MODEL, TIMEOUT, DELEGATE_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--category", help="run only this category")
-    ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any)")
+    ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any; a leading = matches the id exactly)")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--experiment", metavar="WHAT", default=None,
@@ -2604,7 +2611,7 @@ def main():
         scenarios = [s for s in scenarios if s.category == args.category]
     if args.only:
         wanted = [o.strip() for o in args.only.split(",") if o.strip()]
-        scenarios = [s for s in scenarios if any(o in s.id for o in wanted)]
+        scenarios = [s for s in scenarios if only_matches(s.id, wanted)]
     if not (args.category or args.only):
         # `manual` scenarios are opt-in. Some experiments are expensive and
         # already answered — the build-quality arms cost ~$12 and forty minutes
