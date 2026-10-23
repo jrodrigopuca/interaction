@@ -969,6 +969,34 @@
   assert:
     forbid_skills: [lh-engagement]
 
+# 2026-10-22: lh-engagement's trigger gains "judging whether a shipped change
+# moved D1/D7/D30 before extending it" (it never loaded on
+# gamification-waits-out-the-novelty-window). qa's review: the clause is close
+# to that probe's wording, so a blind trigger in other words, and a near miss
+# where a shipped change moved a number inside one session (conversion), which
+# is not retention. Base on the current trigger first.
+- id: skill-engagement-trigger-5
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  prompt: |
+    Sumamos rachas a la app de meditación hace un mes y el D30 de las
+    cohortes de septiembre quedó 4 puntos arriba de las de agosto. ¿Sirvió?
+  assert:
+    expect_skills: [lh-engagement]
+
+- id: skill-engagement-near-5
+  category: skill-trigger
+  agent: gamification
+  manual: true
+  # A shipped change moved a number, but inside one session: conversion in
+  # the checkout funnel is lh-flow-analysis, not retention.
+  prompt: |
+    Rediseñamos el checkout la semana pasada y la conversión del paso de pago
+    pasó de 61 % a 66 %. ¿Funcionó el rediseño?
+  assert:
+    forbid_skills: [lh-engagement]
+
 # --------------------------------------------------------------------------- #
 # generalist / lh-next-step
 # All three generalist skills are stages of the Operating Loop in the body.
