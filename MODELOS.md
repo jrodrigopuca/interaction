@@ -96,6 +96,34 @@ retocado y medido de nuevo, 3/3 en las dos ramas: `20261022-152302`,
 foto compara dos modelos sobre los mismos escenarios, y estos no corrieron en
 Haiku.
 
+### Después de la foto: visionary y product-manager (2026-10-22, solo Sonnet)
+
+Tres escenarios de juicio para cada uno (paso 2). Con catálogo
+`20261022-155649` (y `-211406` para el de "trabajo bueno", con su criterio
+retocado desde etiquetas humanas), sin catálogo `20261022-155924` (y
+`-211512`), ×3:
+
+| Escenario | Con | Sin | Aporte |
+|---|---|---|---|
+| `visionary-leads-with-the-verdict-and-one-thing` | 3/3 | 1/3 | +67 % |
+| `visionary-judges-a-sketch-as-a-sketch` | 3/3 | 1/3 | +67 % |
+| `visionary-calls-good-work-good` | 3/3 | 0/3 | +100 % |
+| `product-manager-ranks-an-all-p1-backlog` | 3/3 | 3/3 | 0 (`model-floor`) |
+| `product-manager-writes-the-story-without-the-how` | 3/3 | 3/3 | 0 (`model-floor`) |
+| `product-manager-says-no-with-the-door` | 2/9 → 6/6 | 3/3 | ver abajo |
+
+Lo que aporta visionary: el veredicto sobre el producto antes de la lista
+que pide el usuario, la vara de la fase ante un boceto con carnada, y
+reconocer lo bueno atado a los datos cuando le piden ser brutal (sin
+catálogo, el modelo descarta la evidencia de entrada).
+
+El no con puerta es el primer caso medido de **aporte negativo** del
+catálogo: el cuerpo de product-manager (descubrir antes de construir, "una
+decisión sin datos es una apuesta") le hacía pedirle datos al interesado en
+vez de leer la estrategia escrita en el repo, y sin catálogo el modelo la lee
+y declina. Con el #4 corregido (leer lo ya decidido antes de mandar algo a
+discovery) pasó de 2/9 a 6/6.
+
 ## Lo que el modelo ya hace solo
 
 Los dos modelos, sin ningún agente, ya hacen casi todo lo que se puede llamar
