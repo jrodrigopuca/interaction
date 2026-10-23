@@ -187,7 +187,10 @@
 # plan "replace moment with dayjs in 40 files" rests on dayjs handling
 # per-clinic time zones, which needs its timezone plugin and behaves
 # differently around DST; src/reminders.js is the one place that depends on
-# it. Read-only: the deliverable is the plan.
+# it. Read-only: the deliverable is the plan. Note (architect, 2026-10-23):
+# the prompt says ~40 files and the fixture holds 8 (a sample); once the agent
+# lists them, the steps look small. Kept as is — that gap is part of what a
+# real repo shows a planner, not a defect to tune away.
 - &decomposition_value_1
   id: value-decomposition-1
   category: skill-value

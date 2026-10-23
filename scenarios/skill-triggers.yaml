@@ -1302,6 +1302,32 @@
     observe:
       unchanged_files: [config/auth.json, src/auth/password.test.mjs]
 
+# 2026-10-23: lh-decomposition's trigger is being reworded (it never loaded on
+# value-decomposition-1). qa's review: a trigger in other words for a library
+# swap that looks mechanical (fetch does not reject on 4xx/5xx, and axios
+# interceptors and timeouts have no drop-in), and a near miss that is a
+# one-line bump. Written by the same reviewer who read the analysis, so NOT
+# blind. Base on the current trigger first.
+- id: skill-decomposition-trigger-5
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    Cambiamos axios por fetch en todo el front. Es buscar y reemplazar, son
+    unas 60 llamadas. Dale.
+  assert:
+    expect_skills: [lh-decomposition]
+
+- id: skill-decomposition-near-5
+  category: skill-trigger
+  agent: generalist
+  manual: true
+  prompt: |
+    Subí lodash de 4.17.20 a 4.17.21 en el package.json, es el parche de
+    seguridad.
+  assert:
+    forbid_skills: [lh-decomposition]
+
 - id: skill-decomposition-blind-1
   category: skill-trigger
   agent: generalist
