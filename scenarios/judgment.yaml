@@ -3385,3 +3385,102 @@
       without a stated reason and no `DispatchQueue.main.async`, uses
       async/await, and handles the error state (and loading, or says why
       not). Naming those patterns as what to avoid is fine. FAIL otherwise.
+
+# Paso 2, gamification y devops (2026-10-22). Promesas del texto que van contra
+# el default; revisados por architect y qa antes de congelar; base con y sin
+# catálogo. Sin nombres del roster en los criterios.
+
+# lh-engagement #5: "measured PAST the novelty window: a new mechanic bumps
+# the curve and then decays, so a read taken inside that window ships on a
+# false positive… find it in your own data."
+- id: gamification-waits-out-the-novelty-window
+  category: judgment
+  agent: gamification
+  manual: true
+  prompt: |
+    Lanzamos badges en el onboarding hace dos semanas y el D7 de las dos
+    cohortes nuevas pasó de 25 % a 28 %. Funcionó, ¿lo extendemos al resto
+    de la app?
+  assert:
+    judge: |
+      A lift measured in the first weeks of a new mechanic can be novelty
+      that decays. PASS if the reply says so — this read does not yet prove
+      the badges work — and names how to tell: later cohorts or a longer
+      horizon, until the new cohorts' curve stops moving (a window whose
+      length comes from the product's own data, not a fixed number of
+      days); a holdout or a value metric beside it is welcome. FAIL if it
+      endorses extending now, or never gives novelty or decay as a
+      reason.
+
+# lh-flow-analysis #2: "in a forced flow (compliance, a work tool, a form the
+# law requires) the question becomes 'what does complying cost them, and
+# where do they cheat?', and the cheat is your drop-off."
+- id: gamification-asks-where-they-cheat
+  category: judgment
+  agent: gamification
+  manual: true
+  prompt: |
+    Los empleados tienen que completar la capacitación anual de seguridad,
+    es obligatoria por normativa. La terminan, pero a último momento.
+    ¿Cómo la gamificamos?
+  assert:
+    judge: |
+      Nobody can leave a mandatory training, so "where do they drop off?"
+      is the wrong question; "what does complying cost them, and where do
+      they cheat?" is the right one. PASS if, before any mechanic, it
+      names at least one way employees game the training beyond the timing
+      the user already stated (skipping or muting videos, clicking
+      through, guessing quizzes, sharing answers), and no mechanic rewards
+      speed (time spent); rewarding completion before the deadline is fine.
+      FAIL if it never names such a behaviour, goes straight to completion
+      points, badges or a leaderboard, or treats the training as
+      voluntary.
+
+# devops #6 and lh-infrastructure #6: "Scale for the load you HAVE plus
+# headroom… automatic and bounded (max limits, so a bug or attack can't
+# autoscale you into bankruptcy). Watch spend as a metric with alerts."
+- id: devops-bounds-the-autoscaling
+  category: judgment
+  agent: devops
+  manual: true
+  workspace: fixtures/devops-autoscale
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Poné autoscaling en la API para que no se caiga nunca.
+  assert:
+    judge: |
+      README.md gives the load the service HAS: 40 rps average, 120 rps
+      daily peak, about 100 rps per replica, 2 fixed replicas at USD 70 a
+      month each. An autoscaler cannot be created without a maximum, so
+      having one proves nothing; the judge reads the reply, not the files
+      it wrote. PASS if the reply itself states the maximum replicas,
+      justifies it from README.md's peak or per-replica capacity plus
+      stated headroom (a maximum above 10 must say why), and states the
+      monthly cost at that maximum or proposes a spend alert. Saying that
+      autoscaling alone does not make a service "never go down" is
+      welcome. FAIL if the reply does not state a maximum, the maximum is
+      above 10 without a load-based reason, or cost is never mentioned.
+
+# lh-ci-cd #5: "blue-green is not a free rollback when both colours share the
+# one database the migration just touched." The user believes it is.
+- id: devops-blue-green-is-not-a-free-rollback
+  category: judgment
+  agent: devops
+  manual: true
+  prompt: |
+    El viernes sale la 4.2: trae la migración que renombra orders.total a
+    orders.amount_total y el código que la usa. Hacemos blue-green, así que
+    si algo sale mal volvemos a blue en un segundo, ¿no?
+  assert:
+    judge: |
+      Both colours share one database. Once the rename runs, blue's code
+      still reads orders.total, so switching back to blue breaks instead of
+      rescuing. PASS if the reply says the rollback is not free for that
+      reason, and says what makes it reversible: the schema change kept
+      backward-compatible with the running version and shipped apart from
+      the code, or an equivalent that keeps blue working on the migrated
+      schema. Detailing that change itself or handing it to whoever owns
+      the schema both pass; noting that blue breaks as soon as the
+      migration runs, before any switch, is welcome. FAIL if it confirms
+      the instant rollback, misses the shared database, or gives no way to
+      make it reversible.
