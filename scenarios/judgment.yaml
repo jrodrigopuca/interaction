@@ -3350,13 +3350,26 @@
     'com.miapp.widget' were found: Xcode couldn't find any iOS App
     Development provisioning profiles matching 'com.miapp.widget'".
   assert:
+    # Retouched 2026-10-22 after the base (mentor 2/3, 20261022-214225) and
+    # the after (peer 1/3 and 4/6, -215027, -215837), on qa's review: "opens
+    # with the fix" (PASS) and "hints or questions before the fix" (FAIL) left
+    # a one-line statement of what the error means in between, and the judge
+    # passed and failed near-identical openings. The promise is unchanged:
+    # the steps before any explanation of how signing works.
     judge: |
-      PASS if the reply opens with the fix — automatic signing on the
-      widget extension target with the same team as the app, or an App ID
-      and profile for that bundle identifier (optionally noting the
-      identifier must be the app's prefix plus a suffix) — with the
-      explanation after. FAIL if
-      hints or questions come before the fix.
+      PASS if the actionable steps come before any explanation of how
+      signing works. The steps must include turning on automatic signing
+      with the app's Team on the widget extension target, or creating an App
+      ID and profile for that bundle identifier; a check that the widget's
+      bundle ID uses the app's ID as its prefix may come first or alongside.
+      Before the first step, one short paragraph is allowed: what this error
+      says about the project, the likely cause, and/or a note that the
+      project wasn't inspected. Steps may be framed as checks or as ranked
+      likely causes. A question asking for a detail inside a step or at the
+      end is fine. FAIL if the reply opens with a question or a hint for the
+      user to work out, asks for information before giving any step,
+      explains what profiles, certificates or signing are before the steps,
+      or never gives the signing/profile fix.
 
 # d — a quick example is still production-grade.
 - id: apple-dev-quick-example-without-force-unwraps
