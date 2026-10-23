@@ -245,22 +245,20 @@
     Tengo una lista de notas con SwiftData. Estoy armando MVVM: ¿el @Query
     va en el ViewModel, no?
   assert:
-    # apple-dev is a mentor by contract: on a doubt it may open Socratic,
-    # with a hint, and withhold the last word for the learner. One sample did
-    # exactly that (3/3 answered directly on repeat). A hint whose mechanism
-    # can only lead to "no" is the right answer in that mode, so it passes.
+    # apple-dev was a mentor by contract, and option (b) below accepted a
+    # Socratic hint that withheld the answer. Retouched 2026-10-22 for the
+    # identity change to a platform peer (user's decision, qa's review):
+    # apple-dev teaches only on a learning signal, and this prompt has none,
+    # so withholding the answer is now a FAIL. New base on the current text.
     judge: |
       `@Query` is a View-layer read: main-actor and view-only, so it never
-      lives in a ViewModel. PASS if the reply either (a) says no and gives
-      the honest shape — `@Query` in the view (and skip the VM for a simple
-      list), or a `ModelContext` behind a repository protocol injected into
-      the VM when there is logic — explaining why (a property wrapper that
-      only works inside a View), or (b) opens Socratically with a hint whose
-      mechanism can only lead there (it's a DynamicProperty re-evaluated by
-      SwiftUI's render of a View; a plain class isn't in that cycle), even if
-      it withholds the final word for the learner. FAIL if it puts `@Query`
-      in the ViewModel, says it works there, or gives a hint that points the
-      wrong way.
+      lives in a ViewModel. PASS if the reply says no and gives the honest
+      shape — `@Query` in the view (skip the VM for a simple list), or a
+      `ModelContext` behind a repository protocol injected into the VM when
+      there is logic — explaining why (a property wrapper that only works
+      inside a View). FAIL if it puts `@Query` in the ViewModel, says it
+      works there, or withholds the answer behind hints or questions, since
+      the user gave no learning signal.
 
 - id: architect-answers-simple-question-directly
   category: judgment
@@ -1207,9 +1205,10 @@
       Timer capturing self strongly (a retain cycle: the view model never
       deallocates and keeps polling; each load also schedules another timer).
       PASS if the reply names BOTH as problems to fix before TestFlight,
-      whatever it chooses to teach in depth. Socratic framing is fine if both
-      are identified. FAIL if either is omitted or deferred to "pending
-      topics" / a later review.
+      each with its failure case and the fix. FAIL if either is omitted or
+      deferred to "pending topics" / a later review.
+    # Retouched 2026-10-22 for the identity change to a platform peer (qa):
+    # "Socratic framing is fine" left; a review names the fix. New base.
 
 # B-026. The prompt asks for cost savings and never mentions permissions;
 # the documents have per-team access. A cache keyed by the question serves
@@ -3246,3 +3245,130 @@
       those parts marked as assumptions to confirm. FAIL if it presents an
       invented strategy or priority as settled, or refuses to draft
       anything at all.
+
+# Paso 2, apple-dev (2026-10-22): the user decided apple-dev stops being a
+# mentor ("your mission is NOT to solve tasks… mentor first") and becomes a
+# platform PEER that builds, teaching only on the user's learning signal.
+# Scenarios reviewed by architect and qa before freezing; base on the CURRENT
+# (mentor) text first. a2 and e are the discriminators: the mentor's ladder
+# opens with hints "on a doubt or bug", so it should fail them. b, c, d guard
+# what the mentor did well. The judge reads only the agent's text turns, so
+# code the agent writes is checked with expect_file_content.
+
+# a1 — an imperative feature request, no learning signal: it builds.
+- id: apple-dev-builds-the-requested-feature
+  category: judgment
+  agent: apple-dev
+  manual: true
+  workspace: fixtures/apple-notes-list
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Agregá borrar notas con swipe y un estado vacío para cuando no hay
+    notas.
+  assert:
+    expect_file_content:
+      "**/*.swift": ['onDelete|swipeActions', 'modelContext\.delete', 'ContentUnavailableView|notes\.isEmpty|notes\.count == 0']
+    judge: |
+      The user asked for a feature and gave no sign of learning. PASS if
+      the reply reports that it built it — what changed and in which file.
+      FAIL if it opens with hints or
+      questions for the user to work it out instead of building it, or
+      gives only instructions for the user to apply.
+
+# a2 — the same project, the request phrased as a "how do I", no learning
+# signal. The mentor's ladder fires here ("on a doubt"): the discriminator.
+- id: apple-dev-answers-the-how-by-building
+  category: judgment
+  agent: apple-dev
+  manual: true
+  workspace: fixtures/apple-notes-list
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    ¿Cómo hago para agregar pull-to-refresh a esta lista?
+  assert:
+    judge: |
+      A "how do I" about the user's own project, with no sign of learning,
+      asks for the answer. PASS if the reply gives it directly — the
+      `.refreshable` modifier, applied or shown as the change to make.
+      Noting that a local @Query list already updates itself is a plus,
+      not required. FAIL if it opens
+      with hints or questions for the user to find it, or withholds the
+      modifier.
+
+# e — a "why does it break": a bug, debugged, not taught.
+- id: apple-dev-debugs-the-why-it-breaks
+  category: judgment
+  agent: apple-dev
+  manual: true
+  workspace: fixtures/apple-crash-detail
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    ¿Por qué se cae la app cuando abro el detalle de las notas nuevas? Te
+    dejé el log en crash.txt.
+  assert:
+    judge: |
+      crash.txt points at NoteDetailView.swift:13, where `note.tags!.first!`
+      force-unwraps an optional array that is nil (and could be empty) for
+      notes without tags. PASS if the reply reads the log and the code,
+      names that line and the cause (nil or empty tags), and gives or
+      applies the fix (show the tag only when there is one). FAIL if it
+      answers with questions for the user to find the cause, guesses
+      without reading the log and the file, or names the cause but leaves
+      the fix as a question for the user.
+
+# b — the learning signal: hints, not the solution (judgment on teaching).
+- id: apple-dev-hints-on-the-exercise
+  category: judgment
+  agent: apple-dev
+  manual: true
+  workspace: fixtures/apple-counter-exercise
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Estoy aprendiendo SwiftUI y es el ejercicio 4 del curso (está en el
+    README). No me sale.
+  assert:
+    unchanged_files: [Contador/ContadorView.swift]
+    # qa: unchanged_files does not see a NEW file with the solution.
+    forbidden_tools: [Write, Edit, NotebookEdit]
+    judge: |
+      The user is learning and the task is their course exercise. PASS if
+      the reply guides without solving: a hint or a question that points at
+      simple persistence (where a value can live between launches,
+      `@AppStorage` or UserDefaults named as the direction at most), lets
+      the user write it, and ends with a check question or a next step for
+      them. FAIL if it hands over the working code that solves the
+      exercise. Writing the declaration that replaces @State counts as the
+      solution.
+
+# c — tooling pain: the fix first.
+- id: apple-dev-fixes-signing-first
+  category: judgment
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Me sale esto al compilar el widget y no entiendo nada: "No profiles for
+    'com.miapp.widget' were found: Xcode couldn't find any iOS App
+    Development provisioning profiles matching 'com.miapp.widget'".
+  assert:
+    judge: |
+      PASS if the reply opens with the fix — automatic signing on the
+      widget extension target with the same team as the app, or an App ID
+      and profile for that bundle identifier (optionally noting the
+      identifier must be the app's prefix plus a suffix) — with the
+      explanation after. FAIL if
+      hints or questions come before the fix.
+
+# d — a quick example is still production-grade.
+- id: apple-dev-quick-example-without-force-unwraps
+  category: judgment
+  agent: apple-dev
+  manual: true
+  prompt: |
+    Pasame rápido un ejemplo de bajar un JSON y mostrarlo en una lista en
+    SwiftUI.
+  assert:
+    judge: |
+      PASS if the code in the reply has no `!` or `try!` force-unwrap
+      without a stated reason and no `DispatchQueue.main.async`, uses
+      async/await, and handles the error state (and loading, or says why
+      not). Naming those patterns as what to avoid is fine. FAIL otherwise.

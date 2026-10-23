@@ -1,0 +1,6 @@
+Notes/NoteDetailView.swift:13: Fatal error: Unexpectedly found nil while unwrapping an Optional value
+
+Thread 1: Fatal error: Unexpectedly found nil while unwrapping an Optional value
+#0  NoteDetailView.body.getter at NoteDetailView.swift:13
+#1  ViewGraph.updateOutputs()
+#2  NavigationStack destination render
