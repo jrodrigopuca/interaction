@@ -93,3 +93,223 @@
 - <<: *qp_value_1
   id: value-query-performance-1-without
   ablate: [lh-query-performance]
+
+# --------------------------------------------------------------------------- #
+# Paso 4 de la revisión fechada (2026-10-22), etapa 0: una tarea contra el
+# default por cada una de las seis skills en duda, escrita desde su patrón y
+# revisada por qa y architect antes de congelar. Etapa 1 corre solo las ramas
+# "-without" (×3): una tarea que el modelo pasa sin la skill no tiene margen y
+# cierra esa skill como piso; las que fallan pasan a la etapa 2 (la rama con
+# catálogo, contando la carga). Diseño de qa y data-ml: el valor es un número
+# por skill, la carga se reporta aparte, y nada se borra solo por el aporte.
+# Revisión de architect y qa: en cuatro tareas el cuerpo o el CORE ya llevan
+# el patrón, así que un 3/3 sin la skill se registra como "cubierto por el
+# cuerpo", no como piso del modelo: dice que la skill repite el cuerpo en
+# esa parte, no que el modelo lo haga solo. Los workspaces son repos de git
+# con el fixture commiteado (run.py), así que editar es reversible.
+# --------------------------------------------------------------------------- #
+
+# architect / lh-tradeoffs #1 (reversibility first) and #2 (drivers from the
+# context, not the generic blog answer). The user frames it as a fashion
+# question; the fixture has the drivers: 3 devs, one VM, 1.200 emails a day,
+# the real pain is a slow provider inside the checkout request.
+- &tradeoffs_value_1
+  id: value-tradeoffs-1
+  category: skill-value
+  agent: architect
+  manual: true
+  workspace: fixtures/arch-notifications
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    ¿Sacamos las notificaciones a un microservicio o las dejamos en el
+    monolito? Se viene WhatsApp y quiero hacerlo bien desde ahora.
+  assert:
+    judge: |
+      The repository gives the drivers: a team of 3 (one part-time), one
+      VM, no dedicated on-call, about 1,200 emails a day, and the current
+      pain is the email provider slowing the checkout because it is called
+      inside the request (src/checkout.js). PASS if the reply decides from
+      those drivers — keeps notifications in the monolith and takes the
+      send out of the checkout request with any async mechanism (a queue,
+      a job table, an outbox), or argues a service from a reason drawn
+      from the drivers — and states the condition that would flip the
+      choice (for example a WhatsApp volume or a second team). Asking
+      whoever runs operations or the data model to cost the queue is fine
+      alongside a pick. FAIL if it
+      compares the options in generic terms that ignore the team, the
+      volume and the synchronous call, gives no recommendation, or
+      recommends the service on growth it imagines rather than the numbers
+      in the repository.
+
+- <<: *tradeoffs_value_1
+  id: value-tradeoffs-1-without
+  ablate: [lh-tradeoffs]
+
+# architect / lh-mentoring #1 (answer first), #3 (diagnose the gap, not the
+# symptom), #6 (check that it landed). The user repeats a misconception and
+# proposes the same wrong fix again.
+- &mentoring_value_1
+  id: value-mentoring-1
+  category: skill-value
+  agent: architect
+  manual: true
+  prompt: |
+    Otra vez el loop infinito con el useEffect. La otra vez tenía `[user]`
+    en el array y hacía loop, así que se lo saqué entero, y ahora tampoco
+    anda:
+
+    ```jsx
+    const [user, setUser] = useState(null);
+    useEffect(() => {
+      fetch(`/api/users/${id}`).then(r => r.json()).then(setUser);
+    });
+    ```
+  assert:
+    judge: |
+      The gap is a concept, not the symptom: the dependency array lists what
+      the effect READS (`id`), not what it sets (`user`). With `[user]` the
+      effect re-ran every time it set user; with no array it runs after
+      every render. PASS if the reply first gives the fix (`[id]`; adding a
+      cleanup or an abort is fine), then names that concept once — reads,
+      not writes — and closes with one question or a tiny exercise that
+      checks the user got it. FAIL if it only gives the fix, names only the
+      symptom ("removing the array causes the loop") without the reads-not-
+      writes rule, lectures through several unrelated concepts, or teaches
+      without fixing first. Its pattern is also in architect's body (the
+      fourth row of the escalation ladder): a pass without the skill is
+      "covered by the body".
+
+- <<: *mentoring_value_1
+  id: value-mentoring-1-without
+  ablate: [lh-mentoring]
+
+# generalist / lh-decomposition #1: find the load-bearing unknown first. The
+# plan "replace moment with dayjs in 40 files" rests on dayjs handling
+# per-clinic time zones, which needs its timezone plugin and behaves
+# differently around DST; src/reminders.js is the one place that depends on
+# it. Read-only: the deliverable is the plan.
+- &decomposition_value_1
+  id: value-decomposition-1
+  category: skill-value
+  agent: generalist
+  manual: true
+  workspace: fixtures/moment-migration
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Antes de arrancar, armame el plan para migrar todo el proyecto de moment
+    a dayjs. Son unos 40 archivos.
+  assert:
+    judge: |
+      src/reminders.js uses moment-timezone (`moment.tz` with each clinic's
+      zone, 9:00 local the day before); dayjs needs its utc and timezone
+      plugins for that, and their behaviour around a DST change is the one
+      assumption that can sink the plan. PASS if, before any mass
+      replacement, the plan proves dayjs plus those plugins matches
+      reminders.js (a test with a DST date, or a side-by-side comparison) —
+      a cheap inventory of moment usages first is fine — and states what
+      result would stop or change the plan. Listing other plugins (such as
+      relativeTime for fromNow) is fine. FAIL if the mass replacement comes
+      before that proof, the time-zone code is treated as one more file, or
+      it never notices it.
+
+- <<: *decomposition_value_1
+  id: value-decomposition-1-without
+  ablate: [lh-decomposition]
+
+# generalist / lh-next-step #6: the state that survives you — here the state
+# file is STALE. NOTES.md says "next: paginate GET /users" and leaves the
+# page size pending, but src/users.js already paginates with config.js's
+# DEFAULT_PAGE_SIZE. #3 (a discoverable answer is not a question) is also
+# in the CORE; #6 is the skill's own (qa's review replaced the first task).
+- &next_step_value_1
+  id: value-next-step-1
+  category: skill-value
+  agent: generalist
+  manual: true
+  workspace: fixtures/resume-notes
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Seguimos con lo de ayer, el estado está en NOTES.md.
+  assert:
+    unchanged_files: [src/users.js]
+    judge: |
+      NOTES.md says the next step is paginating GET /users and leaves the
+      page size pending, but src/users.js already paginates, with
+      DEFAULT_PAGE_SIZE 25 from src/config.js. PASS if the reply notices GET
+      /users is already paginated, says NOTES.md is out of date and updates
+      it (or gives the update), and takes the page size from config.js
+      rather than asking it. FAIL if it re-implements the pagination, asks
+      the user which page size to use, or carries on from NOTES.md as if
+      it were current.
+
+- <<: *next_step_value_1
+  id: value-next-step-1-without
+  ablate: [lh-next-step]
+
+# security / lh-code-audit #3 (authorization at every object access) and #1
+# (follow the class, not the named file). Second task for this skill (qa):
+# the prompt names one file; the same missing ownership check lives in a
+# sibling file the prompt never mentions.
+- &audit_value_2
+  id: value-code-audit-2
+  category: skill-value
+  agent: security
+  manual: true
+  workspace: fixtures/api-invoices-audit
+  allow: "Read,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Auditá src/routes/invoices.js, es lo que cambió en este release.
+  assert:
+    contains: ["/orders/:id"]
+    judge: |
+      GET /invoices/:id returns any invoice to any logged-in user. The same
+      missing ownership check is in src/routes/orders.js, which the user did
+      not name. PASS if the reply reports the invoices flaw and also states
+      that GET /orders/:id lacks the same ownership check (found by
+      following the pattern beyond the named file). FAIL if it reports only
+      the invoices route, or mentions orders only as something to check
+      without stating the flaw there. Security's body (#6, "where ELSE does
+      this pattern live") carries this too: a pass without the skill is
+      "covered by the body".
+
+- <<: *audit_value_2
+  id: value-code-audit-2-without
+  ablate: [lh-code-audit]
+
+# senior-dev / lh-pairing #1: findings, not grades — the blocker first with
+# its failure case, something true and good said, style left alone unless
+# asked. One real bug (the page end loses the last item) among taste-level
+# differences.
+- &pairing_value_1
+  id: value-pairing-1
+  category: skill-value
+  agent: senior-dev
+  manual: true
+  prompt: |
+    ¿Me revisás esto antes del PR?
+
+    ```js
+    function paginate(items, page, size){
+      var start = page * size
+      var end = start + size - 1
+      return { total: items.length, items: items.slice(start, end) }
+    }
+    ```
+  assert:
+    judge: |
+      `slice(start, end)` excludes `end`, so with `end = start + size - 1`
+      every page returns size − 1 items: the last item of each page is
+      lost. That is the blocker; `var`, missing semicolons and the brace
+      style are taste. PASS if the reply leads with that bug and its failure
+      case (for example, size 10 returns 9), labels anything else by
+      severity with style marked as optional or left out, and does not
+      rewrite the function into its own style beyond the fix. A fix
+      snippet that also uses `const` or semicolons is fine unless those
+      changes are presented as part of the fix; flagging that `page * size`
+      assumes pages start at 0 is a legitimate risk, not taste; a "nit:"
+      label counts as marked optional. FAIL if it misses the bug, leads with
+      style, or presents style changes with the same weight as the bug.
+
+- <<: *pairing_value_1
+  id: value-pairing-1-without
+  ablate: [lh-pairing]
