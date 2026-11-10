@@ -12,6 +12,7 @@ this repo does.
 ./run.py --applicability        # which past verdicts still apply to today's install (free)
 ./run.py --category routing --max-cost-usd 2   # one category
 ./run.py --only qa-never --max-cost-usd 1       # one scenario
+./run.py --category judgment --quota            # one minimal paid call: where that run would leave the subscription's windows
 ./run.py --resume 20261110-191413 --max-cost-usd 2   # finish a capped run: only the missing samples
 ./run.py --max-cost-usd 13                      # everything
 
@@ -277,7 +278,8 @@ amount approved for it. A run whose estimate does not fit refuses to start
 (the estimate is each scenario's last measured cost per sample on the same
 model, judge and branch; `--dry-run` says how much of it is measured, which
 model answered and how old the oldest figure is, because prices and aliases
-move); a
+move; the published price list is read before each run, kept in `run.json`
+and compared with the last one noted); a
 running one launches no new sample once the budget is spent or the
 subscription's five-hour window is at 90% (each reply reports that window);
 and each agent call carries its own `--max-budget-usd` ceiling against a

@@ -1551,12 +1551,17 @@ class Gate:
         self.max_cost, self.quota_stop = max_cost, quota_stop
         self.spent = 0.0
         self.quota = None
+        self.first = None          # the first window reading, and what was spent by then
         self.stopped = ""          # "", "budget" or "quota"
 
     def record(self, cost: float, quota) -> None:
         self.spent += cost or 0.0
         if quota:
             self.quota = quota
+            if self.first is None:
+                self.first = {"five_hour": quota.get("five_hour"),
+                              "seven_day": quota.get("seven_day"),
+                              "cost_usd": round(self.spent, 4)}
 
     def allows(self) -> bool:
         if self.spent >= self.max_cost:
@@ -2886,6 +2891,145 @@ def estimate_note(scenarios: list, measured: dict, model: str,
     return note
 
 
+# --------------------------------------------------------------------------- #
+# The published price list, noted before a run
+# --------------------------------------------------------------------------- #
+# There is no pricing endpoint: the Models API returns ids, limits and
+# capabilities, not prices. What the provider publishes is a documentation
+# page with a markdown rendering, readable without credentials and without a
+# model call. Reading it before a run costs nothing and answers the one
+# question measured costs cannot: did the price move since they were taken?
+# It is a note, never a gate — offline, or with the page moved, the run goes
+# on as before. And it is the LIST price: what a sample is recorded as
+# costing is the CLI's own `total_cost_usd`, which follows the list only once
+# the CLI knows the new price.
+PRICES_URL = "https://platform.claude.com/docs/en/about-claude/pricing.md"
+PRICE_COLUMNS = ("Base input tokens", "Output tokens", "Cache hits and refreshes")
+
+
+def parse_price_table(text: str) -> dict:
+    """{model name: {column: value}} from the first table under the page's
+    "Model pricing" heading; {} when the page has no such table."""
+    lines = (text or "").splitlines()
+    try:
+        start = next(i for i, l in enumerate(lines) if l.strip().lower() == "## model pricing")
+    except StopIteration:
+        return {}
+
+    def cells(line):
+        out = []
+        for c in line.strip().strip("|").split("|"):
+            c = re.sub(r"<sup>.*?</sup>", "", c)
+            c = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", c)
+            out.append(re.sub(r"\s+", " ", c).strip())
+        return out
+    header, table = None, {}
+    for line in lines[start + 1:]:
+        if line.startswith("## "):
+            break
+        if not line.lstrip().startswith("|"):
+            if table:
+                break          # the first table ended
+            continue
+        row = cells(line)
+        if header is None:
+            header = row
+        elif set("".join(row)) <= set(":- "):
+            continue           # the separator row
+        elif row and row[0]:
+            table[row[0]] = dict(zip(header[1:], row[1:]))
+    return table
+
+
+def fetch_price_table(timeout: float = 8.0):
+    """The published price table, or None when it cannot be read. One plain
+    GET of a public page: no credentials, no model call, nothing sent."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(PRICES_URL, headers={"User-Agent": "price-list-check"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return parse_price_table(resp.read().decode("utf-8", "replace")) or None
+    except Exception:
+        return None
+
+
+def last_recorded_prices() -> tuple:
+    """(run name, price table) of the newest run that noted one, or (None, None)."""
+    for d in sorted(RUNS.glob("*"), reverse=True):
+        try:
+            table = (json.loads((d / "run.json").read_text()).get("prices") or {}).get("table")
+        except (OSError, ValueError):
+            continue
+        if table:
+            return d.name, table
+    return None, None
+
+
+def price_name(model_id: str) -> str:
+    """`claude-sonnet-5-5` → `Claude Sonnet 5.5`, the name the list uses."""
+    parts = (model_id or "").split("-")
+    words = [p for p in parts if not p.isdigit()]
+    digits = [p for p in parts if p.isdigit() and len(p) < 4]   # a date suffix is not a version
+    return " ".join(w.capitalize() for w in words) + (" " + ".".join(digits) if digits else "")
+
+
+def price_rows(table: dict, model_id: str) -> dict:
+    """The rows of `table` that price `model_id` (a model can have more than
+    one: by prompt length)."""
+    name = price_name(model_id)
+    return {k: v for k, v in (table or {}).items() if k == name or k.startswith(name + " (")}
+
+
+def price_changes(before: dict, after: dict) -> list:
+    """One line per model whose row differs between two readings."""
+    out = []
+    for name in sorted(set(before) | set(after)):
+        a, b = before.get(name), after.get(name)
+        if a == b:
+            continue
+        if a is None:
+            out.append(f"{name}: new on the list")
+        elif b is None:
+            out.append(f"{name}: no longer on the list")
+        else:
+            moved = [f"{col} {a.get(col)} → {b.get(col)}"
+                     for col in sorted(set(a) | set(b)) if a.get(col) != b.get(col)]
+            out.append(f"{name}: " + "; ".join(moved))
+    return out
+
+
+def price_lines(table, previous, previous_run, answered: list) -> list:
+    """What to print about the price list before a run. `answered` are the
+    model ids behind the measured costs the estimate used."""
+    if not table:
+        return ["price list: not read (offline, or the page moved) — the estimate "
+                "stands on past runs alone"]
+    lines = []
+    changes = price_changes(previous, table) if previous else []
+    if not previous:
+        lines.append(f"price list noted: {len(table)} models, first reading")
+    elif not changes:
+        lines.append(f"price list: unchanged since {previous_run}")
+    else:
+        lines.append(f"PRICE LIST CHANGED since {previous_run}:")
+        lines += [f"  {c}" for c in changes]
+    for model in answered:
+        rows = price_rows(table, model)
+        for name, row in rows.items():
+            lines.append(f"  {name}: " + " · ".join(
+                f"{col.lower()} {row[col]}" for col in PRICE_COLUMNS if row.get(col)))
+        if previous and rows != price_rows(previous, model):
+            lines.append(f"  the estimate was measured at the previous price of "
+                         f"{price_name(model)}: expect this run to land away from it")
+    return lines
+
+
+def answered_models(info: dict) -> list:
+    """The model ids behind the measured figures of an estimate."""
+    return sorted({m.strip() for i in (info or {}).values()
+                   for m in (i.get("model") or "").split(",") if m.strip()})
+
+
 DRIFT = 0.25   # a finished run this far from its estimate says so
 
 
@@ -2910,7 +3054,106 @@ def budget_record(gate: Gate, planned: int, ran: int, repeat: int) -> dict:
             "capped": capped, "stopped_by": gate.stopped if capped else None,
             "samples_planned": planned, "samples_run": ran, "repeat": repeat,
             "five_hour": (gate.quota or {}).get("five_hour"),
-            "seven_day": (gate.quota or {}).get("seven_day")}
+            "seven_day": (gate.quota or {}).get("seven_day"),
+            # The windows as the run's first reply reported them, with what
+            # had been spent by then: with the closing values above, what a
+            # dollar of this run moved each window (quota_rates).
+            "quota_first": gate.first}
+
+
+# --------------------------------------------------------------------------- #
+# --quota (B-044, part b): what a run will take of the subscription's windows
+# --------------------------------------------------------------------------- #
+# The budget is dollars; the subscription is two windows, five hours and a
+# week, and a run that fits its budget can still leave the user without
+# capacity for the afternoon. `--quota` reads both windows with one minimal
+# call and forecasts where the selected run would leave them.
+#
+# What a dollar moves each window is measured from past runs (the first and
+# the last reading of each). It is a rough figure on purpose: the windows are
+# shared with everything else the account does while a run is going, and they
+# decay on their own. Until there are runs to measure it from, a flat rate
+# stands in: on 2026-11-10 five Sonnet runs moved the five-hour window 1.5 to
+# 1.6 points per dollar, and a full suite ($11.83) about one point of the week.
+QUOTA_FLAT = {"five_hour": 0.015, "seven_day": 0.001}
+QUOTA_WINDOWS = (("five_hour", "five-hour"), ("seven_day", "weekly"))
+QUOTA_MIN_SPEND = 1.00   # a run that spent less after its first reading says little
+QUOTA_RUNS = 5           # the rate is the median of this many recent runs
+
+
+def quota_rates(model: str) -> tuple:
+    """({window: fraction of the window per USD}, how many runs it comes from).
+    Zero runs means the flat rate. Costs nothing."""
+    seen = {k: [] for k, _ in QUOTA_WINDOWS}
+    used = 0
+    for d in sorted(RUNS.glob("*"), reverse=True):
+        if used >= QUOTA_RUNS:
+            break
+        try:
+            meta = json.loads((d / "run.json").read_text())
+        except (OSError, ValueError):
+            continue
+        b = meta.get("budget") or {}
+        first = b.get("quota_first") or {}
+        # A resumed run spans hours: its windows moved for other reasons too.
+        if meta.get("model") != model or not first or meta.get("resumed"):
+            continue
+        spent = (b.get("cost_usd") or 0) - (first.get("cost_usd") or 0)
+        if spent < QUOTA_MIN_SPEND:
+            continue
+        got = False
+        for k in seen:
+            a, z = first.get(k), b.get(k)
+            # A window that reset mid-run reads lower at the end: no rate there.
+            if a is not None and z is not None and z >= a:
+                seen[k].append((z - a) / spent)
+                got = True
+        used += got
+
+    def median(xs):
+        xs = sorted(xs)
+        return xs[len(xs) // 2] if len(xs) % 2 else (xs[len(xs) // 2 - 1] + xs[len(xs) // 2]) / 2
+    if not used:
+        return dict(QUOTA_FLAT), 0
+    return {k: (median(v) if v else QUOTA_FLAT[k]) for k, v in seen.items()}, used
+
+
+def quota_forecast(now: dict, usd: float, rates: dict) -> dict:
+    """Where `usd` of spend would leave each window that `now` reports."""
+    return {k: now[k] + usd * rates[k] for k, _ in QUOTA_WINDOWS if now.get(k) is not None}
+
+
+def quota_probe(model: str) -> Reply:
+    """The smallest call that makes the CLI report the windows: no tools, no
+    catalog, one word back. It is still a paid call — the only cost of --quota."""
+    return ask("Reply with the single word: ok", model=model, safe_mode=True,
+               system="You answer with one word.", tools="")
+
+
+def quota_report(now, usd: float, budget, rates: dict, runs: int, model: str) -> tuple:
+    """(lines to print, why the run must not start or "")."""
+    if not now:
+        return (["subscription windows: none reported (an API key, or the call failed) — "
+                 "nothing to forecast"], "")
+    def show(vals):
+        return " · ".join(f"{name} {vals[k]:.0%}" for k, name in QUOTA_WINDOWS if k in vals)
+    after = quota_forecast(now, usd, rates)
+    lines = [f"subscription now: {show(now)}",
+             f"after this run (~${usd:.2f}): {show(after)}"]
+    if budget is not None and budget > usd:
+        lines.append(f"if it spends its whole budget (${budget:.2f}): "
+                     f"{show(quota_forecast(now, budget, rates))}")
+    per = " · ".join(f"{name} {rates[k] * 100:.2f} points per dollar" for k, name in QUOTA_WINDOWS)
+    lines.append(f"rate: {per} — " + (f"median of the last {runs} run(s) on {model}" if runs
+                                     else f"flat rate, not yet measured on {model}"))
+    over = [name for k, name in QUOTA_WINDOWS if after.get(k, 0) > 1.0]
+    if over:
+        return lines, (f"the forecast passes 100% of the {' and the '.join(over)} window: "
+                       f"the run would leave the subscription without capacity")
+    if after.get("five_hour", 0) >= QUOTA_STOP:
+        lines.append(f"the five-hour window would reach {QUOTA_STOP:.0%}, where a run stops "
+                     f"launching samples: expect it to end CAPPED")
+    return lines, ""
 
 
 def main():
@@ -2923,6 +3166,11 @@ def main():
                          "the samples it still owes; the selection, the models, the branch "
                          "and --repeat come from that run, and --max-cost-usd is the budget "
                          "for what is missing. Refuses if the install or a scenario changed")
+    ap.add_argument("--quota", action="store_true",
+                    help="read the subscription's five-hour and weekly windows with one "
+                         "minimal PAID call and forecast where the selected run would leave "
+                         "them. Alone it prints the forecast and exits; with --max-cost-usd "
+                         "the run refuses to start when a window would pass 100%%")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--experiment", metavar="WHAT", default=None,
@@ -3084,8 +3332,26 @@ def main():
         if args.max_cost_usd is not None:
             fits = "fits" if est <= args.max_cost_usd else "does NOT fit — the run would refuse to start"
             print(f"budget ${args.max_cost_usd:.2f}: {fits}")
+        seen_run, seen = last_recorded_prices()
+        print("\n".join(price_lines(fetch_price_table(), seen, seen_run, answered_models(info))))
+        if args.quota:
+            print("--quota reads the windows with a paid call, so --dry-run does not make it: "
+                  "run --quota without --dry-run for the forecast")
         return 0
 
+    if args.quota and args.max_cost_usd is None:
+        measured = measured_costs(scenarios, args.model or "(cli default)",
+                                  args.judge_model, args.as_agent)
+        owed = (missing_samples(scenarios, read_records(RUNS / args.resume), args.repeat)
+                if resumed else [sc for _ in range(args.repeat) for sc in scenarios])
+        usd = sum(measured.get(s.id, s.estimate) for s in owed)
+        probe = quota_probe(AGENT_MODEL)
+        rates, runs = quota_rates(args.model or "(cli default)")
+        lines, _ = quota_report(probe.quota, usd, None, rates, runs,
+                                args.model or "(cli default)")
+        print("\n".join(lines))
+        print(f"(the reading cost ${probe.cost:.3f})")
+        return 0
     if args.max_cost_usd is None:
         sys.exit("a run that calls the model needs --max-cost-usd USD: the amount "
                  "that was approved for it (see --dry-run for the estimate)")
@@ -3104,6 +3370,17 @@ def main():
                  f"(${args.max_cost_usd:.2f}): this run would be cut short. Raise the "
                  f"budget or select fewer scenarios\n"
                  f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)', info)}")
+    seen_run, seen = last_recorded_prices()
+    prices = fetch_price_table()
+    print("\n".join(price_lines(prices, seen, seen_run, answered_models(info))))
+    if args.quota:
+        probe = quota_probe(AGENT_MODEL)
+        rates, runs = quota_rates(args.model or "(cli default)")
+        lines, why = quota_report(probe.quota, est, args.max_cost_usd, rates, runs,
+                                  args.model or "(cli default)")
+        print("\n".join(lines))
+        if why:
+            sys.exit(f"not started: {why}")
 
     global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -3130,6 +3407,9 @@ def main():
     # its author's intent, not a rule the report could infer.
     stamp["experiment"] = args.experiment
     stamp["branch"] = BRANCH
+    if prices:
+        # The list as published when the run started: the next run compares.
+        stamp["prices"] = {"source": PRICES_URL, "table": prices}
     if args.as_agent:
         stamp["agent_override"] = args.as_agent
     if skipped:

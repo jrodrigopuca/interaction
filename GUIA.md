@@ -65,6 +65,16 @@ arrancó salvo el tercero:
   esa corrida la acota el tope. Si una corrida completa termina a más de
   25 % de su estimación, lo dice al cerrar. Cada muestra guarda sus tokens
   (`agent_tokens`): mismos tokens y otro costo es un cambio de precio.
+- **La lista de precios.** No hay un endpoint de precios: la API de modelos
+  devuelve ids, límites y capacidades. Lo que el proveedor publica es una
+  página de documentación con versión markdown, pública y sin credenciales.
+  Antes de cada corrida (y en `--dry-run`) el harness la lee, sin llamar a
+  ningún modelo, la guarda en `run.json` (`prices`) y la compara con la de
+  la última corrida que la anotó: si cambió, dice qué fila y, si es la del
+  modelo con que se midió la estimación, que la corrida va a quedar lejos
+  de ella. Es una nota y nunca un freno: sin red sigue como antes. Y es el
+  precio de LISTA: el costo de cada muestra es el `total_cost_usd` del CLI,
+  que sigue a la lista recién cuando el CLI conoce el precio nuevo.
 - **Por corrida.** Antes de lanzar cada muestra se suma lo gastado; al llegar
   al tope, o con la ventana de 5 horas de la suscripción al 90 %, no sale
   ninguna más. Las que están en vuelo terminan con su juez, así que el exceso
@@ -89,6 +99,7 @@ muestras que `--repeat`, no.
 | `--list` | Lista escenarios y sale | |
 | `--dry-run` | Muestra qué correría y una estimación de costo | |
 | `--resume CORRIDA` | Termina una corrida `CAPPED` pagando solo las muestras que le faltan; la selección, los modelos, la rama y `--repeat` salen de esa corrida, y `--max-cost-usd` es el tope de lo que falta. Las muestras nuevas se fusionan en la misma carpeta y la corrida deja de estar `CAPPED` cuando queda completa. Se niega si el catálogo se reinstaló, o si cambió un agente, una skill, un escenario o los permisos. Con `--dry-run` dice cuántas muestras faltan y cuánto costarían | |
+| `--quota` | Lee las ventanas de 5 horas y semanal de la suscripción con UNA llamada mínima (paga) y pronostica dónde las dejaría la corrida elegida. Sola, imprime el pronóstico y sale; con `--max-cost-usd`, la corrida no arranca si alguna ventana pasaría del 100 %. Cuánto mueve un dólar cada ventana sale de la mediana de las últimas corridas del mismo modelo; sin corridas medidas usa una tarifa plana y lo dice. Es una cifra gruesa: las ventanas las comparte todo lo que hace la cuenta mientras tanto | |
 | `--jobs N` | Llamadas en paralelo | 4 |
 | `--max-cost-usd USD` | Tope de gasto de la corrida; obligatorio salvo con `--list`, `--dry-run` y `--applicability` | |
 | `--repeat N` | Muestras por escenario. Con más de una, si los veredictos discrepan el escenario se reporta `FLAKY`, nunca verde por mayoría | 1 |

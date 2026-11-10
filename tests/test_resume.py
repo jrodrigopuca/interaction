@@ -139,9 +139,9 @@ class Merge(unittest.TestCase):
         self.assertEqual((short["capped"], short["stopped_by"]), (True, "budget"))
 
 
-class EndToEnd(unittest.TestCase):
-    """main() with --resume: the selection and the models come from the run,
-    only the missing samples are taken, and the run folder is completed."""
+class MainFixture(unittest.TestCase):
+    """main() against a temporary runs/ folder holding one capped run, with
+    `run_one` replaced by a fake that records which samples were taken."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -156,6 +156,7 @@ class EndToEnd(unittest.TestCase):
         self.manifest.parent.mkdir()
         self.manifest.write_text(json.dumps(STAMP))
         self.taken = []
+        self.prices = None     # the price list as fetched; None is "offline"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -174,6 +175,7 @@ class EndToEnd(unittest.TestCase):
             mock.patch.object(run, "host_fingerprints", return_value=self.prints),
             mock.patch.object(run, "expired_experiments", return_value=[]),
             mock.patch.object(run, "run_one", side_effect=fake),
+            mock.patch.object(run, "fetch_price_table", return_value=self.prices),
             mock.patch.object(sys, "argv", ["run.py", *argv]),
         ]
         out = io.StringIO()
@@ -189,6 +191,12 @@ class EndToEnd(unittest.TestCase):
             for p in reversed(patches):
                 p.stop()
         return code, out.getvalue()
+
+
+
+class EndToEnd(MainFixture):
+    """main() with --resume: the selection and the models come from the run,
+    only the missing samples are taken, and the run folder is completed."""
 
     def test_it_takes_only_what_is_owed_and_the_run_stops_being_capped(self):
         code, out = self.main("--resume", "20261110-100000", "--max-cost-usd", "2")
@@ -216,6 +224,50 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("3 sample(s) still owed", out)
         self.assertEqual(self.taken, [])
+
+
+class QuotaFlag(MainFixture):
+    """--quota in main(): one probe call, a forecast, and a refusal when a
+    window would pass 100%. The probe is a fake."""
+
+    def run_with_probe(self, *argv, five_hour):
+        probe = run.Reply(text="ok", cost=0.07,
+                          quota={"five_hour": five_hour, "seven_day": 0.30, "resets": {}})
+        with mock.patch.object(run, "ask", return_value=probe) as ask:
+            code, out = self.main(*argv)
+        return code, out, ask
+
+    def test_alone_it_forecasts_and_takes_no_sample(self):
+        code, out, ask = self.run_with_probe("--only", "=a,=b", "--repeat", "3", "--quota",
+                                             five_hour=0.50)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ask.call_count, 1)
+        self.assertIn("subscription now: five-hour 50% · weekly 30%", out)
+        self.assertIn("after this run", out)
+        self.assertIn("the reading cost $0.070", out)
+        self.assertEqual(self.taken, [])
+
+    def test_with_a_budget_it_refuses_a_run_that_would_pass_the_window(self):
+        code, out, _ = self.run_with_probe("--only", "=a,=b", "--repeat", "3", "--quota",
+                                           "--max-cost-usd", "5", five_hour=0.995)
+        self.assertIn("passes 100% of the five-hour window", str(code))
+        self.assertEqual(self.taken, [])
+
+    def test_a_fresh_run_keeps_the_price_list_it_started_with(self):
+        self.prices = {"Claude Sonnet 5.5": {"Output tokens": "$10 / MTok"}}
+        code, out, _ = self.run_with_probe("--only", "=a,=b", "--max-cost-usd", "5",
+                                           five_hour=0.10)
+        self.assertEqual(code, 0, out)
+        self.assertIn("price list noted: 1 models, first reading", out)
+        new = [d for d in self.runs.iterdir() if d.name != "20261110-100000"]
+        meta = json.loads((new[0] / "run.json").read_text())
+        self.assertEqual(meta["prices"]["table"], self.prices)
+
+    def test_with_room_in_the_windows_the_run_goes_ahead(self):
+        code, out, _ = self.run_with_probe("--only", "=a,=b", "--quota",
+                                           "--max-cost-usd", "5", five_hour=0.10)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(self.taken), ["a", "b"])
 
 
 if __name__ == "__main__":
