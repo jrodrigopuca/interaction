@@ -54,3 +54,141 @@
     Estamos evaluando partir el monolito en servicios. Es una decisión
     cara de revertir y quiero entender los tradeoffs.
   expect: architect
+
+# --------------------------------------------------------------------------- #
+# B-043 (2026-11-10): pares de vecinos. Los siete de arriba tienen un dueño
+# obvio; acá cada par son dos pedidos del mismo tema que caen de un lado y del
+# otro de una frontera. Escritos desde lo que dice cada cuerpo, antes de
+# cualquier corrida, sin tomar las frases de los ejemplos de las descripciones.
+# --------------------------------------------------------------------------- #
+
+# stark / devops. devops Handoffs: "the first move on an incident is yours
+# when the runbook has it"; lh-orchestration #8: stark "when the cause is
+# unknown or crosses domains nobody owns".
+- id: route-pair-incident-with-rollback
+  category: routing
+  prompt: >
+    El deploy de hace diez minutos rompió el checkout. Tenemos rollback con
+    un comando y el tablero muestra el salto de errores justo ahí.
+  expect: devops
+
+- id: route-pair-incident-cause-unknown
+  category: routing
+  prompt: >
+    Desde ayer producción se cae cada tanto. No hubo deploys, el problema
+    toca la base, la cola de mensajes y un proveedor externo, y nadie sabe
+    por dónde empezar.
+  expect: stark
+
+# visionary / product-manager. visionary decide QUÉ merece existir;
+# product-manager lo ordena y lo defiende ante quien pide.
+- id: route-pair-roadmap-order
+  category: routing
+  prompt: >
+    El roadmap del trimestre tiene quince cosas y el equipo da para cinco.
+    Necesito el orden, qué queda afuera y cómo se lo explico a cada área
+    que pidió algo.
+  expect: product-manager
+
+- id: route-pair-product-identity
+  category: routing
+  prompt: >
+    Nuestro producto hace quince cosas razonablemente bien y nadie lo
+    recomienda. Quiero que me digan sin vueltas qué debería ser.
+  expect: visionary
+
+# gamification / ux-ui. Los dos caminan un flujo: uno mira por qué la gente
+# no sigue ni vuelve, el otro la pantalla.
+- id: route-pair-onboarding-dropoff
+  category: routing
+  prompt: >
+    En el onboarding la mitad de los usuarios llega al paso 3, lo completa
+    y no vuelve a abrir la app en toda la semana.
+  expect: gamification
+
+- id: route-pair-onboarding-screen
+  category: routing
+  prompt: >
+    En el paso 3 del onboarding la pantalla se ve cargada y la gente no
+    encuentra cómo continuar.
+  expect: ux-ui
+
+# stark / senior-dev. lh-zero-to-one: un módulo nuevo dentro de un producto
+# con usuarios es de senior-dev, aunque se haga desde cero.
+- id: route-pair-new-module-in-live-product
+  category: routing
+  prompt: >
+    Hay que sumarle facturación a la app que ya usan nuestros clientes. Es
+    un módulo nuevo, desde cero, al lado de lo que existe.
+  expect: senior-dev
+
+- id: route-pair-nothing-exists-yet
+  category: routing
+  prompt: >
+    Quiero probar una idea este fin de semana. No hay nada construido, ni
+    repo ni usuarios: necesito algo andando para mostrar el lunes.
+  expect: stark
+
+# architect / senior-dev. Una reseña de código es de senior-dev; una que
+# mueve un límite entre módulos es de architect.
+- id: route-pair-review-feature-pr
+  category: routing
+  prompt: >
+    Revisame este PR antes de mergear: agrega un endpoint de búsqueda y el
+    componente que lo consume.
+  expect: senior-dev
+
+- id: route-pair-review-boundary-pr
+  category: routing
+  prompt: >
+    Revisame este PR antes de mergear: saca la lógica de precios del módulo
+    de pedidos y la pone en uno nuevo del que van a depender tres servicios.
+  expect: architect
+
+# dba / data-ml. dba es dueño de la fuente transaccional; data-ml, de lo
+# derivado.
+- id: route-pair-derived-sales-table
+  category: routing
+  prompt: >
+    Necesito una tabla de ventas por día y por canal para el tablero de
+    gerencia, armada todas las noches desde la base de la aplicación.
+  expect: data-ml
+
+- id: route-pair-column-on-big-table
+  category: routing
+  prompt: >
+    La tabla de ventas de la aplicación necesita una columna para el canal
+    y ya tiene cuarenta millones de filas.
+  expect: dba
+
+# eng-manager / product-manager. El mismo atraso: uno responde por el cómo
+# y el cuándo, el otro por el qué.
+- id: route-pair-late-what-to-drop
+  category: routing
+  prompt: >
+    No llegamos al 30 con todo lo comprometido. ¿Qué es lo que menos les
+    duele a los usuarios si queda para después?
+  expect: product-manager
+
+- id: route-pair-late-how-to-land
+  category: routing
+  prompt: >
+    No llegamos al 30 con todo lo comprometido. Hay tres personas trabadas
+    esperando una definición y no sé cuánto riesgo real tiene la fecha.
+  expect: eng-manager
+
+# qa / security. qa camina al usuario torpe o apurado; el que puede alcanzar
+# datos ajenos es de security.
+- id: route-pair-user-breaks-the-flow
+  category: routing
+  prompt: >
+    Antes de salir quiero saber qué pasa si alguien manda el pago dos veces
+    o vuelve atrás a mitad del checkout.
+  expect: qa
+
+- id: route-pair-user-reaches-others-data
+  category: routing
+  prompt: >
+    Me parece que cambiando el número que va en la dirección de la página
+    un cliente puede abrir el pedido de otro.
+  expect: security
