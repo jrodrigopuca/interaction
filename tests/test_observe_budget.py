@@ -112,6 +112,36 @@ class FixtureWorkspace(unittest.TestCase):
         (self.ws / "README.md").write_text("seeded\nplus the agent's notes\n")
         self.assertEqual(run.written_files(self.ws, ["**/*.md"], self.sc), ["README.md"])
 
+    def test_forbid_files_sees_a_file_the_agent_created(self):
+        """`unchanged_files` only looks at seeded files: a new component next
+        to them is what `forbid_files` exists for."""
+        reply = run.Reply(text="done", events=[])
+        a = {"forbid_files": ["**/*.tsx"], "unchanged_files": ["src/**"]}
+        self.assertEqual(run.action_failures(a, self.sc, reply, self.ws), [])
+        (self.ws / "src" / "Empty.tsx").write_text("export const Empty = () => null\n")
+        self.assertEqual(run.action_failures(a, self.sc, reply, self.ws),
+                         ["wrote a forbidden file: src/Empty.tsx"])
+
+    def test_forbid_own_edits_counts_the_agent_not_its_subagent(self):
+        """The disk cannot tell who wrote: a delegated developer editing src/
+        keeps the promise, the agent editing it breaks it."""
+        def edit(path, parent=None):
+            return {"type": "assistant", "parent_tool_use_id": parent, "message": {"content": [
+                {"type": "tool_use", "id": "t", "name": "Edit",
+                 "input": {"file_path": path}}]}}
+        a = {"forbid_own_edits": ["src/**"]}
+        target = str(self.ws / "src" / "a.mjs")
+        delegated = run.Reply(text="done", events=[edit(target, parent="agent-1")])
+        self.assertEqual(run.action_failures(a, self.sc, delegated, self.ws), [])
+        spec = run.Reply(text="done", events=[edit(str(self.ws / "design" / "spec.md"))])
+        self.assertEqual(run.action_failures(a, self.sc, spec, self.ws), [])
+        own = run.Reply(text="done", events=[edit(target)])
+        self.assertEqual(run.action_failures(a, self.sc, own, self.ws),
+                         ["edited a forbidden file itself: src/a.mjs"])
+        relative = run.Reply(text="done", events=[edit("src/a.mjs")])
+        self.assertEqual(run.action_failures(a, self.sc, relative, self.ws),
+                         ["edited a forbidden file itself: src/a.mjs"])
+
     def test_observe_records_behaviour_without_changing_the_verdict(self):
         (self.ws / "src" / "a.mjs").write_text("export const a = 2\n")   # the agent edited it
         sc = self.sc

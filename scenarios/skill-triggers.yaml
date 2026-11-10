@@ -2459,3 +2459,103 @@
     ¿Qué diferencia hay entre XSS reflejado y almacenado?
   assert:
     forbid_skills: [lh-code-audit]
+
+# --------------------------------------------------------------------------- #
+# ux-ui, 2026-11-10: tres skills nuevas (lh-design-critique, lh-icons,
+# lh-visual-direction). Dos disparos y un casi-acierto por skill; el
+# casi-acierto es del mismo dominio y cae en lh-visual-craft.
+# --------------------------------------------------------------------------- #
+- id: skill-design-critique-trigger-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-react-projects
+  prompt: |
+    Revisá los estilos de ProjectList y dejalos prolijos.
+  assert:
+    expect_skills: [lh-design-critique]
+
+- id: skill-design-critique-trigger-2
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Un compañero me pasó este diseño del checkout y quiero tu evaluación
+    antes de aprobarlo: arriba el resumen del pedido, abajo tres botones del
+    mismo tamaño (Pagar, Guardar para después, Seguir comprando) y el total
+    en gris chico al pie. ¿Está para aprobar?
+  assert:
+    expect_skills: [lh-design-critique]
+
+- id: skill-design-critique-near-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Estoy armando la pantalla de configuración y me está quedando apretada.
+    ¿Qué le ajusto?
+  assert:
+    forbid_skills: [lh-design-critique]
+
+- id: skill-icons-trigger-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-brand-icons
+  prompt: |
+    Dibujame el icono de "turnos" para la app.
+  assert:
+    expect_skills: [lh-icons]
+
+- id: skill-icons-trigger-2
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-brand-icons
+  prompt: |
+    La pantalla de avisos queda en blanco cuando no hay ninguno. Haceme una
+    ilustración chica para ese estado vacío.
+  assert:
+    expect_skills: [lh-icons]
+
+- id: skill-icons-near-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    ¿De qué tamaño y color pongo los iconos de la barra lateral para que no
+    compitan con el texto del menú?
+  assert:
+    forbid_skills: [lh-icons]
+
+- id: skill-visual-direction-trigger-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-landing-brief
+  prompt: |
+    Armame el mockup en HTML de la landing de Navaja.
+  assert:
+    expect_skills: [lh-visual-direction]
+
+- id: skill-visual-direction-trigger-2
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  prompt: |
+    Todas las pantallas que hacemos terminan pareciendo la misma plantilla.
+    Estamos por arrancar una app de recetas para gente que cocina con poco
+    tiempo: ¿cómo le damos una identidad propia?
+  assert:
+    expect_skills: [lh-visual-direction]
+
+- id: skill-visual-direction-near-1
+  category: skill-trigger
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-tokens-existing
+  prompt: |
+    Con los tokens que ya tenemos, ¿qué espaciado va entre las secciones de
+    la página de precios?
+  assert:
+    forbid_skills: [lh-visual-direction]

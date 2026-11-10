@@ -117,6 +117,15 @@ for something to be written, assert the file:
     expect_files: ["**/*.md"]   # any glob matching is enough; .claude/ is ignored
 ```
 
+`forbid_files` is the mirror: no file the agent created or modified may match
+its globs. `unchanged_files` only looks at files the fixture seeded, so a new
+file next to them needs this one.
+
+Both read the disk, and the disk cannot tell who wrote. For a promise of the
+form "this role does not write X, it hands X over", use `forbid_own_edits`:
+globs the agent itself may not send to an editing tool. Edits made by a
+subagent it delegated to do not count.
+
 Every trial also records `permission_denials` — tool calls the host refused for
 lack of permission — and a run that had any ends with a line naming those
 scenarios. They are not failures on their own (a scenario may `deny:` a tool on

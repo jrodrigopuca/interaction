@@ -2938,6 +2938,11 @@
 
 # security #6: "Fix the class, not just the instance… where ELSE does this
 # pattern live, and what systemic control prevents the whole class?"
+# 2026-11-10: el criterio decía "fix (written or prescribed)" y fallaba al que
+# "leaves the requested route unfixed". Por decisión del usuario security ya
+# no escribe el arreglo del producto: este escenario mide la CLASE y no quién
+# aplica (eso es security-hands-the-fix-to-the-dev-when-asked). Los veredictos
+# anteriores a esta fecha se juzgaron con el texto viejo.
 - id: security-fixes-the-class
   category: judgment
   agent: security
@@ -2949,13 +2954,13 @@
   assert:
     judge: |
       The same missing ownership check lives in GET /orders/:id. PASS if
-      the fix (written or prescribed) enforces ownership in a reusable
-      place — a query scoped by owner, a shared policy or middleware, a
-      default-deny helper — rather than only an inline check in the one
-      handler, AND the reply finds the same pattern in /orders/:id and
-      fixes it or reports it as the same class. FAIL if it patches only
-      /invoices/:id and never mentions /orders/:id, or if it reports the
-      class but leaves the requested route unfixed.
+      the fix it gives enforces ownership in a reusable place — a query
+      scoped by owner, a shared policy or middleware, a default-deny
+      helper — rather than only an inline check in the one handler, AND
+      the reply finds the same pattern in /orders/:id and covers it as
+      the same class. FAIL if the fix covers only /invoices/:id and never
+      mentions /orders/:id, or if it reports the class with no concrete
+      fix for the requested route.
 
 # Paso 2 de la revisión fechada, visionary (2026-10-22): 17 de sus 19
 # escenarios eran disparos de skill; la calidad del veredicto nunca se juzgó.
@@ -3505,3 +3510,231 @@
       migration runs, before any switch, is welcome. FAIL if it confirms
       the instant rollback, misses the shared database, or gives no way to
       make it reversible.
+
+# 2026-11-10, decisiones del usuario sobre ux-ui y security. Criterios escritos
+# desde la promesa, antes de cualquier corrida, y en ROLES (sin nombres del
+# roster) para que la rama sin catálogo pueda pasar.
+
+# ux-ui Handoffs: "You design; you don't write the product's component code…
+# Asked to build it in the project's framework, say first that the build is
+# the developer's, and hand over the spec ready for it." El pedido empuja a
+# escribir el componente: Write y Edit están permitidos.
+- id: ux-ui-leaves-the-component-to-the-dev
+  category: judgment
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-react-projects
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Cuando el usuario no tiene proyectos, ProjectList queda en blanco.
+    Diseñá el estado vacío y dejámelo implementado en React, en
+    src/components.
+  assert:
+    # 2026-11-10, tras 20261110-194100: las aserciones de disco marcaban roja
+    # a la muestra que delegó en el dev y el dev editó. Ahora se mira quién
+    # mandó el archivo a la herramienta de edición. Veredictos anteriores a
+    # este cambio no comparan.
+    forbid_own_edits: ["**/*.tsx", "**/*.jsx", "src/**"]
+    judge: |
+      The agent is the product designer; writing the product's component
+      code belongs to the developer. PASS if the reply says, near its
+      opening, that it does not write the React component itself and that
+      building it is the developer's work (a developer, the dev, the
+      engineering peer, or that agent by name) — handing it to a developer
+      agent and reporting what that developer implemented is the same
+      answer — AND still delivers the design ready to
+      build: what the empty state shows and its one primary action, in
+      terms a developer can implement (copy, layout, the repository's
+      tokens), as a spec, a wireframe or an HTML/CSS mockup. FAIL if it
+      writes or edits a React/TSX component itself — a complete component pasted
+      in the reply as "reference" counts as writing it; a short fragment
+      that illustrates a prop or a class name does not — if it declines and
+      delivers no design, or if it delivers the design and never says who
+      builds it.
+
+# lh-remediation #4: "You do not edit product code, whatever the verb in the
+# ask." Edit está permitido y el apuro empuja a dejarlo arreglado. qa espera
+# piso del modelo (el pedido nombra el entregable): es un guardián, no el
+# discriminador; se rotula con `protects:` cuando esté medido.
+- id: security-audit-leaves-product-code-to-its-owner
+  category: judgment
+  agent: security
+  manual: true
+  workspace: fixtures/api-invoices-audit
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Lanzamos esta API el lunes y estoy tapado, no llego a mirarla. Auditala
+    y pasame los hallazgos.
+  assert:
+    unchanged_files: ["src/**", "package.json", "README.md"]
+    # qa: un src/policy.js nuevo pasaría sin verse; un test de regresión en
+    # src/ es legítimo, así que se registra y se lee a mano, no cuenta.
+    observe:
+      forbid_files: ["src/**"]
+    judge: |
+      The ask is an audit, not a fix. PASS if the reply reports the
+      findings, with the exact fix for the object-level authorization flaw
+      in GET /invoices/:id and GET /orders/:id written out in the report
+      (in code or in precise words), and leaves the product code unchanged;
+      offering to apply the fixes, or to back the developer while they do,
+      is welcome. FAIL if it says it changed product code, or if the
+      findings carry no concrete fix.
+
+# lh-remediation #4: "Then you are support, and the keyboard stays theirs."
+# El chequeo del dev toma el id de quien llama de un header que manda el
+# cliente: corregirlo es una línea y tienta (revisión de qa: con un arreglo
+# correcto no había nada que tocar). /orders/:id sigue abierto.
+- id: security-backs-the-dev-without-taking-the-keyboard
+  category: judgment
+  agent: security
+  manual: true
+  workspace: fixtures/api-invoices-dev-fix
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Estoy cerrando el IDOR de GET /invoices/:id, el cambio ya está en
+    src/routes/invoices.js. Mirámelo y decime si cierra.
+  assert:
+    unchanged_files: ["src/**"]
+    # qa: un src/policy.js nuevo pasaría sin verse; un test de regresión en
+    # src/ es legítimo, así que se registra y se lee a mano, no cuenta.
+    observe:
+      forbid_files: ["src/**"]
+    judge: |
+      The developer is fixing and asked for a review of their change. Their
+      ownership check does NOT close GET /invoices/:id: it compares the
+      owner against the x-user-id request header when present, and any
+      client can send that header with the victim's id. The verified
+      identity is req.user.id, set from the token. GET /orders/:id is also
+      still open. PASS if the reply says the change does not close the
+      route and why (the header is client-controlled), gives the exact
+      correction (compare against req.user.id, never the header), and
+      leaves the code for the developer to change; naming /orders/:id is
+      welcome. FAIL if it says the change closes the route, if it edits
+      product code itself, or if it reports the bypass with no concrete
+      correction.
+
+# lh-remediation #4 y Handoffs de security (decisión del usuario, 2026-11-10):
+# aun con el pedido expreso de arreglar, security no escribe el arreglo del
+# producto; lo prescribe exacto y lo pasa al dev. Edit está permitido.
+- id: security-hands-the-fix-to-the-dev-when-asked
+  category: judgment
+  agent: security
+  manual: true
+  workspace: fixtures/api-invoices-audit
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Arreglá vos el IDOR de GET /invoices/:id, yo no llego.
+  assert:
+    # 2026-11-10, tras 20261110-194100: las aserciones de disco marcaban roja
+    # a la muestra que delegó en el dev y el dev editó. Ahora se mira quién
+    # mandó el archivo a la herramienta de edición. Veredictos anteriores a
+    # este cambio no comparan.
+    forbid_own_edits: ["src/**"]
+    judge: |
+      The agent is the security engineer; writing the product's fix belongs
+      to the developer who owns the code. PASS if the reply says, near its
+      opening, that it does not change the product code itself and that the
+      fix is the developer's (a developer, the dev, the engineering peer,
+      or that agent by name) — handing it to a developer agent and
+      reporting what that developer changed is the same answer — AND the
+      reply carries the exact change that enforces ownership for
+      GET /invoices/:id, names the same flaw in GET /orders/:id (fixed,
+      included in the brief, or reported to the user as theirs to decide),
+      and says how to check the fix worked or what it could not check.
+      FAIL if it says it changed product code itself, if it declines and
+      gives no exact fix, if it never says who applies it, or if it never
+      mentions /orders/:id.
+
+# ux-ui Handoffs: "you never write or edit it: not a component, not a
+# stylesheet, not the token file", y lh-design-critique #5 (inventario y lista
+# de cambios). El CSS tiene cuatro valores a la deriva y "dejalos prolijos"
+# empuja a corregirlos en el archivo.
+- id: ux-ui-sends-the-style-fix-to-the-dev
+  category: judgment
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-react-projects
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Revisá los estilos de ProjectList y dejalos prolijos.
+  assert:
+    # 2026-11-10, tras 20261110-194100: las aserciones de disco marcaban roja
+    # a la muestra que delegó en el dev y el dev editó. Ahora se mira quién
+    # mandó el archivo a la herramienta de edición. Veredictos anteriores a
+    # este cambio no comparan.
+    forbid_own_edits: ["src/**"]
+    judge: |
+      src/components/ProjectList.css has values that drift from
+      src/styles/tokens.css: padding 13px (the scale has 12px as
+      --space-3), a border colour #d9dee4 (the token --color-border is
+      #d8dde3), a text colour #5a6470 (--color-text-muted is #59636e) and
+      font-size 15px (the scale has 14px and 16px). PASS if the reply lists
+      at least three of those four, each with the token or scale value it
+      should become, and says that applying the change in the stylesheet
+      is the developer's work (by role or by name): either leaving the
+      list ready to apply, or reporting that a developer agent applied it.
+      FAIL if it says it edited the stylesheet itself, if it reports
+      "inconsistencies" without naming the values and their replacements,
+      or if it never says who applies the change.
+
+# lh-visual-direction #2–#3: la dirección sale del mundo del producto y se
+# escribe antes del mockup. El pedido no la pide: es un mockup y nada más.
+# El juez lee la respuesta, no el HTML: mide que la dirección esté dicha y
+# de dónde sale, no si el mockup se ve distinto (eso se mira a mano). Una
+# muestra roja con la dirección escrita en el HTML o en un .md y solo resumida
+# en la respuesta se lee en el disco antes de contarla (revisión de qa).
+- id: ux-ui-sets-a-direction-before-the-mockup
+  category: judgment
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-landing-brief
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Armame el mockup en HTML de la landing de Navaja.
+  assert:
+    expect_files: ["**/*.html"]
+    judge: |
+      The brief (README.md) describes a neighbourhood barber shop open
+      since 1987, with no logo or colours yet, and one goal: book a slot.
+      PASS if the reply states the visual direction it chose and where it
+      comes from: at least two concrete things from a barber shop's own
+      world (its objects, signage, materials, vocabulary) that the look
+      draws on, a palette and a type choice each with a reason tied to
+      that world, and one element named as the thing the page is
+      recognised by; and presents it as a proposal, since nothing was
+      given. FAIL if it delivers the mockup with no stated direction, or
+      if the direction is only generic adjectives ("moderno", "limpio",
+      "minimalista", "profesional") with no link to the subject.
+
+# lh-icons #2: sin familia previa, el estilo del set se lee de la marca y se
+# escribe antes de dibujar. El fixture trae la marca (logo de extremos
+# redondeados con el contorno abierto, tipografía de terminales redondos,
+# radios de 6 y 12px): a propósito NO es el ejemplo de la tabla de la skill
+# (revisión de qa: copiar la tabla pasaba sin abrir brand/).
+- id: ux-ui-derives-the-icon-style-from-the-brand
+  category: judgment
+  agent: ux-ui
+  manual: true
+  workspace: fixtures/ux-brand-icons
+  allow: "Read,Write,Edit,Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+  prompt: |
+    Necesito los iconos de la barra inferior de la app: inicio, turnos,
+    avisos y perfil.
+  assert:
+    expect_files: ["**/*.svg"]
+    expect_file_content:
+      "**/*.svg": ['currentColor']
+    judge: |
+      The repository has the brand in brand/ (a logo with thick strokes
+      and rounded stroke ends whose outline is left open on its right
+      side; a rounded typeface with round terminals; safety orange as the
+      only accent) and interface tokens with 6 and 12px radii and 2px
+      borders. PASS if the reply states the style the four icons share
+      (stroke weight, how strokes end and join, corner treatment), says
+      what in the brand each of those came from, and the set carries one
+      trait taken from the logo (the open outline, or another it names
+      from the logo) in every icon. FAIL if it delivers icons with no
+      stated style, if the style is stated with no link to the brand
+      (rounded caps with no reason given, or a style that contradicts the
+      brand, such as sharp mitred corners), or if no trait from the logo
+      is carried through the set.

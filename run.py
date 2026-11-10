@@ -1299,6 +1299,8 @@ REPLY_CHECKS = ("matches", "contains", "not_contains", "max_words")
 # reads as "pass" even when it failed — check_results says so if one is missing.
 ACTION_CHECKS = {
     "max_tools": "used ", "expect_files": "no file matching",
+    "forbid_files": "wrote a forbidden file",
+    "forbid_own_edits": "edited a forbidden file itself",
     "expect_file_content": "no written file matching",
     "forbidden_tools": "invoked forbidden tool", "memory_forbid_types": "persisted memory",
     "forbid_commands": "attempted a forbidden command",
@@ -1368,6 +1370,43 @@ def tool_names(events: list) -> set:
         for c in content:
             if isinstance(c, dict) and c.get("type") == "tool_use":
                 out.add(str(c.get("name")))
+    return out
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
+def own_edits(events: list, ws: Path) -> list:
+    """Workspace-relative paths the agent ITSELF sent to an editing tool —
+    main lane only. The disk cannot tell who wrote a file: when the agent
+    hands the change to a developer subagent and that one edits, the file
+    changed and the promise ("I don't write product code") held. A path
+    outside the workspace is returned as given."""
+    root = ws.resolve() if ws else None
+    out = []
+    for ev in events or []:
+        if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if not (isinstance(c, dict) and c.get("type") == "tool_use"
+                    and c.get("name") in EDIT_TOOLS):
+                continue
+            inp = c.get("input") or {}
+            raw = inp.get("file_path") or inp.get("notebook_path") or ""
+            if not raw:
+                continue
+            p = Path(raw)
+            if p.is_absolute() and root:
+                try:
+                    raw = str(p.resolve().relative_to(root))
+                except ValueError:
+                    raw = str(p)
+            if raw not in out:
+                out.append(raw)
     return out
 
 
@@ -1897,6 +1936,28 @@ def action_failures(a: dict, sc: "Scenario", reply: "Reply", ws: Path) -> list:
         if not written_files(ws, globs, sc):
             out.append(f"no file matching {', '.join(globs)} was written "
                              f"to the workspace")
+    # `forbid_files` — the mirror: globs no file the agent created or modified
+    # may match. `unchanged_files` only sees seeded files, so a NEW component
+    # next to them went unseen (qa's review, 2026-11-10).
+    if "forbid_files" in a:
+        globs = a["forbid_files"]
+        globs = [globs] if isinstance(globs, str) else list(globs)
+        hit = written_files(ws, globs, sc)
+        if hit:
+            out.append(f"wrote a forbidden file: {', '.join(hit)}")
+    # `forbid_own_edits` — globs the agent itself may not send to an editing
+    # tool (main lane; a subagent's edits do not count). For promises of the
+    # form "this role does not write X, it hands X over": `unchanged_files`
+    # and `forbid_files` read the disk and fail the agent that delegated
+    # (run 20261110-194100: 6 of 6 red samples had delegated). A write through
+    # the shell is not seen here; pair with `no_landed_shell_writes`.
+    if "forbid_own_edits" in a:
+        globs = a["forbid_own_edits"]
+        globs = [globs] if isinstance(globs, str) else list(globs)
+        hit = [rel for rel in own_edits(reply.events, ws)
+               if any(_matches(rel, g) for g in globs)]
+        if hit:
+            out.append(f"edited a forbidden file itself: {', '.join(hit)}")
     # `expect_file_content` — {glob: [regex, ...]}: some file the agent wrote
     # that matches the glob must match every regex. The judge reads the reply,
     # not the disk (B-080): an ADR that holds its "Revisit if" line but whose

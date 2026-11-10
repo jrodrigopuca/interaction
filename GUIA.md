@@ -292,6 +292,8 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     expect_files: ["**/*.md"]       # algún archivo que el agente CREÓ o MODIFICÓ (uno del fixture que no tocó no cuenta)
     expect_file_content: {"docs/**/*.md": ['(?i)revisit']}  # algún archivo escrito que calce con el glob cumple cada regex (el juez lee la respuesta, no el disco)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
+    forbid_files: ["**/*.tsx"]      # ningún archivo que el agente CREÓ o MODIFICÓ puede calzar (unchanged_files no ve los archivos nuevos)
+    forbid_own_edits: ["src/**"]    # el agente MISMO no puede mandar esos archivos a la herramienta de edición; si delega y edita el subagente, no cuenta (el disco no sabe quién escribió)
     expect_commands: ['\bnpm run gen\b']  # regex que algún comando Bash tiene que CORRER sin error (rechazado o fallido no cuenta)
     no_landed_shell_writes: *shell-write-detours  # ningún comando que calce puede haber CORRIDO sin error (el intento rechazado no cuenta; eso es forbid_commands)
     # o, juzgado por lo que IMPRIMIÓ y no por el exit: {cmd: <regex>, output: <regex>} (ver abajo)
