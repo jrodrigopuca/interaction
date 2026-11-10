@@ -53,7 +53,10 @@ aprobó para ella. Hay tres frenos, y ninguno corta una muestra que ya
 arrancó salvo el tercero:
 
 - **La estimación.** Si lo que estima `--dry-run` no entra en el tope, la
-  corrida no arranca.
+  corrida no arranca. Cada escenario se estima con lo que costó por muestra
+  la última vez que corrió igual que ahora (mismo escenario, modelo, juez y
+  rama); el que no tiene medida va a la tarifa plana de su tipo, y
+  `--dry-run` dice cuántos son de cada clase.
 - **Por corrida.** Antes de lanzar cada muestra se suma lo gastado; al llegar
   al tope, o con la ventana de 5 horas de la suscripción al 90 %, no sale
   ninguna más. Las que están en vuelo terminan con su juez, así que el exceso

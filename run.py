@@ -204,8 +204,8 @@ class Scenario:
     @property
     def estimate(self) -> float:
         """A declared `budget:` says the scenario does real work, so its kind's
-        estimate would lie: half the ceiling stands in until per-scenario
-        estimates are measured (B-044, part b)."""
+        estimate would lie: half the ceiling stands in until the scenario
+        has a measured cost (measured_costs)."""
         if self.budget:
             return max(self.sample_budget / 2, EST_SINGLE)
         return EST_HEAVY if self.heavy else EST_SINGLE
@@ -2583,8 +2583,77 @@ def skill_cell_lines(aggs: list) -> list:
     return out
 
 
-def estimate(scenarios: list, repeat: int) -> float:
-    return sum(s.estimate for s in scenarios) * repeat
+def measured_costs(scenarios: list, model: str, judge_model: str,
+                   override: str = None) -> dict:
+    """{scenario id: USD per sample}, from the latest run that measured each
+    scenario AS IT IS NOW: same scenario fingerprint, same agent model, same
+    judge model, same branch (B-044, part b).
+
+    The flat rate by kind was the estimate, and it was wrong both ways on
+    2026-11-10: routing costs half of it ($0.074 a sample against $0.15) and a
+    scenario with a workspace about twice, so runs that fitted their budget
+    refused to start and a run that started went 40% over its estimate. A
+    sample that ended in ERROR is left out: a call cut short says nothing of
+    what a whole one costs. Experiments are left out too — another session.
+
+    Costs nothing: it reads run.json and trace.jsonl, newest first, and stops
+    once every scenario asked about has a figure."""
+    want = {s.id: s for s in scenarios}
+    found = {}
+    for d in sorted(RUNS.glob("*"), reverse=True):
+        if len(found) == len(want):
+            break
+        trace = d / "trace.jsonl"
+        if not trace.is_file():
+            continue
+        try:
+            meta = json.loads((d / "run.json").read_text())
+        except (OSError, ValueError):
+            continue
+        if meta.get("model") != model or meta.get("judge_model") != judge_model:
+            continue
+        if (meta.get("branch") or "with") != BRANCH:
+            continue
+        if (meta.get("agent_override") or None) != (override or None):
+            continue
+        if is_experiment_run(meta):
+            continue
+        then = (meta.get("fingerprints") or {}).get("scenarios") or {}
+        for line in trace.read_text().splitlines():
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            sid = rec.get("id")
+            if sid not in want or sid in found or then.get(sid) != want[sid].fingerprint:
+                continue
+            costs = [t["cost_usd"] for t in rec.get("trials") or []
+                     if t.get("status") != "ERROR" and t.get("cost_usd")]
+            if costs:
+                found[sid] = sum(costs) / len(costs)
+    return found
+
+
+def estimate(scenarios: list, repeat: int, measured: dict = None) -> float:
+    """What the run should cost: each scenario at its measured cost per sample
+    when there is one (measured_costs), at the flat rate of its kind when
+    there is not."""
+    measured = measured or {}
+    return sum(measured.get(s.id, s.estimate) for s in scenarios) * repeat
+
+
+def estimate_note(scenarios: list, measured: dict, model: str) -> str:
+    """How much of the estimate is measured. An estimate that mixes the two
+    without saying so reads as more certain than it is."""
+    flat = [s for s in scenarios if s.id not in measured]
+    if not flat:
+        return f"every scenario measured on {model}"
+    if not measured:
+        return f"not calibrated for {model}: every scenario at the flat rate of its kind"
+    rate = sum(s.estimate for s in flat)
+    return (f"{len(scenarios) - len(flat)} measured on {model}, {len(flat)} not yet "
+            f"(${rate:.2f} a pass at the flat rate): {', '.join(s.id for s in flat[:4])}"
+            + (f" and {len(flat) - 4} more" if len(flat) > 4 else ""))
 
 
 def budget_record(gate: Gate, planned: int, ran: int, repeat: int) -> dict:
@@ -2726,8 +2795,11 @@ def main():
         calls = (len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
                  ) * args.repeat
         sampled = f" × {args.repeat} samples" if args.repeat > 1 else ""
-        est = estimate(scenarios, args.repeat)
+        measured = measured_costs(scenarios, args.model or "(cli default)",
+                                  args.judge_model, args.as_agent)
+        est = estimate(scenarios, args.repeat, measured)
         print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · ~${est:.2f}")
+        print(f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)')}")
         if args.max_cost_usd is not None:
             fits = "fits" if est <= args.max_cost_usd else "does NOT fit — the run would refuse to start"
             print(f"budget ${args.max_cost_usd:.2f}: {fits}")
@@ -2738,11 +2810,14 @@ def main():
                  "that was approved for it (see --dry-run for the estimate)")
     if args.max_cost_usd <= 0:
         sys.exit("--max-cost-usd must be above zero")
-    est = estimate(scenarios, args.repeat)
+    measured = measured_costs(scenarios, args.model or "(cli default)",
+                              args.judge_model, args.as_agent)
+    est = estimate(scenarios, args.repeat, measured)
     if est > args.max_cost_usd:
         sys.exit(f"the estimate (${est:.2f}) exceeds --max-cost-usd "
                  f"(${args.max_cost_usd:.2f}): this run would be cut short. Raise the "
-                 f"budget or select fewer scenarios")
+                 f"budget or select fewer scenarios\n"
+                 f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)')}")
 
     global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")

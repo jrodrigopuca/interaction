@@ -161,5 +161,81 @@ class Capped(unittest.TestCase):
         self.assertEqual(row["run"], "20261013-100000")
 
 
+class MeasuredEstimate(unittest.TestCase):
+    """B-044 (b): the estimate is the last measured cost of each scenario as
+    it is now, on the same models; the flat rate only where nothing matches."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.runs = Path(self.tmp.name)
+        self.a = run.Scenario(id="a", category="routing", prompt="p")
+        self.b = run.Scenario(id="b", category="judgment", prompt="q")
+        self.patch = mock.patch.object(run, "RUNS", self.runs)
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+        self.tmp.cleanup()
+
+    def record(self, name, sc, costs, model="sonnet", judge="sonnet", fp=None,
+               statuses=None, **meta):
+        d = self.runs / name
+        d.mkdir()
+        (d / "run.json").write_text(json.dumps({
+            "model": model, "judge_model": judge, "branch": "with",
+            "fingerprints": {"isolation": " ".join(run.NEUTRAL_SESSION),
+                             "scenarios": {sc.id: fp or sc.fingerprint}}, **meta}))
+        statuses = statuses or ["PASS"] * len(costs)
+        (d / "trace.jsonl").write_text(json.dumps({"id": sc.id, "trials": [
+            {"status": s, "cost_usd": c} for s, c in zip(statuses, costs)]}) + "\n")
+
+    def costs(self, *scs, model="sonnet", judge="sonnet"):
+        return run.measured_costs(list(scs), model, judge)
+
+    def test_a_measured_scenario_is_estimated_at_what_it_cost(self):
+        self.record("20261110-100000", self.a, [0.07, 0.08, 0.09])
+        m = self.costs(self.a, self.b)
+        self.assertAlmostEqual(m["a"], 0.08)
+        self.assertNotIn("b", m)
+        self.assertAlmostEqual(run.estimate([self.a, self.b], 3, m),
+                               3 * (0.08 + run.EST_SINGLE))
+
+    def test_the_latest_matching_run_wins(self):
+        self.record("20261110-100000", self.a, [0.50])
+        self.record("20261110-110000", self.a, [0.10])
+        self.assertAlmostEqual(self.costs(self.a)["a"], 0.10)
+
+    def test_another_model_or_judge_is_not_this_scenarios_cost(self):
+        self.record("20261110-100000", self.a, [0.02], model="haiku")
+        self.record("20261110-110000", self.a, [0.30], judge="opus")
+        self.assertEqual(self.costs(self.a), {})
+        self.assertAlmostEqual(self.costs(self.a, model="haiku")["a"], 0.02)
+
+    def test_a_scenario_that_changed_since_is_not_measured(self):
+        self.record("20261110-100000", self.a, [0.07], fp="an-older-fingerprint")
+        self.assertEqual(self.costs(self.a), {})
+
+    def test_the_other_branch_an_override_and_an_experiment_do_not_count(self):
+        self.record("20261110-100000", self.a, [0.07], branch="without")
+        self.record("20261110-110000", self.a, [0.07], agent_override="qa")
+        self.record("20261110-120000", self.a, [0.07], experiment="a probe")
+        self.assertEqual(self.costs(self.a), {})
+
+    def test_a_sample_that_errored_is_left_out_of_the_mean(self):
+        self.record("20261110-100000", self.a, [0.10, 1.00], statuses=["PASS", "ERROR"])
+        self.assertAlmostEqual(self.costs(self.a)["a"], 0.10)
+        self.record("20261110-110000", self.b, [1.00], statuses=["ERROR"])
+        self.assertNotIn("b", self.costs(self.b))
+
+    def test_the_note_says_how_much_is_measured(self):
+        both = [self.a, self.b]
+        self.assertIn("not calibrated for opus", run.estimate_note(both, {}, "opus"))
+        note = run.estimate_note(both, {"a": 0.08}, "sonnet")
+        self.assertIn("1 measured on sonnet, 1 not yet", note)
+        self.assertIn("b", note)
+        self.assertEqual(run.estimate_note(both, {"a": 0.08, "b": 0.2}, "sonnet"),
+                         "every scenario measured on sonnet")
+
+
 if __name__ == "__main__":
     unittest.main()
