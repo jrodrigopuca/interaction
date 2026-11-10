@@ -12,6 +12,7 @@ this repo does.
 ./run.py --applicability        # which past verdicts still apply to today's install (free)
 ./run.py --category routing --max-cost-usd 2   # one category
 ./run.py --only qa-never --max-cost-usd 1       # one scenario
+./run.py --resume 20261110-191413 --max-cost-usd 2   # finish a capped run: only the missing samples
 ./run.py --max-cost-usd 13                      # everything
 
 ./viz.py --index                # every run, one page → runs/index.html
@@ -282,7 +283,9 @@ subscription's five-hour window is at 90% (each reply reports that window);
 and each agent call carries its own `--max-budget-usd` ceiling against a
 runaway. Samples in flight always finish with their judge — a sample cut
 short is money spent for no verdict. A run stopped that way is `CAPPED`:
-recorded in `run.json`, exit code 2, never a baseline. Details in
+recorded in `run.json`, exit code 2, never a baseline. `--resume RUN` finishes
+it, paying only the samples it still owes and merging them into the same
+folder; it refuses when the install or a scenario changed since. Details in
 [GUIA.md](GUIA.md#presupuesto).
 
 **On-demand regressions.** Some categories are `manual: true`: out of the full

@@ -2171,6 +2171,16 @@ def run_one(sc: Scenario) -> Result:
     return res
 
 
+def status_of(statuses) -> str:
+    """A scenario's status from its samples' — see Aggregate.status for why
+    disagreement is FLAKY and never a majority. A function of its own because
+    --resume recomputes it from samples stored on disk."""
+    seen = set(statuses)
+    if "FLOOR" in seen and seen <= {"PASS", "FLOOR"}:
+        return "FLOOR"      # sampling below the floor is what the floor predicts
+    return seen.pop() if len(seen) == 1 else "FLAKY"
+
+
 @dataclass
 class Aggregate:
     """One scenario and every sample taken of it. With --repeat 1 it is a
@@ -2195,10 +2205,7 @@ class Aggregate:
         agent is inconsistent or the scenario is, and both are worth knowing.
         So FLAKY is not a pass. Asking for certainty and getting ambiguity
         means the answer is "we still don't know"."""
-        seen = {r.status for r in self.trials}
-        if "FLOOR" in seen and seen <= {"PASS", "FLOOR"}:
-            return "FLOOR"      # sampling below the floor is what the floor predicts
-        return seen.pop() if len(seen) == 1 else "FLAKY"
+        return status_of(r.status for r in self.trials)
 
     @property
     def passes(self) -> int:
@@ -2465,63 +2472,222 @@ def persist(aggs: list, outdir: Path):
     outdir.mkdir(parents=True, exist_ok=True)
     with (outdir / "trace.jsonl").open("w") as fh:
         for a in aggs:
-            lead = a.lead
-            fh.write(json.dumps({
-                "id": a.sc.id,
-                "category": a.sc.category,
-                "agent": a.sc.agent or "(routing)",
-                "prompt": a.sc.prompt,
-                # What the verdict was measured against, verbatim: when the
-                # scenario changes later, a report can still show the criterion
-                # this run used instead of today's (fingerprint says WHETHER it
-                # changed, this says to WHAT).
-                "assert": a.sc.assertions,
-                "status": a.status,
-                "floor": a.sc.floor or None,
-                "repeat": len(a.trials),
-                "passes": a.passes,
-                "tally": a.tally,
-                "failures": lead.fails,
-                "judge": {"verdict": lead.judged, "why": lead.judge_why}
-                         if "judge" in a.sc.assertions else None,
-                "cost_usd": round(a.cost, 4),
-                "duration_ms": lead.reply.ms,
-                "reply": lead.reply.text,
-                "error": lead.reply.error,
-                "score": lead.score or None,
-                "delegated_to": lead.spawned or None,
-                "trials": [trial_record(t) for t in a.trials],
-                "events": lead.reply.events,
-            }, ensure_ascii=False) + "\n")
-        # Per-scenario markdown, for reading a failure without jq.
+            fh.write(json.dumps(scenario_record(a), ensure_ascii=False) + "\n")
+    # Per-scenario markdown, for reading a failure without jq.
     for a in aggs:
-        n = len(a.trials)
-        head = a.status + (f"  {a.passes}/{n}" if n > 1 else "")
-        body = [f"# {a.sc.id}  ({head})", "",
-                f"- agent: `{a.sc.agent or '(routing)'}`",
-                f"- category: {a.sc.category}",
-                f"- cost: ${a.cost:.4f}", "",
-                "## Prompt", "", a.sc.prompt]
-        for i, r in enumerate(a.trials, 1):
-            label = "## Reply" if n == 1 else f"## Sample {i}/{n} — {r.status}"
-            if r.score_line:
-                label += f"  ·  suite {r.score_line}"
-            body += ["", label, ""]
-            if r.spawned:
-                body += ["Subagents: " + ", ".join(
-                    f"`{v.get('agent')}`" for v in r.spawned.values()), ""]
-            for f in r.score.get("failures", [])[:20]:
-                body += [f"- ✕ {f['name']} — `{f['input']!r}` → `{f['got']}` "
-                         f"(expected `{f['expected']}`)"]
-            if r.score.get("failures"):
-                body += [""]
-            body += [r.reply.text or f"*(error: {r.reply.error})*"]
-            if r.fails:
-                body += ["", "Failed assertions:"] + [f"- {f}" for f in r.fails]
-            if r.judge_why:
-                body += ["", f"Judge: {r.judged} — {r.judge_why}"]
-        (outdir / f"{a.sc.id}.md").write_text("\n".join(body) + "\n")
+        (outdir / f"{a.sc.id}.md").write_text(scenario_markdown(a))
     return outdir
+
+
+def scenario_record(a: "Aggregate") -> dict:
+    """One line of trace.jsonl: a scenario and every sample taken of it."""
+    lead = a.lead
+    return {
+        "id": a.sc.id,
+        "category": a.sc.category,
+        "agent": a.sc.agent or "(routing)",
+        "prompt": a.sc.prompt,
+        # What the verdict was measured against, verbatim: when the
+        # scenario changes later, a report can still show the criterion
+        # this run used instead of today's (fingerprint says WHETHER it
+        # changed, this says to WHAT).
+        "assert": a.sc.assertions,
+        "status": a.status,
+        "floor": a.sc.floor or None,
+        "repeat": len(a.trials),
+        "passes": a.passes,
+        "tally": a.tally,
+        "failures": lead.fails,
+        "judge": {"verdict": lead.judged, "why": lead.judge_why}
+                 if "judge" in a.sc.assertions else None,
+        "cost_usd": round(a.cost, 4),
+        "duration_ms": lead.reply.ms,
+        "reply": lead.reply.text,
+        "error": lead.reply.error,
+        "score": lead.score or None,
+        "delegated_to": lead.spawned or None,
+        "trials": [trial_record(t) for t in a.trials],
+        "events": lead.reply.events,
+    }
+
+
+def sample_block(r: "Result", label: str) -> list:
+    """The markdown lines of one sample, under `label`."""
+    if r.score_line:
+        label += f"  ·  suite {r.score_line}"
+    body = ["", label, ""]
+    if r.spawned:
+        body += ["Subagents: " + ", ".join(
+            f"`{v.get('agent')}`" for v in r.spawned.values()), ""]
+    for f in r.score.get("failures", [])[:20]:
+        body += [f"- ✕ {f['name']} — `{f['input']!r}` → `{f['got']}` "
+                 f"(expected `{f['expected']}`)"]
+    if r.score.get("failures"):
+        body += [""]
+    body += [r.reply.text or f"*(error: {r.reply.error})*"]
+    if r.fails:
+        body += ["", "Failed assertions:"] + [f"- {f}" for f in r.fails]
+    if r.judge_why:
+        body += ["", f"Judge: {r.judged} — {r.judge_why}"]
+    return body
+
+
+def scenario_markdown(a: "Aggregate") -> str:
+    n = len(a.trials)
+    head = a.status + (f"  {a.passes}/{n}" if n > 1 else "")
+    body = [f"# {a.sc.id}  ({head})", "",
+            f"- agent: `{a.sc.agent or '(routing)'}`",
+            f"- category: {a.sc.category}",
+            f"- cost: ${a.cost:.4f}", "",
+            "## Prompt", "", a.sc.prompt]
+    for i, r in enumerate(a.trials, 1):
+        body += sample_block(r, "## Reply" if n == 1 else f"## Sample {i}/{n} — {r.status}")
+    return "\n".join(body) + "\n"
+
+
+# --------------------------------------------------------------------------- #
+# --resume (B-044, part b): finish a capped run, paying only what is missing
+# --------------------------------------------------------------------------- #
+# A run its budget cut short is never a baseline, and until now the only way
+# to make it one was to pay for all of it again. The samples it did take are
+# whole verdicts on an install that is still there: --resume takes the ones
+# that are missing and merges them into the SAME run folder, so the run stops
+# being capped when it is complete. It refuses when anything a verdict
+# depends on moved since — samples from two installs describe neither (B-052).
+LEAD_KEYS = ("failures", "judge", "duration_ms", "reply", "error", "score",
+             "delegated_to", "events")
+
+
+def read_records(outdir: Path) -> dict:
+    """{scenario id: its trace.jsonl record}, in file order."""
+    out = {}
+    try:
+        lines = (outdir / "trace.jsonl").read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if rec.get("id"):
+            out[rec["id"]] = rec
+    return out
+
+
+def resume_refusal(meta: dict, fingerprints: dict, catalog) -> str:
+    """Why this run cannot be resumed, or "" when it can. `fingerprints` and
+    `catalog` are today's, for the same selection."""
+    budget = (meta or {}).get("budget") or {}
+    if not budget:
+        return "it has no budget record: it predates the cost cap or never finished"
+    if not budget.get("capped"):
+        return "it is not capped: every sample it planned was taken"
+    if meta.get("catalog_changed"):
+        return "the catalog was reinstalled while it ran: its samples already mix two versions"
+    if catalog_changed(meta.get("catalog"), catalog):
+        return ("the catalog was reinstalled since "
+                f"({((meta.get('catalog') or {}).get('catalog_commit') or '?')[:7]} → "
+                f"{((catalog or {}).get('catalog_commit') or '?')[:7]}): new samples would "
+                f"describe another install")
+    then = meta.get("fingerprints") or {}
+    # The harness's own commit is left out: a doc commit in this repo would
+    # block every resume. What a verdict depends on is in the other keys.
+    moved = sorted(k for k in set(then) | set(fingerprints)
+                   if k != "harness" and then.get(k) != fingerprints.get(k))
+    if moved:
+        return f"what its verdicts depend on changed since: {', '.join(moved)}"
+    return ""
+
+
+def missing_samples(scenarios: list, records: dict, repeat: int) -> list:
+    """The samples a capped run still owes, as whole passes over the suite
+    (the order a fresh run takes them in): a scenario that has k samples
+    joins from pass k+1."""
+    have = {sid: len(rec.get("trials") or []) for sid, rec in records.items()}
+    return [sc for n in range(repeat) for sc in scenarios if n >= have.get(sc.id, 0)]
+
+
+def merge_record(old: dict, new: dict) -> dict:
+    """A scenario's stored record plus the samples a resume took of it. The
+    lead stays the stored one when it already was a failing sample; a first
+    failure among the new ones takes its place, events included."""
+    trials = (old.get("trials") or []) + (new.get("trials") or [])
+    statuses = [t.get("status") for t in trials]
+    tally = {}
+    for s in statuses:
+        tally[s] = tally.get(s, 0) + 1
+    out = dict(old)
+    old_failed = any(t.get("status") != "PASS" for t in old.get("trials") or [])
+    new_failed = any(t.get("status") != "PASS" for t in new.get("trials") or [])
+    if new_failed and not old_failed:
+        out.update({k: new.get(k) for k in LEAD_KEYS})
+    out.update({"trials": trials, "status": status_of(statuses), "repeat": len(trials),
+                "passes": statuses.count("PASS"), "tally": tally,
+                "cost_usd": round((old.get("cost_usd") or 0) + (new.get("cost_usd") or 0), 4)})
+    return out
+
+
+def merge_into(outdir: Path, scenarios: list, aggs: list, when: str) -> dict:
+    """Write the resumed samples into the run: trace.jsonl rewritten with the
+    merged records, and each touched scenario's markdown extended. Returns
+    {id: record} for every scenario the run now holds."""
+    old = read_records(outdir)
+    new = {a.sc.id: a for a in aggs}
+    merged = {}
+    for sid in [s.id for s in scenarios] + [i for i in old if i not in {s.id for s in scenarios}]:
+        if sid in old and sid in new:
+            merged[sid] = merge_record(old[sid], scenario_record(new[sid]))
+        elif sid in new:
+            merged[sid] = scenario_record(new[sid])
+        elif sid in old:
+            merged[sid] = old[sid]
+    with (outdir / "trace.jsonl").open("w") as fh:
+        for rec in merged.values():
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    for sid, a in new.items():
+        path = outdir / f"{sid}.md"
+        if sid not in old or not path.is_file():
+            path.write_text(scenario_markdown(a))
+            continue
+        rec = merged[sid]
+        lines = path.read_text().rstrip("\n").split("\n")
+        lines[0] = f"# {sid}  ({rec['status']}  {rec['passes']}/{rec['repeat']})"
+        lines = [f"- cost: ${rec['cost_usd']:.4f}" if l.startswith("- cost: $") else l
+                 for l in lines]
+        first = rec["repeat"] - len(a.trials) + 1
+        lines += ["", f"## Resumed {when}: samples {first} to {rec['repeat']} of {rec['repeat']}"]
+        for i, r in enumerate(a.trials, first):
+            lines += sample_block(r, f"## Sample {i}/{rec['repeat']} — {r.status}")
+        path.write_text("\n".join(lines) + "\n")
+    return merged
+
+
+def merged_budget(old: dict, gate: "Gate", ran: int) -> dict:
+    """The run's budget after a resume: what was authorized and spent in
+    total, and whether samples are still owed."""
+    cost = (old.get("cost_usd") or 0) + gate.spent
+    allowed = (old.get("max_cost_usd") or 0) + gate.max_cost
+    samples = (old.get("samples_run") or 0) + ran
+    capped = samples < (old.get("samples_planned") or 0)
+    return {**old, "max_cost_usd": round(allowed, 4), "cost_usd": round(cost, 4),
+            "overshoot_usd": round(max(0.0, cost - allowed), 4),
+            "capped": capped, "stopped_by": gate.stopped if capped else None,
+            "samples_run": samples,
+            "five_hour": (gate.quota or {}).get("five_hour", old.get("five_hour")),
+            "seven_day": (gate.quota or {}).get("seven_day", old.get("seven_day"))}
+
+
+def report_records(records: dict) -> int:
+    """The summary of a resumed run, from its merged records: the new samples
+    alone would show a scenario green whose stored sample failed."""
+    print()
+    for rec in sorted(records.values(), key=lambda r: (r.get("category") or "", r["id"])):
+        print(f"{MARK.get(rec['status'], '?   ')}  {rec.get('category') or '':12} {rec['id']:28} "
+              f"{rec['passes']}/{rec['repeat']}  ${rec.get('cost_usd') or 0:.3f}")
+    ok = sum(1 for r in records.values() if r["status"] in ("PASS", "FLOOR"))
+    print(f"\n{ok}/{len(records)} passed")
+    return 0 if ok == len(records) else 1
 
 
 MARK = {"PASS": " ok ", "FAIL": "FAIL", "ERROR": "ERR ", "FLAKY": "FLKY", "FLOOR": "flr "}
@@ -2752,6 +2918,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--category", help="run only this category")
     ap.add_argument("--only", help="run scenarios whose id contains this (comma-separated: any; a leading = matches the id exactly)")
+    ap.add_argument("--resume", metavar="RUN", default=None,
+                    help="finish a capped run (its folder name under runs/), paying only "
+                         "the samples it still owes; the selection, the models, the branch "
+                         "and --repeat come from that run, and --max-cost-usd is the budget "
+                         "for what is missing. Refuses if the install or a scenario changed")
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--dry-run", action="store_true", help="show what would run")
     ap.add_argument("--experiment", metavar="WHAT", default=None,
@@ -2803,6 +2974,26 @@ def main():
                          "already spent its tokens and returns nothing, so err "
                          "high — this catches hangs, it does not save money")
     args = ap.parse_args()
+
+    resumed = None
+    if args.resume:
+        try:
+            resumed = json.loads((RUNS / args.resume / "run.json").read_text())
+        except (OSError, ValueError):
+            sys.exit(f"--resume {args.resume}: no readable run.json under {RUNS}")
+        ids = list((resumed.get("fingerprints") or {}).get("scenarios") or {})
+        if not ids:
+            sys.exit(f"--resume {args.resume}: the run does not record which scenarios it selected")
+        # Everything that defines the run comes from the run, not from flags.
+        args.model = None if resumed.get("model") == "(cli default)" else resumed.get("model")
+        args.judge_model = resumed.get("judge_model") or args.judge_model
+        args.branch = resumed.get("branch") or "with"
+        args.as_agent = resumed.get("agent_override")
+        args.experiment = resumed.get("experiment")
+        args.user_session = ((resumed.get("fingerprints") or {}).get("isolation") or ""
+                             ).startswith("USER SESSION")
+        args.repeat = (resumed.get("budget") or {}).get("repeat") or 1
+        args.category, args.only = None, ",".join("=" + i for i in ids)
 
     AGENT_MODEL, JUDGE_MODEL = args.model, args.judge_model
     global NEUTRAL, BRANCH
@@ -2878,6 +3069,16 @@ def main():
         measured = measured_costs(scenarios, args.model or "(cli default)",
                                   args.judge_model, args.as_agent, info)
         est = estimate(scenarios, args.repeat, measured)
+        if resumed:
+            why = resume_refusal(resumed, host_fingerprints(scenarios), {
+                k: v for k, v in (read_stamp(INSTALLED_AGENTS.parent / ".local-agents.json")
+                                  or {}).items() if k not in ("skills", "agents")} or None)
+            owed = missing_samples(scenarios, read_records(RUNS / args.resume), args.repeat)
+            est = sum(measured.get(s.id, s.estimate) for s in owed)
+            print(f"\nresume {args.resume}: {len(owed)} sample(s) still owed · ~${est:.2f}")
+            if why:
+                print(f"cannot be resumed: {why}")
+            return 0
         print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · ~${est:.2f}")
         print(f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)', info)}")
         if args.max_cost_usd is not None:
@@ -2894,6 +3095,10 @@ def main():
     measured = measured_costs(scenarios, args.model or "(cli default)",
                               args.judge_model, args.as_agent, info)
     est = estimate(scenarios, args.repeat, measured)
+    tasks = [sc for _ in range(args.repeat) for sc in scenarios]
+    if resumed:
+        tasks = missing_samples(scenarios, read_records(RUNS / args.resume), args.repeat)
+        est = sum(measured.get(s.id, s.estimate) for s in tasks)
     if est > args.max_cost_usd:
         sys.exit(f"the estimate (${est:.2f}) exceeds --max-cost-usd "
                  f"(${args.max_cost_usd:.2f}): this run would be cut short. Raise the "
@@ -2902,7 +3107,7 @@ def main():
 
     global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
-    outdir = RUNS / started
+    outdir = RUNS / (args.resume or started)
     outdir.mkdir(parents=True, exist_ok=True)
     # Workspaces live with the run. What an agent DID — which files it wrote,
     # how many times it re-ran its own tests — is evidence the reply summarises
@@ -2929,7 +3134,16 @@ def main():
         stamp["agent_override"] = args.as_agent
     if skipped:
         stamp["without_skipped"] = skipped
-    (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
+    if resumed:
+        why = resume_refusal(resumed, stamp["fingerprints"], stamp["catalog"])
+        if why:
+            sys.exit(f"--resume {args.resume}: {why}")
+        if not tasks:
+            sys.exit(f"--resume {args.resume}: no sample is missing")
+        stamp = resumed          # the run keeps its own stamp; today's only had to match it
+        print(f"resuming {args.resume}: {len(tasks)} sample(s) still owed")
+    else:
+        (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
     cat = stamp["catalog"] or {}
     print(f"catalog {cat.get('catalog_commit', '?')[:7]}"
           f"{' (dirty)' if cat.get('catalog_dirty') else ''} installed {cat.get('installed_at', '?')}")
@@ -2940,7 +3154,6 @@ def main():
     # Whole-suite passes, not N back-to-back copies of each scenario. Samples of
     # the same prompt launched together all pay cache creation; separated by a
     # full pass, the later ones land on a warm prompt cache instead.
-    tasks = [sc for _ in range(args.repeat) for sc in scenarios]
 
     def run_and_log(sc: Scenario) -> Result:
         r = run_one(sc)
@@ -2954,29 +3167,45 @@ def main():
         by_id.setdefault(r.sc.id, []).append(r)
     # A scenario the gate never reached has no samples and no verdict.
     aggs = [Aggregate(sc, by_id[sc.id]) for sc in scenarios if sc.id in by_id]
-    stamp["budget"] = budget_record(gate, len(tasks), len(flat), args.repeat)
-    persist(aggs, outdir)
+    before = stamp.get("effective") or {}
+    if resumed:
+        records = merge_into(outdir, scenarios, aggs, started)
+        stamp["budget"] = merged_budget(stamp["budget"], gate, len(flat))
+        stamp.setdefault("resumed", []).append({
+            "at": started, "max_cost_usd": gate.max_cost, "cost_usd": round(gate.spent, 4),
+            "samples_run": len(flat), "samples_owed": len(tasks)})
+    else:
+        stamp["budget"] = budget_record(gate, len(tasks), len(flat), args.repeat)
+        persist(aggs, outdir)
     (outdir / "partial.jsonl").unlink(missing_ok=True)
     # What actually ran, known only after the calls: aliases resolved, styles seen.
     stamp["effective"] = {
-        "agent_models": sorted({r.reply.model for r in flat if r.reply.model}),
-        "judge_models": sorted(JUDGE_SEEN),
-        "output_styles": sorted({r.reply.output_style for r in flat if r.reply.output_style}),
+        "agent_models": sorted(set(before.get("agent_models") or [])
+                               | {r.reply.model for r in flat if r.reply.model}),
+        "judge_models": sorted(set(before.get("judge_models") or []) | set(JUDGE_SEEN)),
+        "output_styles": sorted(set(before.get("output_styles") or [])
+                                | {r.reply.output_style for r in flat if r.reply.output_style}),
     }
     changed = close_stamp(stamp, manifest)
     (outdir / "run.json").write_text(json.dumps(stamp, indent=2))
-    code = report(aggs, outdir, time.time() - t0)
+    if resumed:
+        code = report_records(records)
+        print(f"run saved to {outdir}")
+    else:
+        code = report(aggs, outdir, time.time() - t0)
     b = stamp["budget"]
     print(f"spent ${b['cost_usd']:.2f} of ${b['max_cost_usd']:.2f}"
           + (f" · five-hour window at {b['five_hour']:.0%}" if b.get("five_hour") is not None else ""))
-    if not b["capped"] and drift_note(est, b["cost_usd"]):
-        print(drift_note(est, b["cost_usd"]))
+    if (resumed or not b["capped"]) and len(flat) == len(tasks) and drift_note(est, gate.spent):
+        print(drift_note(est, gate.spent))
     if b["capped"]:
         why = ("its budget" if b["stopped_by"] == "budget"
                else f"the five-hour window reaching {QUOTA_STOP:.0%}")
         print(f"\nCAPPED RUN: stopped by {why} after {b['samples_run']} of "
               f"{b['samples_planned']} samples (overshoot ${b['overshoot_usd']:.2f}). "
-              f"It is never a baseline; {len(scenarios) - len(aggs)} scenario(s) did not run.")
+              f"It is never a baseline; "
+              f"{len(scenarios) - (len(records) if resumed else len(aggs))} scenario(s) did not "
+              f"run. Finish it with --resume {outdir.name}.")
         code = code or 2
     if BRANCH == "without":
         print(f"\nWITHOUT-CATALOG RUN: the model alone, {len(skipped)} scenario(s) skipped "

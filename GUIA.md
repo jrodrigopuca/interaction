@@ -88,6 +88,7 @@ muestras que `--repeat`, no.
 | `--only a,b` | Corre los ids que contengan alguno de los textos | todos |
 | `--list` | Lista escenarios y sale | |
 | `--dry-run` | Muestra qué correría y una estimación de costo | |
+| `--resume CORRIDA` | Termina una corrida `CAPPED` pagando solo las muestras que le faltan; la selección, los modelos, la rama y `--repeat` salen de esa corrida, y `--max-cost-usd` es el tope de lo que falta. Las muestras nuevas se fusionan en la misma carpeta y la corrida deja de estar `CAPPED` cuando queda completa. Se niega si el catálogo se reinstaló, o si cambió un agente, una skill, un escenario o los permisos. Con `--dry-run` dice cuántas muestras faltan y cuánto costarían | |
 | `--jobs N` | Llamadas en paralelo | 4 |
 | `--max-cost-usd USD` | Tope de gasto de la corrida; obligatorio salvo con `--list`, `--dry-run` y `--applicability` | |
 | `--repeat N` | Muestras por escenario. Con más de una, si los veredictos discrepan el escenario se reporta `FLAKY`, nunca verde por mayoría | 1 |
