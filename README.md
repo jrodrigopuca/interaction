@@ -274,7 +274,9 @@ Cost is linear: `--repeat 3` on the full suite is three suites (the last one,
 **Every run that calls the model states its budget** (`--max-cost-usd`), the
 amount approved for it. A run whose estimate does not fit refuses to start
 (the estimate is each scenario's last measured cost per sample on the same
-model, judge and branch; `--dry-run` says how much of it is measured); a
+model, judge and branch; `--dry-run` says how much of it is measured, which
+model answered and how old the oldest figure is, because prices and aliases
+move); a
 running one launches no new sample once the budget is spent or the
 subscription's five-hour window is at 90% (each reply reports that window);
 and each agent call carries its own `--max-budget-usd` ceiling against a

@@ -574,6 +574,7 @@ class Reply:
     model: str = ""           # the model that ACTUALLY answered (init event)
     output_style: str = ""    # host output style in force (init event)
     quota: dict = None        # subscription windows after this call; see quota_of
+    tokens: dict = None       # the result event's `usage`; see tokens_of
 
     @property
     def graded(self) -> str:
@@ -583,6 +584,26 @@ class Reply:
         closed with the specialist's report — the final text alone failed a
         criterion the agent had met in its first sentence."""
         return self.transcript or self.text
+
+
+TOKEN_KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+              "cache_read_input_tokens")
+
+
+def tokens_of(events: list):
+    """Token counts of a call, from its result event. Dollars are tokens times
+    a price, and the price is not ours: it changes with the provider's list,
+    and an alias like `sonnet` moves to another model. The tokens are what the
+    scenario itself costs; kept per sample so that a jump in dollars can be
+    told apart — same tokens, the price moved; more tokens, the agent or the
+    scenario did."""
+    for ev in reversed(events or []):
+        if isinstance(ev, dict) and ev.get("type") == "result":
+            usage = ev.get("usage")
+            if isinstance(usage, dict):
+                out = {k: usage[k] for k in TOKEN_KEYS if isinstance(usage.get(k), int)}
+                return out or None
+    return None
 
 
 def quota_of(events: list):
@@ -768,7 +789,7 @@ def parse_stream(stdout: str, returncode: int = 0, stderr: str = "") -> Reply:
     if not text:
         return Reply(text="", cost=cost, events=events, quota=quota,
                      error="no result event in stream")
-    return Reply(text=text.strip(), cost=cost, ms=ms, events=events,
+    return Reply(text=text.strip(), cost=cost, ms=ms, events=events, tokens=tokens_of(events),
                  transcript=transcript_of(events, text), model=model, output_style=style,
                  quota=quota)
 
@@ -2370,6 +2391,7 @@ def trial_record(r: Result) -> dict:
                  if "judge" in r.sc.assertions else None,
         "cost_usd": round(r.cost, 4),
         "agent_cost_usd": round(r.reply.cost, 4),
+        "agent_tokens": r.reply.tokens,
         "judge_cost_usd": round(r.judge_cost, 4),
         "duration_ms": r.reply.ms,
         "reply": r.reply.text,
@@ -2583,8 +2605,11 @@ def skill_cell_lines(aggs: list) -> list:
     return out
 
 
+STALE_DAYS = 30   # a measured cost older than this is flagged, not dropped
+
+
 def measured_costs(scenarios: list, model: str, judge_model: str,
-                   override: str = None) -> dict:
+                   override: str = None, info: dict = None) -> dict:
     """{scenario id: USD per sample}, from the latest run that measured each
     scenario AS IT IS NOW: same scenario fingerprint, same agent model, same
     judge model, same branch (B-044, part b).
@@ -2595,6 +2620,13 @@ def measured_costs(scenarios: list, model: str, judge_model: str,
     refused to start and a run that started went 40% over its estimate. A
     sample that ended in ERROR is left out: a call cut short says nothing of
     what a whole one costs. Experiments are left out too — another session.
+
+    A figure is dollars at the price of the day it was measured, on the
+    model the alias pointed to that day. Neither is fixed, so `info`, when
+    given, receives {id: {"run": run name, "model": the model that answered}}
+    and estimate_note says how old the figures are. Nothing is re-priced:
+    the latest run wins, so one run after a price change the estimate is
+    current again, and the budget gate bounds that one run.
 
     Costs nothing: it reads run.json and trace.jsonl, newest first, and stops
     once every scenario asked about has a figure."""
@@ -2631,6 +2663,10 @@ def measured_costs(scenarios: list, model: str, judge_model: str,
                      if t.get("status") != "ERROR" and t.get("cost_usd")]
             if costs:
                 found[sid] = sum(costs) / len(costs)
+                if info is not None:
+                    answered = sorted({t.get("model") for t in rec.get("trials") or []
+                                       if t.get("model")})
+                    info[sid] = {"run": d.name, "model": ", ".join(answered) or None}
     return found
 
 
@@ -2642,18 +2678,61 @@ def estimate(scenarios: list, repeat: int, measured: dict = None) -> float:
     return sum(measured.get(s.id, s.estimate) for s in scenarios) * repeat
 
 
-def estimate_note(scenarios: list, measured: dict, model: str) -> str:
-    """How much of the estimate is measured. An estimate that mixes the two
-    without saying so reads as more certain than it is."""
+def run_day(name: str):
+    """The date in a run's folder name (YYYYMMDD-HHMMSS), or None."""
+    try:
+        return datetime.strptime(name[:8], "%Y%m%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def estimate_note(scenarios: list, measured: dict, model: str,
+                  info: dict = None, today=None) -> str:
+    """How much of the estimate is measured, on which model and how long ago.
+    An estimate that mixes measured and flat figures without saying so reads
+    as more certain than it is, and so does a price from another month."""
     flat = [s for s in scenarios if s.id not in measured]
-    if not flat:
-        return f"every scenario measured on {model}"
     if not measured:
         return f"not calibrated for {model}: every scenario at the flat rate of its kind"
-    rate = sum(s.estimate for s in flat)
-    return (f"{len(scenarios) - len(flat)} measured on {model}, {len(flat)} not yet "
-            f"(${rate:.2f} a pass at the flat rate): {', '.join(s.id for s in flat[:4])}"
-            + (f" and {len(flat) - 4} more" if len(flat) > 4 else ""))
+    if not flat:
+        note = f"every scenario measured on {model}"
+    else:
+        rate = sum(s.estimate for s in flat)
+        note = (f"{len(scenarios) - len(flat)} measured on {model}, {len(flat)} not yet "
+                f"(${rate:.2f} a pass at the flat rate): {', '.join(s.id for s in flat[:4])}"
+                + (f" and {len(flat) - 4} more" if len(flat) > 4 else ""))
+    used = [info[s.id] for s in scenarios if info and s.id in info and s.id in measured]
+    answered = sorted({i["model"] for i in used if i.get("model")})
+    if answered:
+        note += f" · answered by {', '.join(answered)}"
+        if len(answered) > 1:
+            note += " (more than one model behind the alias: their prices differ)"
+    days = [d for d in (run_day(i.get("run")) for i in used) if d]
+    if days:
+        today = today or datetime.now().date()
+        oldest = min(days)
+        age = (today - oldest).days
+        note += f" · oldest figure from {oldest.isoformat()}"
+        stale = sum(1 for d in days if (today - d).days > STALE_DAYS)
+        if stale:
+            note += (f" ({age} days) — {stale} of {len(days)} figures are over {STALE_DAYS} "
+                     f"days old: prices may have moved since")
+    return note
+
+
+DRIFT = 0.25   # a finished run this far from its estimate says so
+
+
+def drift_note(estimated: float, spent: float) -> str:
+    """One line when a COMPLETE run cost far from what was estimated — the
+    only moment a price change shows itself. Empty when it stayed close."""
+    if estimated <= 0 or abs(spent - estimated) / estimated <= DRIFT:
+        return ""
+    return (f"cost ${spent:.2f} against an estimate of ${estimated:.2f} "
+            f"({(spent - estimated) / estimated:+.0%}): the price per token, the model "
+            f"behind the alias, or what the scenarios do has changed. Compare "
+            f"`agent_tokens` with the previous run to tell which; the next estimate "
+            f"already uses this run's figures")
 
 
 def budget_record(gate: Gate, planned: int, ran: int, repeat: int) -> dict:
@@ -2795,11 +2874,12 @@ def main():
         calls = (len(scenarios) + sum(1 for s in scenarios if "judge" in s.assertions)
                  ) * args.repeat
         sampled = f" × {args.repeat} samples" if args.repeat > 1 else ""
+        info = {}
         measured = measured_costs(scenarios, args.model or "(cli default)",
-                                  args.judge_model, args.as_agent)
+                                  args.judge_model, args.as_agent, info)
         est = estimate(scenarios, args.repeat, measured)
         print(f"\n{len(scenarios)} scenarios{sampled} · ~{calls} calls · ~${est:.2f}")
-        print(f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)')}")
+        print(f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)', info)}")
         if args.max_cost_usd is not None:
             fits = "fits" if est <= args.max_cost_usd else "does NOT fit — the run would refuse to start"
             print(f"budget ${args.max_cost_usd:.2f}: {fits}")
@@ -2810,14 +2890,15 @@ def main():
                  "that was approved for it (see --dry-run for the estimate)")
     if args.max_cost_usd <= 0:
         sys.exit("--max-cost-usd must be above zero")
+    info = {}
     measured = measured_costs(scenarios, args.model or "(cli default)",
-                              args.judge_model, args.as_agent)
+                              args.judge_model, args.as_agent, info)
     est = estimate(scenarios, args.repeat, measured)
     if est > args.max_cost_usd:
         sys.exit(f"the estimate (${est:.2f}) exceeds --max-cost-usd "
                  f"(${args.max_cost_usd:.2f}): this run would be cut short. Raise the "
                  f"budget or select fewer scenarios\n"
-                 f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)')}")
+                 f"estimate: {estimate_note(scenarios, measured, args.model or '(cli default)', info)}")
 
     global WS_ROOT
     started = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -2888,6 +2969,8 @@ def main():
     b = stamp["budget"]
     print(f"spent ${b['cost_usd']:.2f} of ${b['max_cost_usd']:.2f}"
           + (f" · five-hour window at {b['five_hour']:.0%}" if b.get("five_hour") is not None else ""))
+    if not b["capped"] and drift_note(est, b["cost_usd"]):
+        print(drift_note(est, b["cost_usd"]))
     if b["capped"]:
         why = ("its budget" if b["stopped_by"] == "budget"
                else f"the five-hour window reaching {QUOTA_STOP:.0%}")

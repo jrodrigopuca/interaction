@@ -161,9 +161,8 @@ class Capped(unittest.TestCase):
         self.assertEqual(row["run"], "20261013-100000")
 
 
-class MeasuredEstimate(unittest.TestCase):
-    """B-044 (b): the estimate is the last measured cost of each scenario as
-    it is now, on the same models; the flat rate only where nothing matches."""
+class RunsFixture(unittest.TestCase):
+    """A temporary runs/ folder and a way to drop a finished run into it."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -181,16 +180,23 @@ class MeasuredEstimate(unittest.TestCase):
                statuses=None, **meta):
         d = self.runs / name
         d.mkdir()
+        statuses = statuses or ["PASS"] * len(costs)
+        answered = meta.pop("answered", "claude-sonnet-5-5")
         (d / "run.json").write_text(json.dumps({
             "model": model, "judge_model": judge, "branch": "with",
             "fingerprints": {"isolation": " ".join(run.NEUTRAL_SESSION),
                              "scenarios": {sc.id: fp or sc.fingerprint}}, **meta}))
-        statuses = statuses or ["PASS"] * len(costs)
         (d / "trace.jsonl").write_text(json.dumps({"id": sc.id, "trials": [
-            {"status": s, "cost_usd": c} for s, c in zip(statuses, costs)]}) + "\n")
+            {"status": s, "cost_usd": c, "model": answered}
+            for s, c in zip(statuses, costs)]}) + "\n")
 
     def costs(self, *scs, model="sonnet", judge="sonnet"):
         return run.measured_costs(list(scs), model, judge)
+
+
+class MeasuredEstimate(RunsFixture):
+    """B-044 (b): the estimate is the last measured cost of each scenario as
+    it is now, on the same models; the flat rate only where nothing matches."""
 
     def test_a_measured_scenario_is_estimated_at_what_it_cost(self):
         self.record("20261110-100000", self.a, [0.07, 0.08, 0.09])
@@ -235,6 +241,56 @@ class MeasuredEstimate(unittest.TestCase):
         self.assertIn("b", note)
         self.assertEqual(run.estimate_note(both, {"a": 0.08, "b": 0.2}, "sonnet"),
                          "every scenario measured on sonnet")
+
+
+class PricesMove(RunsFixture):
+    """A measured cost is dollars at that day's price, on the model the alias
+    pointed to that day. The estimate does not pretend otherwise: it says how
+    old its figures are and who answered, and a finished run that lands far
+    from its estimate says so."""
+
+    def note(self, *scs, today):
+        from datetime import date
+        info = {}
+        m = run.measured_costs(list(scs), "sonnet", "sonnet", info=info)
+        return run.estimate_note(list(scs), m, "sonnet", info, today=date(*today))
+
+    def test_the_note_names_the_model_that_answered_and_the_oldest_day(self):
+        self.record("20261110-100000", self.a, [0.07])
+        note = self.note(self.a, today=(2026, 11, 12))
+        self.assertIn("answered by claude-sonnet-5-5", note)
+        self.assertIn("oldest figure from 2026-11-10", note)
+        self.assertNotIn("prices may have moved", note)
+
+    def test_figures_over_thirty_days_old_are_flagged_not_dropped(self):
+        self.record("20261001-100000", self.a, [0.07])
+        self.record("20261110-100000", self.b, [0.20])
+        note = self.note(self.a, self.b, today=(2026, 11, 12))
+        self.assertIn("1 of 2 figures are over 30 days old: prices may have moved", note)
+        self.assertIn("oldest figure from 2026-10-01", note)
+
+    def test_two_models_behind_one_alias_are_named(self):
+        self.record("20261101-100000", self.a, [0.07], answered="claude-sonnet-5-5")
+        self.record("20261110-100000", self.b, [0.20], answered="claude-sonnet-6")
+        note = self.note(self.a, self.b, today=(2026, 11, 12))
+        self.assertIn("claude-sonnet-5-5, claude-sonnet-6", note)
+        self.assertIn("more than one model behind the alias", note)
+
+    def test_a_finished_run_far_from_its_estimate_says_so(self):
+        self.assertEqual(run.drift_note(5.00, 5.90), "")
+        self.assertEqual(run.drift_note(0.0, 3.0), "")
+        self.assertIn("+40%", run.drift_note(4.83, 6.77))
+        self.assertIn("-50%", run.drift_note(10.0, 5.0))
+
+    def test_the_tokens_of_a_sample_come_from_its_result_event(self):
+        events = [{"type": "result", "usage": {
+            "input_tokens": 12, "output_tokens": 340, "cache_read_input_tokens": 9000,
+            "cache_creation_input_tokens": 0, "service_tier": "standard"}}]
+        self.assertEqual(run.tokens_of(events), {
+            "input_tokens": 12, "output_tokens": 340,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 9000})
+        self.assertIsNone(run.tokens_of([{"type": "result"}]))
+        self.assertIsNone(run.tokens_of([]))
 
 
 if __name__ == "__main__":

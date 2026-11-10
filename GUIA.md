@@ -57,6 +57,14 @@ arrancó salvo el tercero:
   la última vez que corrió igual que ahora (mismo escenario, modelo, juez y
   rama); el que no tiene medida va a la tarifa plana de su tipo, y
   `--dry-run` dice cuántos son de cada clase.
+  Esa cifra son dólares al precio del día en que se midió, con el modelo al
+  que apuntaba el alias ese día, y ninguno de los dos es fijo: la nota dice
+  qué modelo respondió y de cuándo es la cifra más vieja, y avisa si alguna
+  pasa de 30 días. Nada se recalcula; gana la última corrida, así que tras
+  un cambio de precio la estimación queda al día después de una corrida, y
+  esa corrida la acota el tope. Si una corrida completa termina a más de
+  25 % de su estimación, lo dice al cerrar. Cada muestra guarda sus tokens
+  (`agent_tokens`): mismos tokens y otro costo es un cambio de precio.
 - **Por corrida.** Antes de lanzar cada muestra se suma lo gastado; al llegar
   al tope, o con la ventana de 5 horas de la suscripción al 90 %, no sale
   ninguna más. Las que están en vuelo terminan con su juez, así que el exceso
