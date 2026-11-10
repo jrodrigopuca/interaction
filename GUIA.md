@@ -95,7 +95,7 @@ muestras que `--repeat`, no.
 | Opción | Qué hace | Default |
 |--------|----------|---------|
 | `--category X` | Corre solo esa categoría | todas |
-| `--only a,b` | Corre los ids que contengan alguno de los textos | todos |
+| `--only a,b` | Corre los ids que contengan alguno de los textos; con `=` adelante, el id exacto. En zsh va entre comillas (`--only '=mi-id'`): sin ellas la shell toma `=mi-id` como el nombre de un comando y el harness no llega a correr | todos |
 | `--list` | Lista escenarios y sale | |
 | `--dry-run` | Muestra qué correría y una estimación de costo | |
 | `--resume CORRIDA` | Termina una corrida `CAPPED` pagando solo las muestras que le faltan; la selección, los modelos, la rama y `--repeat` salen de esa corrida, y `--max-cost-usd` es el tope de lo que falta. Las muestras nuevas se fusionan en la misma carpeta y la corrida deja de estar `CAPPED` cuando queda completa. Se niega si el catálogo se reinstaló, o si cambió un agente, una skill, un escenario o los permisos. Con `--dry-run` dice cuántas muestras faltan y cuánto costarían | |
