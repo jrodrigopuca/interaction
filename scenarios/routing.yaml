@@ -163,11 +163,25 @@
 
 # eng-manager / product-manager. El mismo atraso: uno responde por el cómo
 # y el cuándo, el otro por el qué.
+# 2026-11-10: este escenario esperaba product-manager y la base
+# (20261110-201412) lo mandó a visionary 3/3. El error era del escenario: el
+# catálogo ya dice que CORTAR es de visionary (lh-focus: "scope colliding with
+# a date") y ORDENAR es de product-manager. Decisión del usuario: se respeta
+# lo escrito. Queda como el lado de visionary; el de product-manager es el
+# escenario siguiente, escrito antes de la corrida posterior.
 - id: route-pair-late-what-to-drop
   category: routing
   prompt: >
     No llegamos al 30 con todo lo comprometido. ¿Qué es lo que menos les
     duele a los usuarios si queda para después?
+  expect: visionary
+
+- id: route-pair-late-which-problem-first
+  category: routing
+  prompt: >
+    No llegamos al 30 con todo lo comprometido. Entran dos de los tres
+    pedidos de clientes: tengo que decidir cuál resuelve el problema más
+    importante, con qué evidencia, y cómo se lo cuento al que queda tercero.
   expect: product-manager
 
 - id: route-pair-late-how-to-land
