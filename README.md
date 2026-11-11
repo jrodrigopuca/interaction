@@ -250,6 +250,27 @@ have to declare it: an agent delegates when its own rules say so.
 `delegate: true` adds the subagents' text to the trace and the long timeout,
 so the cost of a process is visible next to what it bought.
 
+## `acp.py` — the same driver for another host
+
+Everything above drives Claude Code through `claude -p`. `acp.py` is a minimal
+client of the [Agent Client Protocol](https://agentclientprotocol.com/): it
+opens a session with any agent that speaks ACP over stdio, switches to a
+named agent, sends one prompt and answers every permission request the agent
+makes by its own policy — refuse everything, or approve only some kinds of
+tool (`--allow read,search`). ACP connects a program to an agent, not two
+agents to each other; what it buys is that the handoff and the limit of each
+role can be decided by this program instead of by the agent's prose.
+
+```bash
+./acp.py --cmd "kiro-cli acp" --cwd <workspace> --mode ux-ui --describe   # what the agent offers; calls no model
+./acp.py --cmd "kiro-cli acp" --cwd <workspace> --mode ux-ui "the prompt" # one turn; this spends
+```
+
+Measured against kiro-cli 3.2.0: the catalog's agents come back as session
+modes, and a mode the agent does not offer is an error rather than a silent
+fall back to the host's default. It is not wired into `run.py` yet: no
+scenario runs through it (B-103).
+
 ## `--repeat` — when one sample isn't a measurement
 
 The same scenario, same commit, two consecutive runs:
