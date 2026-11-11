@@ -63,6 +63,16 @@ class Session(unittest.TestCase):
         refused = self.run_turn(policy=acp.allow_kinds("read"))
         self.assertEqual(refused.permissions[0]["answered"], "opt-reject_once")
 
+    def test_a_request_that_omits_the_kind_is_judged_by_the_kind_the_call_announced(self):
+        """kiro-cli 3.2.0 sends the kind in the `tool_call` update and not in
+        the permission request: an edit must not be judged as `other`."""
+        turn = self.run_turn("no-kind", policy=acp.allow_kinds("edit"))
+        self.assertEqual(turn.permissions[0]["kind"], "edit")
+        self.assertTrue(turn.permissions[0]["approved"])
+        refused = self.run_turn("no-kind", policy=acp.allow_kinds("other", "read"))
+        self.assertEqual((refused.permissions[0]["kind"], refused.permissions[0]["approved"]),
+                         ("edit", False))
+
     def test_without_an_option_that_says_it_once_the_request_is_cancelled(self):
         """Approving with `allow_always` would hand the decision back to the
         agent for the rest of the session."""

@@ -163,7 +163,16 @@ class AcpClient:
                                   "message": f"{msg['method']}: not offered by this client"}})
             return
         params = msg.get("params") or {}
-        call = params.get("toolCall") or {}
+        call = dict(params.get("toolCall") or {})
+        if not call.get("kind"):
+            # Measured on kiro-cli 3.2.0: the request names the tool call but
+            # not its kind, which came earlier in the `tool_call` update.
+            # Without this an "edit" would be judged as "other".
+            known = next((c for c in self.turn.tool_calls
+                          if c.get("toolCallId") == call.get("toolCallId")), None)
+            if known and known.get("kind"):
+                call["kind"] = known["kind"]
+                params = {**params, "toolCall": call}
         approve = bool(self.policy(params))
         option = choose_option(params.get("options"), approve)
         self.turn.permissions.append({"title": call.get("title"), "kind": call.get("kind"),

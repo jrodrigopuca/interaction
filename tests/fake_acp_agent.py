@@ -10,6 +10,7 @@ prompt:
     no-once     offers only `*_always` options in its permission request
     hang        never answers the prompt
     die         exits in the middle of the turn
+    no-kind     leaves the tool kind out of its permission request
 """
 import json
 import sys
@@ -79,7 +80,10 @@ while True:
                 ["allow_once", "allow_always", "reject_once"]
         out({"jsonrpc": "2.0", "id": 901, "method": "session/request_permission", "params": {
             "sessionId": sid,
-            "toolCall": {"toolCallId": "t2", "title": "Creating b.tsx", "kind": "edit"},
+            # `no-kind`: the request names the call and leaves its kind out,
+            # as kiro-cli 3.2.0 does.
+            "toolCall": ({"toolCallId": "t2", "title": "Creating b.tsx"} if "no-kind" in text
+                         else {"toolCallId": "t2", "title": "Creating b.tsx", "kind": "edit"}),
             "options": [{"optionId": f"opt-{k}", "name": k, "kind": k} for k in kinds]}})
         answer = read()
         outcome = ((answer or {}).get("result") or {}).get("outcome") or {}
