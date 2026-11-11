@@ -241,7 +241,11 @@ Three rules keep it honest:
 Every sample records whom it handed work to (`delegated_to`): the agent, or
 `fork` when the child inherited the caller's whole conversation instead of
 starting clean, how many levels down it was, and the skills the called agent
-loaded. A run that delegated ends with one line saying so. A scenario does not
+loaded. It also records what the handoff cost in reading: the files the
+called agent read, which of them its caller had already read (`reread`), and
+which of those it did not go on to edit (`reread_context`: read only to
+understand what the caller already understood). A run that delegated ends
+with one line saying so. A scenario does not
 have to declare it: an agent delegates when its own rules say so.
 `delegate: true` adds the subagents' text to the trace and the long timeout,
 so the cost of a process is visible next to what it bought.

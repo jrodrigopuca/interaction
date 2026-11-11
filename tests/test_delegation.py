@@ -66,6 +66,79 @@ class Tree(unittest.TestCase):
         self.assertEqual(run.delegation_tree(None), {})
 
 
+class ReadAgain(unittest.TestCase):
+    """What a handoff costs in reading: the files the called agent read that
+    its caller had already read, and which of those it did not go on to edit."""
+
+    def setUp(self):
+        self.ws = Path(tempfile.mkdtemp())
+        (self.ws / "src").mkdir()
+
+    def tearDown(self):
+        shutil.rmtree(self.ws)
+
+    def test_the_files_one_call_read(self):
+        root = self.ws.resolve()
+        inside = str(self.ws / "src" / "auth.js")
+        self.assertEqual(run.files_read(
+            {"name": "Read", "input": {"file_path": inside}}, root), ["src/auth.js"])
+        bash = lambda cmd: run.files_read({"name": "Bash", "input": {"command": cmd}}, root)
+        self.assertEqual(bash("cat src/db.js ./src/auth.js"), ["src/db.js", "src/auth.js"])
+        self.assertEqual(bash("cd src && sed -n '1,40p' routes/invoices.js | head -5"),
+                         ["routes/invoices.js"])
+        self.assertEqual(bash("ls -la src; cat package.json"), ["package.json"])
+        self.assertEqual(bash("grep -rn ownerId src"), [])
+        self.assertEqual(bash("npm test"), [])
+        self.assertEqual(bash("node src/app.js"), [])        # runs it, does not read it
+        for name in ("a.js", "b.js", "notes.md"):
+            (self.ws / "src" / name).write_text("x")
+        self.assertEqual(bash("cat package.json src/*.js"),
+                         ["package.json", "src/a.js", "src/b.js"])
+        self.assertEqual(bash("cat src/[zzz"), [])
+        self.assertEqual(bash("cat 'unbalanced"), [])
+        self.assertEqual(run.files_read({"name": "Write", "input": {"file_path": inside}}, root), [])
+
+    def test_only_what_the_caller_read_before_the_call_counts_as_read_again(self):
+        f = lambda name: str(self.ws / "src" / name)
+        tree = run.delegation_tree([
+            call("Read", None, file_path=f("auth.js")),
+            call("Bash", None, command="cat src/db.js"),
+            spawn("t1", "senior-dev"),
+            call("Read", "t1", file_path=f("auth.js")),          # read again, context only
+            call("Read", "t1", file_path=f("db.js")),            # read again, then edited
+            call("Read", "t1", file_path=f("orders.js")),        # new to the called agent
+            call("Edit", "t1", file_path=f("db.js")),
+            call("Read", None, file_path=f("orders.js")),        # the caller, afterwards
+        ], self.ws)
+        self.assertEqual(tree["t1"]["read"], ["src/auth.js", "src/db.js", "src/orders.js"])
+        self.assertEqual(tree["t1"]["reread"], ["src/auth.js", "src/db.js"])
+        self.assertEqual(tree["t1"]["reread_context"], ["src/auth.js"])
+
+    def test_a_nested_call_is_measured_against_its_own_caller(self):
+        f = lambda name: str(self.ws / "src" / name)
+        tree = run.delegation_tree([
+            call("Read", None, file_path=f("a.js")),
+            spawn("t1", "ux-ui"),
+            call("Read", "t1", file_path=f("b.js")),
+            spawn("t2", "senior-dev", parent="t1"),
+            call("Read", "t2", file_path=f("a.js")),
+            call("Read", "t2", file_path=f("b.js")),
+        ], self.ws)
+        self.assertEqual(tree["t1"]["reread"], [])
+        self.assertEqual(tree["t2"]["reread"], ["src/b.js"])
+
+    def test_the_run_line_says_how_much_was_read_again(self):
+        f = lambda name: str(self.ws / "src" / name)
+        events = [call("Read", None, file_path=f("auth.js")), spawn("t1", "senior-dev"),
+                  call("Read", "t1", file_path=f("auth.js"))]
+        res = run.Result(sc=run.Scenario(id="x", category="c", prompt="p"),
+                         reply=run.Reply(text="ok", events=events))
+        res.spawned = run.delegation_tree(events, self.ws)
+        line = run.delegation_summary([res])
+        self.assertIn("read again 1 file(s) their caller had already read", line)
+        self.assertIn("1 of them they did not go on to edit", line)
+
+
 class EverySample(unittest.TestCase):
     """A scenario does not have to declare `delegate:` for the delegation to
     be recorded: on 2026-11-10 five samples delegated and the run saw none."""

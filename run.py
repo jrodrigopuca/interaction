@@ -826,9 +826,75 @@ def transcript_of(events: list, final: str) -> str:
     return "\n\n".join(turns)
 
 
-def delegation_tree(events: list) -> dict:
+# Shell commands that read a file. An agent reads with the host's file tool or
+# with one of these (the CORE's Tooling rule names `sed -n`), and a fixture's
+# `allow:` often leaves it only the shell.
+READ_COMMANDS = ("cat", "sed", "head", "tail", "nl", "less", "more", "bat")
+PATHLIKE = re.compile(r"^[\w@~.+/-]*[\w-]\.[A-Za-z0-9]{1,8}$")
+
+
+def workspace_path(raw: str, root) -> str:
+    """`raw` relative to the workspace when it lies inside it, else as given."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    p = Path(raw)
+    if p.is_absolute() and root:
+        try:
+            return str(p.resolve().relative_to(root))
+        except ValueError:
+            return str(p)
+    return raw[2:] if raw.startswith("./") else raw
+
+
+def files_read(block: dict, root) -> list:
+    """The files one tool call read: the Read tool's path, or the file
+    arguments of a shell command that reads. A guess for the shell, on
+    purpose narrow: only commands in READ_COMMANDS, only arguments that look
+    like a file name. A `grep -r` that touched forty files counts as none."""
+    name, inp = block.get("name"), block.get("input") or {}
+    if name == "Read":
+        return [p for p in [workspace_path(inp.get("file_path"), root)] if p]
+    if name != "Bash":
+        return []
+    out = []
+    for part in re.split(r"&&|\|\||;|\|", str(inp.get("command") or "")):
+        try:
+            words = shlex.split(part)
+        except ValueError:
+            continue
+        if not words or words[0] not in READ_COMMANDS:
+            continue
+        for w in words[1:]:
+            if w.startswith("-"):
+                continue
+            if root and any(ch in w for ch in "*?["):
+                # `cat src/routes/*.js`: the shell expanded it; so do we,
+                # against the workspace as it was kept with the run.
+                try:
+                    found = sorted(str(f.relative_to(root)) for f in root.glob(
+                        workspace_path(w, root)) if f.is_file())
+                except (ValueError, NotImplementedError, OSError):
+                    found = []
+            else:
+                found = [workspace_path(w, root)] if PATHLIKE.match(w) else []
+            for p in found:
+                if p and p not in out:
+                    out.append(p)
+    return out
+
+
+def delegation_tree(events: list, ws: Path = None) -> dict:
     """Who spawned whom, from the raw stream: {tool_use id: {agent, task,
-    kind, depth, skills, events}}.
+    kind, depth, skills, events, read, reread, reread_context}}.
+
+    `read` are the files the called agent read; `reread`, the ones its caller
+    had already read before the call; `reread_context`, those of `reread` the
+    called agent did not go on to edit. A file you are about to change has to
+    be read; one read only to understand what the caller already understood
+    is the part of a handoff a better brief could save (measured by hand on
+    2026-11-10: in six of six delegations the called agent read again every
+    file its caller had read, or all but one).
 
     A `Task`/`Agent` tool_use names the subagent and carries the id its
     messages will be tagged with; every later event whose parent_tool_use_id
@@ -845,6 +911,10 @@ def delegation_tree(events: list) -> dict:
     Lives here rather than in project.py because project.py already imports
     this module — putting it there and importing back would be a cycle."""
     spawned, activity, skills, parent = {}, {}, {}, {}
+    root = ws.resolve() if ws else None
+    reads = {}        # lane (None is the main conversation) → files read so far, in order
+    edits = {}        # lane → files sent to an editing tool
+    known = {}        # spawn id → what its caller had read when it made the call
     for ev in events or []:
         if not isinstance(ev, dict):
             continue
@@ -856,6 +926,13 @@ def delegation_tree(events: list) -> dict:
                 if not isinstance(block, dict) or block.get("type") != "tool_use":
                     continue
                 arg = block.get("input") or {}
+                for f in files_read(block, root):
+                    if f not in reads.setdefault(pid, []):
+                        reads[pid].append(f)
+                if block.get("name") in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+                    f = workspace_path(arg.get("file_path") or arg.get("notebook_path"), root)
+                    if f and f not in edits.setdefault(pid, []):
+                        edits[pid].append(f)
                 # Both names appear depending on the CLI version; looking for
                 # only one of them reported "no delegation" on a run that had
                 # spawned seven subagents.
@@ -868,6 +945,7 @@ def delegation_tree(events: list) -> dict:
                         "kind": "fork" if kind == "fork" else "agent",
                     }
                     parent[tid] = pid
+                    known[tid] = list(reads.get(pid, []))
                 elif block.get("name") == "Skill" and pid:
                     name = str(arg.get("skill", "") or "").rsplit(":", 1)[-1]
                     if name and name not in skills.setdefault(pid, []):
@@ -882,6 +960,9 @@ def delegation_tree(events: list) -> dict:
         info["depth"] = depth
         info["skills"] = skills.get(tid) or []
         info["events"] = activity.get(tid, 0)
+        info["read"] = reads.get(tid, [])
+        info["reread"] = [f for f in info["read"] if f in known.get(tid, [])]
+        info["reread_context"] = [f for f in info["reread"] if f not in edits.get(tid, [])]
     return spawned
 
 
@@ -902,8 +983,14 @@ def delegation_summary(results: list) -> str:
     parts = [f"{n} ×{c}" for n, c in sorted(names.items())]
     if forks:
         parts.append(f"fork ×{forks} (a fork is the caller with another task, not a catalog agent)")
-    return (f"delegation: {samples} of {len(results)} sample(s) handed work to another agent — "
+    line = (f"delegation: {samples} of {len(results)} sample(s) handed work to another agent — "
             + ", ".join(parts) + f" · deepest level {max(s.get('depth', 1) for s in spawns)}")
+    again = sum(len(s.get("reread") or []) for s in spawns)
+    if again:
+        context = sum(len(s.get("reread_context") or []) for s in spawns)
+        line += (f"\n  the called agents read again {again} file(s) their caller had already read; "
+                 f"{context} of them they did not go on to edit")
+    return line
 
 
 # --------------------------------------------------------------------------- #
@@ -2208,7 +2295,7 @@ def run_one(sc: Scenario) -> Result:
         # A sample cut short still delegated what it delegated — and the cut
         # can land while the called agent is working: `--max-budget-usd`
         # counts a subagent's spend (measured 2026-11-10, B-044).
-        res.spawned = delegation_tree(reply.events)
+        res.spawned = delegation_tree(reply.events, ws)
         if reply.error.startswith("budget"):
             res.cut_verdict = cut_skill_verdict(sc.assertions, reply.events)
             if res.cut_verdict == "FAIL":
@@ -2221,7 +2308,7 @@ def run_one(sc: Scenario) -> Result:
         res.observed = observe_results(sc.assertions["observe"], sc, reply, ws)
     # Every sample, not only the scenarios that declare `delegate:`: an agent
     # hands work over when its own rules say so, whatever the scenario expected.
-    res.spawned = delegation_tree(reply.events)
+    res.spawned = delegation_tree(reply.events, ws)
     if sc.execute:
         code, origin = deliverable(sc, reply.graded, ws)
         res.score = run_suite(code, ROOT / sc.execute["suite"],
