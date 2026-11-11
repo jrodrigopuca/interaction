@@ -276,6 +276,13 @@ def host_fingerprints(scenarios: list) -> dict:
                      + " · git root per workspace",
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
+        # B-094: how far delegation may nest and whether forks are on change
+        # what a sample can do without changing a single installed file. The
+        # harness passes its environment through, so these are the values the
+        # CLI saw; "default" is the CLI's own (3 levels and forks on, 2.1.322).
+        "subagents": {
+            "max_depth": os.environ.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") or "default",
+            "fork": os.environ.get("CLAUDE_CODE_FORK_SUBAGENT") or "default"},
         # B-083: the guard's script is catalog code outside any agent file.
         "guards": {g: _digest(guard_script(g).read_bytes())
                    for g in sorted({s.guard for s in scenarios if s.guard}
@@ -820,33 +827,83 @@ def transcript_of(events: list, final: str) -> str:
 
 
 def delegation_tree(events: list) -> dict:
-    """Who spawned whom, from the raw stream.
+    """Who spawned whom, from the raw stream: {tool_use id: {agent, task,
+    kind, depth, skills, events}}.
 
-    A `Task`/`Agent` tool_use in the parent's output names the subagent and
-    carries the id its messages will be tagged with; every later event whose
-    parent_tool_use_id matches belongs to that child.
+    A `Task`/`Agent` tool_use names the subagent and carries the id its
+    messages will be tagged with; every later event whose parent_tool_use_id
+    matches belongs to that child.
+
+    `kind` tells a fork from a named agent (B-094). They are opposites in
+    what the child knows: a named agent starts clean, with its own definition
+    and the brief; a fork inherits the whole conversation of whoever launched
+    it, so it is the CALLER with another task, not the agent the catalog
+    defines. Since Claude Code 2.1.302 forks are on by default in `claude -p`.
+    `depth` is 1 for a child of the main conversation and grows with each
+    spawn made from inside a child; `skills` are the ones the child called.
 
     Lives here rather than in project.py because project.py already imports
     this module — putting it there and importing back would be a cycle."""
-    spawned, activity = {}, {}
-    for ev in events:
-        if ev.get("type") == "assistant":
-            for block in ev.get("message", {}).get("content", []):
+    spawned, activity, skills, parent = {}, {}, {}, {}
+    for ev in events or []:
+        if not isinstance(ev, dict):
+            continue
+        pid = ev.get("parent_tool_use_id")
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if ev.get("type") == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                arg = block.get("input") or {}
                 # Both names appear depending on the CLI version; looking for
                 # only one of them reported "no delegation" on a run that had
                 # spawned seven subagents.
-                if block.get("type") == "tool_use" and block.get("name") in ("Task", "Agent"):
-                    arg = block.get("input", {})
-                    spawned[block.get("id", "?")] = {
-                        "agent": arg.get("subagent_type", "?"),
+                if block.get("name") in ("Task", "Agent"):
+                    tid = block.get("id", "?")
+                    kind = arg.get("subagent_type")
+                    spawned[tid] = {
+                        "agent": kind or "?",
                         "task": (arg.get("description") or "")[:70],
+                        "kind": "fork" if kind == "fork" else "agent",
                     }
-        pid = ev.get("parent_tool_use_id")
+                    parent[tid] = pid
+                elif block.get("name") == "Skill" and pid:
+                    name = str(arg.get("skill", "") or "").rsplit(":", 1)[-1]
+                    if name and name not in skills.setdefault(pid, []):
+                        skills[pid].append(name)
         if pid:
             activity[pid] = activity.get(pid, 0) + 1
     for tid, info in spawned.items():
+        depth, up, seen = 1, parent.get(tid), set()
+        while up in spawned and up not in seen:
+            seen.add(up)
+            depth, up = depth + 1, parent.get(up)
+        info["depth"] = depth
+        info["skills"] = skills.get(tid) or []
         info["events"] = activity.get(tid, 0)
     return spawned
+
+
+def delegation_summary(results: list) -> str:
+    """One line on what the samples of a run delegated, or "" when none did.
+    A scenario does not have to declare `delegate:` for its agent to hand work
+    over, and until B-094 that went unseen: on 2026-11-10 five samples called
+    another agent and the run recorded none."""
+    spawns = [s for r in results for s in (r.spawned or {}).values()]
+    if not spawns:
+        return ""
+    samples = sum(1 for r in results if r.spawned)
+    names = {}
+    for s in spawns:
+        if s.get("kind") != "fork":
+            names[s.get("agent", "?")] = names.get(s.get("agent", "?"), 0) + 1
+    forks = sum(1 for s in spawns if s.get("kind") == "fork")
+    parts = [f"{n} ×{c}" for n, c in sorted(names.items())]
+    if forks:
+        parts.append(f"fork ×{forks} (a fork is the caller with another task, not a catalog agent)")
+    return (f"delegation: {samples} of {len(results)} sample(s) handed work to another agent — "
+            + ", ".join(parts) + f" · deepest level {max(s.get('depth', 1) for s in spawns)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -2158,8 +2215,9 @@ def run_one(sc: Scenario) -> Result:
     res.fails.extend(action_failures(sc.assertions, sc, reply, ws))
     if sc.assertions.get("observe"):
         res.observed = observe_results(sc.assertions["observe"], sc, reply, ws)
-    if sc.delegate:
-        res.spawned = delegation_tree(reply.events)
+    # Every sample, not only the scenarios that declare `delegate:`: an agent
+    # hands work over when its own rules say so, whatever the scenario expected.
+    res.spawned = delegation_tree(reply.events)
     if sc.execute:
         code, origin = deliverable(sc, reply.graded, ws)
         res.score = run_suite(code, ROOT / sc.execute["suite"],
@@ -2598,7 +2656,9 @@ def resume_refusal(meta: dict, fingerprints: dict, catalog) -> str:
     then = meta.get("fingerprints") or {}
     # The harness's own commit is left out: a doc commit in this repo would
     # block every resume. What a verdict depends on is in the other keys.
-    moved = sorted(k for k in set(then) | set(fingerprints)
+    # A key the run's stamp never had is one the harness learned to record
+    # later: it cannot be compared, and it must not block the resume.
+    moved = sorted(k for k in then
                    if k != "harness" and then.get(k) != fingerprints.get(k))
     if moved:
         return f"what its verdicts depend on changed since: {', '.join(moved)}"
@@ -3473,6 +3533,8 @@ def main():
         print(f"run saved to {outdir}")
     else:
         code = report(aggs, outdir, time.time() - t0)
+    if delegation_summary(flat):
+        print(delegation_summary(flat))
     b = stamp["budget"]
     print(f"spent ${b['cost_usd']:.2f} of ${b['max_cost_usd']:.2f}"
           + (f" · five-hour window at {b['five_hour']:.0%}" if b.get("five_hour") is not None else ""))

@@ -238,8 +238,13 @@ Three rules keep it honest:
   shim (the task was "write this function", not "pick a module system") and
   the shim is recorded in the trace.
 
-`delegate: true` records the subagent tree for a scenario, so the cost of a
-process is visible next to what it bought.
+Every sample records whom it handed work to (`delegated_to`): the agent, or
+`fork` when the child inherited the caller's whole conversation instead of
+starting clean, how many levels down it was, and the skills the called agent
+loaded. A run that delegated ends with one line saying so. A scenario does not
+have to declare it: an agent delegates when its own rules say so.
+`delegate: true` adds the subagents' text to the trace and the long timeout,
+so the cost of a process is visible next to what it bought.
 
 ## `--repeat` — when one sample isn't a measurement
 

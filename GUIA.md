@@ -333,7 +333,7 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   refuse: "Edit,Write"              # la ve, pero fuera de los permisos: al usarla recibe un rechazo
   memory: off                       # el agente sombra va SIN línea memory:, como en un host sin memoria
   hide_commands: [rg]               # esos comandos no existen en el PATH del agente: "command not found"
-  delegate: true                    # graba el árbol de subagentes
+  delegate: true                    # pide el texto de los subagentes en la traza y usa el tope largo; a quién se delegó se graba SIEMPRE (`delegated_to`: agente o fork, nivel y skills del agente llamado)
   timeout: 600                      # tope propio en segundos
   budget: 3                         # tope propio por muestra en USD (máximo 12); default 1, o 12 si delega o ejecuta
   manual: true                      # excluido de ./run.py a secas; correr con --category
