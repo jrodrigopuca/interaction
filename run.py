@@ -2205,6 +2205,10 @@ def run_one(sc: Scenario) -> Result:
             reply.error = "without: " + "; ".join(leaks)
     if reply.error:
         res = Result(sc, reply, workspace=str(ws or ""))
+        # A sample cut short still delegated what it delegated — and the cut
+        # can land while the called agent is working: `--max-budget-usd`
+        # counts a subagent's spend (measured 2026-11-10, B-044).
+        res.spawned = delegation_tree(reply.events)
         if reply.error.startswith("budget"):
             res.cut_verdict = cut_skill_verdict(sc.assertions, reply.events)
             if res.cut_verdict == "FAIL":

@@ -98,6 +98,19 @@ class EverySample(unittest.TestCase):
         self.assertEqual(rec["delegated_to"]["t1"]["kind"], "agent")
         self.assertEqual(rec["delegated_to"]["t1"]["depth"], 1)
 
+    def test_a_sample_cut_by_its_budget_still_says_whom_it_called(self):
+        """Measured on 2026-11-10: the ceiling counts the called agent's spend,
+        so the cut lands while it works — and the record came back empty."""
+        reply = run.Reply(text="", cost=0.2, events=[spawn("t1", "senior-dev"),
+                                                     call("Bash", "t1", command="ls")],
+                          error="budget: the sample hit its --max-budget-usd ceiling ($0.20 spent)")
+        with mock.patch.object(run, "ask", return_value=reply), \
+                mock.patch.object(run, "make_workspace", return_value=self.ws):
+            res = run.run_one(self.sc)
+        self.assertEqual(res.status, "ERROR")
+        self.assertEqual(run.trial_record(res)["delegated_to"]["t1"]["agent"], "senior-dev")
+        self.assertEqual(res.spawned["t1"]["events"], 1)
+
     def test_a_sample_that_did_not_delegate_records_nothing(self):
         self.assertIsNone(run.trial_record(self.sample([]))["delegated_to"])
 
