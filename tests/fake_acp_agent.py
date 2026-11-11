@@ -44,11 +44,26 @@ while True:
             "protocolVersion": 1, "agentCapabilities": {"loadSession": False}}})
     elif method == "session/new":
         out({"jsonrpc": "2.0", "method": "_fake/extension", "params": {"hello": True}})
-        out({"jsonrpc": "2.0", "id": rid, "result": {
-            "sessionId": "sess-1",
-            "modes": {"currentModeId": "agent_default",
-                      "availableModes": [{"id": m, "name": m} for m in MODES]},
-            "models": {"currentModelId": "auto", "availableModels": []}}})
+        if "--config-options" in sys.argv:
+            # The other way of offering agents, as opencode 2.1.3 does.
+            out({"jsonrpc": "2.0", "id": rid, "result": {
+                "sessionId": "sess-1",
+                "configOptions": [
+                    {"id": "model", "category": "model", "currentValue": "some/model",
+                     "options": [{"value": "some/model"}]},
+                    {"id": "mode", "category": "mode", "currentValue": "agent_default",
+                     "options": [{"value": m} for m in MODES]}]}})
+        else:
+            out({"jsonrpc": "2.0", "id": rid, "result": {
+                "sessionId": "sess-1",
+                "modes": {"currentModeId": "agent_default",
+                          "availableModes": [{"id": m, "name": m} for m in MODES]},
+                "models": {"currentModelId": "auto", "availableModels": []}}})
+    elif method == "session/set_config_option":
+        if params.get("configId") == "mode" and params.get("value") in MODES:
+            out({"jsonrpc": "2.0", "id": rid, "result": {"configOptions": []}})
+        else:
+            out({"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "bad option"}})
     elif method == "session/set_mode":
         if params.get("modeId") in MODES:
             out({"jsonrpc": "2.0", "id": rid, "result": {}})

@@ -216,18 +216,35 @@ class AcpClient:
             "clientInfo": {"name": "interaction-harness", "version": "0"}}, timeout=60)
         new = self.request("session/new", {"cwd": str(self.cwd.resolve()), "mcpServers": []},
                            timeout=120)
+        # Two ways an agent says which agents it can be, both measured on
+        # 2026-11-11: kiro-cli 3.2.0 lists them as session modes and switches
+        # with `session/set_mode`; opencode 2.1.3 lists them as a config
+        # option of category "mode" and switches with
+        # `session/set_config_option`. Same idea, two methods.
         modes = new.get("modes") or {}
         offered = [m.get("id") for m in modes.get("availableModes") or []]
-        models = new.get("models") or {}
-        self.turn.session = {"sessionId": new.get("sessionId"),
-                             "mode": modes.get("currentModeId"), "modes": offered,
-                             "model": models.get("currentModelId")}
+        current, option = modes.get("currentModeId"), None
+        config = {o.get("category"): o for o in new.get("configOptions") or []
+                  if isinstance(o, dict)}
+        if not offered and "mode" in config:
+            option = config["mode"]
+            offered = [o.get("value") for o in option.get("options") or []]
+            current = option.get("currentValue")
+        model = ((new.get("models") or {}).get("currentModelId")
+                 or (config.get("model") or {}).get("currentValue"))
+        self.turn.session = {"sessionId": new.get("sessionId"), "mode": current,
+                             "modes": offered, "model": model}
         if mode:
             if mode not in offered:
                 raise AcpError(f"the agent offers no mode `{mode}` (it has: "
                                f"{', '.join(offered) or 'none'})")
-            self.request("session/set_mode", {"sessionId": new.get("sessionId"),
-                                              "modeId": mode}, timeout=120)
+            if option is not None:
+                self.request("session/set_config_option", {
+                    "sessionId": new.get("sessionId"), "configId": option.get("id"),
+                    "value": mode}, timeout=120)
+            else:
+                self.request("session/set_mode", {"sessionId": new.get("sessionId"),
+                                                  "modeId": mode}, timeout=120)
             self.turn.session["mode"] = mode
         return self.turn.session
 

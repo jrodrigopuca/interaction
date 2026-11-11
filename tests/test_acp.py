@@ -39,6 +39,18 @@ class Session(unittest.TestCase):
         self.assertIn("no mode `visionary`", str(ctx.exception))
         self.assertIn("ux-ui", str(ctx.exception))
 
+    def test_agents_offered_as_a_config_option_are_found_and_switched_to(self):
+        """opencode 2.1.3 offers its agents as a config option of category
+        `mode`, not as session modes: the client finds them either way."""
+        turn = acp.run_prompt(FAKE + ["--config-options"], self.cwd, "", mode="senior-dev",
+                              timeout=20, send=False)
+        self.assertEqual(turn.session["modes"], ["agent_default", "ux-ui", "senior-dev"])
+        self.assertEqual((turn.session["mode"], turn.session["model"]),
+                         ("senior-dev", "some/model"))
+        with self.assertRaises(acp.AcpError):
+            acp.run_prompt(FAKE + ["--config-options"], self.cwd, "", mode="visionary",
+                           timeout=20, send=False)
+
     def test_a_turn_collects_the_text_the_tool_calls_and_the_stop_reason(self):
         turn = self.run_turn(mode="senior-dev")
         self.assertTrue(turn.text.startswith("Leo el archivo. "))
