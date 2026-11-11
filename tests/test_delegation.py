@@ -127,6 +127,20 @@ class ReadAgain(unittest.TestCase):
         self.assertEqual(tree["t1"]["reread"], [])
         self.assertEqual(tree["t2"]["reread"], ["src/b.js"])
 
+    def test_what_the_agent_itself_read_leaves_the_called_agents_out(self):
+        f = lambda name: str(self.ws / "src" / name)
+        events = [call("Read", None, file_path=f("a.js")),
+                  call("Bash", None, command="cat src/b.js src/a.js"),
+                  spawn("t1", "senior-dev"), call("Read", "t1", file_path=f("c.js")),
+                  call("Edit", None, file_path=f("a.js"))]
+        self.assertEqual(run.own_reads(events, self.ws), ["src/a.js", "src/b.js"])
+        res = run.Result(sc=run.Scenario(id="x", category="c", prompt="p"),
+                         reply=run.Reply(text="ok", events=events), workspace=str(self.ws))
+        self.assertEqual(run.trial_record(res)["files_read"], ["src/a.js", "src/b.js"])
+        self.assertIsNone(run.trial_record(run.Result(
+            sc=run.Scenario(id="x", category="c", prompt="p"),
+            reply=run.Reply(text="ok")))["files_read"])
+
     def test_the_run_line_says_how_much_was_read_again(self):
         f = lambda name: str(self.ws / "src" / name)
         events = [call("Read", None, file_path=f("auth.js")), spawn("t1", "senior-dev"),

@@ -884,6 +884,28 @@ def files_read(block: dict, root) -> list:
     return out
 
 
+def own_reads(events: list, ws: Path = None) -> list:
+    """The files the agent itself read, main lane only, in order (see
+    files_read for what counts). What a scenario about a handoff measures on
+    the RECEIVING side: with the brief as its prompt, how much of the
+    repository the agent read before changing two files."""
+    root = ws.resolve() if ws else None
+    out = []
+    for ev in events or []:
+        if not isinstance(ev, dict) or ev.get("parent_tool_use_id"):
+            continue
+        msg = ev.get("message")
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if ev.get("type") != "assistant" or not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                for f in files_read(block, root):
+                    if f not in out:
+                        out.append(f)
+    return out
+
+
 def delegation_tree(events: list, ws: Path = None) -> dict:
     """Who spawned whom, from the raw stream: {tool_use id: {agent, task,
     kind, depth, skills, events, read, reread, reread_context}}.
@@ -2565,6 +2587,8 @@ def trial_record(r: Result) -> dict:
         "output_style": r.reply.output_style or None,
         "permission_denials": permission_denials(r.reply.events) or None,
         "tools_used": lane_tools(r.reply.events)[0] or None,
+        "files_read": own_reads(r.reply.events,
+                                Path(r.workspace) if r.workspace else None) or None,
         # Only the calls that loaded; a failed one (missing, turned off,
         # refused) goes to skills_refused — see skill_calls.
         "skills_loaded": [n for n, ok in skill_calls(r.reply.events) if ok] or None,
