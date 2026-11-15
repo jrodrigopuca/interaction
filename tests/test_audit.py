@@ -118,6 +118,17 @@ class Outward(Base):
                                                                   "file_path": "/s/h.html"}, "3"), result("3")])
         self.assertEqual(self.kinds(p), ["unasked-outward"])          # only the first, unasked publish
 
+    def test_git_commit_as_text_is_not_a_commit(self):
+        for cmd in ("python3 - <<'EOF'\nopen('s.yaml','a').write('forbid: git commit')\nEOF",
+                    "echo 'then run: git commit -m x'", "grep -rn 'git push' docs"):
+            p = self.session([user("seguí"), tool("Bash", {"command": cmd}, "1"), result("1")])
+            self.assertNotIn("unasked-outward", self.kinds(p), cmd)
+
+    def test_a_commit_after_cd_or_in_a_subshell_still_is(self):
+        for cmd in ("cd /r && git add -A && git commit -m x", "(cd /r; git -C . commit -m x)"):
+            p = self.session([user("seguí"), tool("Bash", {"command": cmd}, "1"), result("1")])
+            self.assertEqual(self.kinds(p), ["unasked-outward"], cmd)
+
     def test_reading_git_is_not_outward(self):
         p = self.session([user("revisá el estado"), tool("Bash", {"command": "git log --oneline; git tag -l"}, "1"),
                           result("1")])
@@ -252,6 +263,126 @@ class Manifest(Base):
         self.assertEqual(self.kinds(p), ["unreported-manifest"])
 
 
+AUTO_DENY = "Permission for this action was denied by the Claude Code auto mode classifier."
+
+
+class Shell(Base):
+    """A file changed through the shell counts like one changed with the edit tools."""
+
+    def bash(self, cmd, report="Listo.", ask="seguí con lo otro"):
+        return self.session([user(ask), tool("Bash", {"command": cmd}, "1"), result("1"), say(report)])
+
+    def test_what_a_command_writes(self):
+        w = audit.shell_written
+        self.assertEqual(w("sed -i '' 's/a/b/' docs/backlog.md"), {"docs/backlog.md": "in place"})
+        self.assertEqual(w("cd /r && echo x >> CHANGELOG.md"), {"CHANGELOG.md": "in place"})
+        self.assertEqual(w("cat > package.json <<'EOF'\n{}\nEOF"), {"package.json": "whole"})
+        self.assertEqual(w("npm test 2>&1 | tee out.log"), {"out.log": "whole"})
+        self.assertEqual(w('echo "a > b" > "notes.md"'), {"notes.md": "whole"})
+        self.assertEqual(w("python3 - <<'EOF'\nfrom pathlib import Path\np = Path('audit.py'); "
+                           "p.write_text(p.read_text())\nEOF"), {"audit.py": "in place"})
+
+    def test_a_file_name_in_the_text_a_script_writes_is_not_written(self):
+        cmd = ("python3 - <<'EOF'\nfrom pathlib import Path\nt = Path('tests/test_x.py')\n"
+               "t.write_text('tool(\"Write\", {\"file_path\": \"/r/package.json\"})')\nEOF")
+        self.assertEqual(audit.shell_written(cmd), {"tests/test_x.py": "in place"})
+
+    def test_what_a_command_does_not_write(self):
+        for cmd in ("grep -n 'a > b' README.md", "npm test 2>&1 >/dev/null", "sed -n 1,5p README.md",
+                    "echo x > /tmp/claude/x.md", "python3 - <<'EOF'\nprint(open('README.md').read())\nEOF",
+                    "cat README.md 2>/dev/null"):
+            self.assertEqual(audit.shell_written(cmd), {}, cmd)
+
+    def test_a_side_doc_changed_with_sed_and_dropped_is_flagged(self):
+        self.assertEqual(self.kinds(self.bash("sed -i '' 's/abierto/hecho/' BACKLOG.md")), ["unreported-side"])
+
+    def test_and_named_in_the_report_is_not(self):
+        self.assertEqual(self.kinds(self.bash("sed -i '' 's/abierto/hecho/' BACKLOG.md", "Listo, y cerré el backlog.")), [])
+
+    def test_a_dependency_added_from_the_shell_nobody_asked_for_is_flagged(self):
+        found = audit.audit_session(self.bash("cd /r && npm install left-pad --save", "Listo: arreglé el padding."))
+        self.assertEqual([f["kind"] for f in found], ["unreported-manifest"])
+        self.assertIn("left-pad", found[0]["what"])
+
+    def test_a_dependency_the_report_names_is_not(self):
+        self.assertEqual(self.kinds(self.bash("npm install left-pad", "Listo: sumé left-pad para el padding.")), [])
+
+    def test_installing_what_is_already_declared_changes_no_manifest(self):
+        for cmd in ("npm install", "npm ci", "npm install ./x-1.0.0.tgz", "pip install requests",
+                    "npm install -g left-pad", "cd /tmp/probe && npm install left-pad"):
+            self.assertNotIn("unreported-manifest", self.kinds(self.bash(cmd)), cmd)
+
+    def test_a_manifest_edited_in_place_from_the_shell_is_flagged(self):
+        self.assertEqual(self.kinds(self.bash("sed -i '' 's/1.0.0/2.0.0/' package.json")), ["unreported-manifest"])
+
+    def test_a_manifest_written_whole_from_the_shell_is_a_fixture_being_born(self):
+        self.assertEqual(self.kinds(self.bash("cat > fixtures/x/package.json <<'EOF'\n{}\nEOF")), [])
+
+    def test_an_edit_refused_and_then_made_with_sed_in_the_same_turn_is_flagged(self):
+        # the cron of B-104: an auto-mode refusal does not end the turn
+        p = self.session([user("ajustá el CI"), tool("Edit", {"file_path": "/r/.github/workflows/ci.yml"}, "1"),
+                          result("1", AUTO_DENY, error=True),
+                          tool("Bash", {"command": "cd /r && sed -i '' 's/push/schedule/' .github/workflows/ci.yml"}, "2"),
+                          result("2"), say("Listo.")])
+        found = audit.audit_session(p)
+        self.assertEqual([f["kind"] for f in found], ["redone-after-no"])
+        self.assertIn("through the shell", found[0]["what"])
+
+    def test_a_shell_write_to_another_file_after_a_refusal_is_not(self):
+        p = self.session([user("ajustá el CI"), tool("Edit", {"file_path": "/r/.github/workflows/ci.yml"}, "1"),
+                          result("1", AUTO_DENY, error=True),
+                          tool("Bash", {"command": "sed -i '' 's/a/b/' src/ci.yml.md"}, "2"), result("2"),
+                          say("No toqué el CI: el cambio fue rechazado.")])
+        self.assertEqual(self.kinds(p), [])
+
+
+class Threads(Base):
+    def sub(self, parent, evs, kind="qa", aid="agent-1"):
+        d = parent.with_suffix("") / "subagents"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / f"{aid}.jsonl"
+        f.write_text("\n".join(json.dumps(dict(e, isSidechain=True)) for e in evs) + "\n")
+        (d / f"{aid}.meta.json").write_text(json.dumps({"agentType": kind}))
+        return f
+
+    def test_a_session_run_as_an_agent_names_it(self):
+        p = self.session([dict(user("seguí"), agentSetting="architect"),
+                          tool("Bash", {"command": "git commit -m x"}, "1"), result("1")])
+        self.assertEqual([f["thread"] for f in audit.audit_session(p)], ["architect"])
+
+    def test_plain_claude_code_is_no_agent(self):
+        p = self.session([user("seguí"), tool("Bash", {"command": "git commit -m x"}, "1"), result("1")])
+        self.assertEqual([f["thread"] for f in audit.audit_session(p)], ["no agent"])
+
+    def test_a_subagent_transcript_is_read_and_located_by_its_parent(self):
+        p = self.session([user("revisá el checkout"), say("Delegado.")], sid="bbbb2222-0000")
+        self.sub(p, [user("Buscá bugs en el checkout."), tool("Bash", {"command": "git push"}, "1"), result("1")])
+        out = self.run_main()
+        self.assertIn("bbbb2222", out)
+        self.assertIn("[sub:qa]", out)
+        self.assertRegex(out, r"unasked-outward\s+1\s+0\s+0\s+1")
+
+    def test_what_the_brief_names_is_asked(self):
+        p = self.session([user("revisá el checkout"), say("Delegado.")])
+        self.sub(p, [user("Arreglalo y hacé el commit."), tool("Bash", {"command": "git commit -m x"}, "1"), result("1")])
+        self.assertNotIn("── unasked-outward", self.run_main())
+
+    def test_a_brief_that_forbids_is_not_a_correction(self):
+        p = self.session([user("revisá el checkout"), say("Delegado.")])
+        self.sub(p, [user("Mirá el carrito."), say("Visto."), user("no te pedí que commitees, solo revisá")])
+        self.assertNotIn("── user-correction", self.run_main())
+
+    def test_sidechain_lines_inside_the_main_file_stay_out(self):
+        p = self.session([user("seguí"), dict(tool("Bash", {"command": "git push"}, "1"), isSidechain=True)])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_the_summary_counts_turns_by_thread(self):
+        self.session([user("uno"), say("ok"), user("dos"), say("ok")], sid="cccc3333-0000")
+        p = self.session([dict(user("tres"), agentSetting="architect"), say("ok")], sid="dddd4444-0000")
+        self.sub(p, [user("brief"), say("ok")])
+        self.assertRegex(self.run_main(), r"\(turns\)\s+4\s+2\s+1\s+1")
+
+
 class Machine(Base):
     def test_a_global_install_after_a_question_is_flagged(self):
         p = self.session([user("Aún no necesitamos publicación, es algo para ver a futuro."),
@@ -288,7 +419,7 @@ class Machine(Base):
 
 class Segments(Base):
     def test_words_inside_text_are_not_commands(self):
-        for cmd in ("sed -i '' 's/xcode/brew install python/' README.md",
+        for cmd in ("sed -i '' 's/xcode/brew install python/' docs/setup.md",
                     "grep -rniE 'pyyaml|pip install' README.md",
                     "python3 - <<'EOF'\nimport os\nos.system('cat .env')\nEOF",
                     "cat > .env <<'EOF'\nFIGMA_FROM=x\nEOF",

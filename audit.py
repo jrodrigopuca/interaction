@@ -55,6 +55,19 @@ What it flags (each is a pointer for a human to read, not a verdict):
                       credentials, auth.json, .npmrc, an ssh key) into the
                       transcript. `.env.example` does not count.
 
+Who did it. Each finding carries its THREAD: the agent the session ran as
+(`claude --agent architect`), `no agent` for plain Claude Code — which loads
+none of the catalog's rules — or `sub:qa` for a subagent, whose transcript
+lives in its own file and whose "request" is the brief its parent wrote. The
+summary splits every count by those three, with the turns of each, because a
+rate only means something against its own thread (2026-11-15: half the turns
+had no agent, and 6 of 9 unasked outward actions were there).
+
+A file changed through the shell (`sed -i`, a redirect, `tee`, a script that
+writes, `npm install x`) counts like one changed with the edit tools: about a
+tenth of the changes go that way, and an edit refused and then made with `sed`
+is the workaround `redone-after-no` exists for.
+
     python3 audit.py                 # last 14 days, every project
     python3 audit.py --days 30 --project local-hero
     python3 audit.py --only unasked-outward,user-correction
@@ -156,7 +169,9 @@ def sessions(root: Path, since: datetime, project: str = "", exclude=()) -> list
     return out
 
 
-def events(path: Path) -> list:
+def events(path: Path, side: bool = False) -> list:
+    """The user and assistant lines of a transcript. `side` reads a subagent's
+    own file, where every line is a sidechain."""
     out = []
     with path.open(encoding="utf-8", errors="replace") as fh:
         for line in fh:
@@ -164,9 +179,41 @@ def events(path: Path) -> list:
                 e = json.loads(line)
             except ValueError:
                 continue
-            if e.get("isSidechain") or e.get("type") not in ("user", "assistant"):
+            if (e.get("isSidechain") and not side) or e.get("type") not in ("user", "assistant"):
                 continue
             out.append(e)
+    return out
+
+
+NO_AGENT = "no agent"
+
+
+def main_thread(path: Path) -> str:
+    """The agent a session ran as (`agentSetting`), or NO_AGENT: plain Claude
+    Code, which carries none of the catalog's rules."""
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if '"agentSetting"' in line:
+                try:
+                    name = json.loads(line).get("agentSetting")
+                except ValueError:
+                    continue
+                if name:
+                    return str(name)
+    return NO_AGENT
+
+
+def subagents(path: Path) -> list:
+    """[(transcript, "sub:<type>")] for the subagents a session spawned. Claude
+    Code keeps each in <session>/subagents/agent-<id>.jsonl beside a meta file."""
+    out = []
+    for f in sorted((path.with_suffix("") / "subagents").glob("*.jsonl")):
+        kind = "?"
+        try:
+            kind = json.loads(f.with_suffix("").with_suffix(".meta.json").read_text()).get("agentType") or "?"
+        except (OSError, ValueError):
+            pass
+        out.append((f, f"sub:{kind}"))
     return out
 
 
@@ -240,9 +287,12 @@ def outward_of(call: dict) -> str:
         cmd = inp.get("command", "")
         if SCRATCH.search(cmd):
             return ""
-        for kind, rx, _ in OUTWARD_BASH:
-            if rx.search(cmd):
-                return kind
+        # the command word, not the text: a heredoc that WRITES "git commit" into a
+        # scenario, or an echo that quotes it, commits nothing
+        for seg in segments(cmd):
+            for kind, rx, _ in OUTWARD_BASH:
+                if rx.match(seg.lstrip("({ ")):
+                    return kind
         return ""
     if name == "Artifact" and inp.get("action", "publish") == "publish" and not inp.get("asset"):
         return "publish"
@@ -347,8 +397,9 @@ def doc_named(name: str, report: str) -> bool:
 
 
 def manifest_changes(acts: dict) -> dict:
-    """{manifest name: the tokens its edits added or removed}. A Write has no
-    before, so only the file name can name it."""
+    """{manifest name: the tokens its edits added or removed}. A Write or a
+    shell edit has no before, so only the file name can name it; a dependency
+    command (`npm install x`) names its packages."""
     out = {}
     for c in acts["calls"]:
         fp = c["input"].get("file_path") or ""
@@ -364,6 +415,16 @@ def manifest_changes(acts: dict) -> dict:
                 continue
             a, b = set(TOKEN.findall(old)), set(TOKEN.findall(new))
             toks |= {t.strip("./").lower() for t in a ^ b} - {""}
+    for c in acts["calls"]:
+        if c["name"] != "Bash" or not c["ok"]:
+            continue
+        cmd = c["input"].get("command", "")
+        # `cat > package.json` is how a fixture is born: only in-place edits count
+        for path, how in shell_written(cmd).items():
+            if how == "in place" and MANIFEST.match(Path(path).name):
+                out.setdefault(Path(path).name, set())
+        for manifest, pkgs in dep_change(cmd).items():
+            out.setdefault(manifest, set()).update(pkgs)
     return out
 
 
@@ -374,20 +435,113 @@ def manifest_named(name: str, tokens: set, final: str) -> bool:
     return any(t in final if len(t) > 3 else t in {w.strip("`'\".,:;()") for w in words} for t in tokens)
 
 
+REDIRECT = re.compile(r"(?<![0-9&>])(>>?)\s*([^\s;|&<>()]+)")
+INPLACE = re.compile(r"^(?:sed\s+(?:-\w+\s+)*-\w*i|perl\s+(?:-\w+\s+)*-\w*i)")
+SCRIPT_WRITES = re.compile(r"write_text\(|\.write\(|open\([^)]*['\"][wa]|writeFile|fs\.write|File\.write")
+FILE_LIKE = re.compile(r"['\"]([\w./~-]*[\w-]+\.[A-Za-z]{1,5})['\"]")
+# in a script, only a name handed to something that opens files: a file name
+# inside the text the script writes is not a file the script writes
+SCRIPT_FILE = re.compile(r"(?:Path|open|writeFile\w*|readFile\w*|fs\.\w+|File\.\w+)\(\s*"
+                         r"['\"]([\w./~-]*[\w-]+\.[A-Za-z]{1,5})['\"]")
+# a dependency added or removed from the shell edits the manifest too
+DEP_CMD = [(re.compile(r"^(?:npm\s+(?:install|i|add|uninstall|remove|rm)|pnpm\s+(?:add|remove)|"
+                       r"yarn\s+(?:add|remove)|bun\s+(?:add|remove))\b"), "package.json"),
+           (re.compile(r"^cargo\s+(?:add|remove)\b"), "Cargo.toml"),
+           (re.compile(r"^(?:uv|poetry)\s+(?:add|remove)\b"), "pyproject.toml"),
+           (re.compile(r"^go\s+get\b"), "go.mod")]
+
+
+def _unquote(x: str) -> str:
+    return x.strip("'\"")
+
+
+def shell_written(cmd: str) -> dict:
+    """{path: how} for the files a shell command changes: "in place" (sed -i,
+    perl -i, `>>`, a script that writes) or "whole" (`>`, tee, mv/cp target).
+    Scratch paths do not count. A pointer: a shell line is not parsed, it is read."""
+    out = {}
+
+    def add(path: str, how: str):
+        path = _unquote(path)
+        if path and not path.startswith(("/dev/", "&", "-", "$(")) and not SCRATCH.search(path):
+            out.setdefault(path, how)
+
+    for m in HEREDOC.finditer(cmd):            # python/node fed a script that writes files
+        body = m.group(0)
+        if SCRIPT_WRITES.search(body):
+            for name in SCRIPT_FILE.findall(body):
+                add(name, "in place")
+    for seg in segments(cmd):
+        # a `>` inside a quoted string (a grep pattern, an echo) redirects nothing
+        bare = re.sub(r"""(?<![>\s])\s*(?:'[^']*'|"[^"]*")""", " ''", seg)
+        for op, target in REDIRECT.findall(bare):
+            add(target, "in place" if op == ">>" else "whole")
+        words = seg.split()
+        w0 = word0(seg)
+        if INPLACE.match(seg):
+            for w in words[1:]:
+                if FILE_LIKE.fullmatch(f'"{_unquote(w)}"'):
+                    add(w, "in place")
+        elif w0 == "tee":
+            for w in words[1:]:
+                if not w.startswith("-"):
+                    add(w, "whole")
+        elif w0 in ("mv", "cp") and len(words) >= 3 and not words[-1].startswith("-"):
+            add(words[-1], "whole")
+    return out
+
+
+def dep_change(cmd: str) -> dict:
+    """{manifest: {package, …}} for `npm install x`, `cargo add y`…: a
+    dependency added or removed from the shell. A bare `npm install`, a global
+    one and a path or tarball install change no manifest."""
+    out = {}
+    if SCRATCH.search(cmd):        # `cd /tmp/probe && npm install x`: a probe's manifest, not the project's
+        return out
+    for seg in segments(cmd):
+        if GLOBAL_INSTALL.search(seg):
+            continue
+        for rx, manifest in DEP_CMD:
+            if rx.match(seg):
+                pkgs = {w.lower() for w in seg.split()[2:]
+                        if not w.startswith(("-", ".", "/", "~")) and not w.endswith(".tgz")
+                        and not re.search(r"[<>|]", w)}
+                if pkgs:
+                    out.setdefault(manifest, set()).update(pkgs)
+    return out
+
+
+def changed_files(acts: dict) -> list:
+    """Every file the turn changed: the edit tools and the shell."""
+    out = list(edited_files(acts))
+    for c in acts["calls"]:
+        if c["name"] == "Bash" and c["ok"]:
+            out += list(shell_written(c["input"].get("command", "")))
+    return out
+
+
 def edited_files(acts: dict) -> list:
     return [c["input"].get("file_path") or c["input"].get("notebook_path")
             for c in acts["calls"] if c["name"] in EDIT_TOOLS and c["ok"]
             and (c["input"].get("file_path") or c["input"].get("notebook_path"))]
 
 
-def audit_session(path: Path) -> list:
+def same_file(refused: str, shell_path: str) -> bool:
+    shell_path = shell_path[2:] if shell_path.startswith("./") else shell_path
+    return refused == shell_path or refused.endswith("/" + shell_path.lstrip("/"))
+
+
+def audit_session(path: Path, parent: Path = None, thread: str = "") -> list:
+    """The findings of one transcript. `parent` is given for a subagent's file:
+    the session it belongs to, whose project and id locate the finding."""
     found = []
-    where = {"project": path.parent.name.replace("-Users-", "").split("-Developer-")[-1],
-             "session": path.stem[:8]}
+    main = parent or path
+    where = {"project": main.parent.name.replace("-Users-", "").split("-Developer-")[-1],
+             "session": main.stem[:8], "thread": thread or (main_thread(path) if parent is None else "sub:?")}
     refused_files = {}
     published = set()          # a page republished from the same file is an update, not a new publish
     prev = None
-    for t in turns(events(path)):
+    for t in turns(events(path, side=parent is not None)):
         acts = actions(t)
         base = dict(where, ts=t["ts"][:16].replace("T", " "), model=acts["model"].replace("claude-", ""))
         # unasked-outward
@@ -402,8 +556,9 @@ def audit_session(path: Path) -> list:
                 what = c["input"].get("command") or c["name"]
                 found.append(dict(base, kind="unasked-outward", what=f"{kind}: {what}", ask=t["ask"]))
         # user-correction: what the agent did in the turn before this message
-        if prev is not None and CORRECTION.search(t["ask"]):
-            did = [Path(f).name for f in edited_files(prev)][:5]
+        # (a subagent's "user" is its parent's brief: "no commitees" there is an order, not a correction)
+        if parent is None and prev is not None and CORRECTION.search(t["ask"]):
+            did = [Path(f).name for f in changed_files(prev)][:5]
             did += [outward_of(c) for c in prev["calls"] if outward_of(c) and c["ok"]][:3]
             found.append(dict(base, kind="user-correction", what="after: " + (", ".join(did) or "no edits"),
                               ask=t["ask"]))
@@ -418,6 +573,16 @@ def audit_session(path: Path) -> list:
                                       what=f"{Path(fp).name} written after a refusal at {refused_files[fp][:16]}",
                                       ask=t["ask"]))
                     refused_files.pop(fp)
+            elif c["name"] == "Bash" and c["ok"] and refused_files:
+                # the same file through the shell — in the same turn too: after an
+                # auto-mode refusal the turn goes on, and `sed` is the way round it
+                for sp in shell_written(c["input"].get("command", "")):
+                    hit = next((fp for fp in refused_files if same_file(fp, sp)), None)
+                    if hit:
+                        found.append(dict(base, kind="redone-after-no",
+                                          what=f"{Path(hit).name} written through the shell after a refusal at "
+                                               f"{refused_files[hit][:16]}", ask=t["ask"]))
+                        refused_files.pop(hit)
         # machine-change, broad-kill, secret-read: what the shell did to things
         # that are not the project's
         for c in acts["calls"]:
@@ -438,7 +603,7 @@ def audit_session(path: Path) -> list:
         # unreported-side
         report = acts["texts"][-1] if acts["texts"] else ""
         final = report.lower()
-        side = sorted({Path(f).name for f in edited_files(acts) if SIDE.match(Path(f).name)})
+        side = sorted({Path(f).name for f in changed_files(acts) if SIDE.match(Path(f).name)})
         missing = [n for n in side if not doc_named(n, report)]
         if missing:
             found.append(dict(base, kind="unreported-side", what="not in the report: " + ", ".join(missing),
@@ -448,7 +613,7 @@ def audit_session(path: Path) -> list:
         silent = sorted(n for n, toks in man.items()
                         if not manifest_named(n, toks, final) and not manifest_named(n, toks, t["ask"].lower()))
         if silent:
-            detail = "; ".join(f"{n} → {', '.join(sorted(man[n])[:4]) or 'written whole'}" for n in silent)
+            detail = "; ".join(f"{n} → {', '.join(sorted(man[n])[:4]) or 'no diff to read'}" for n in silent)
             found.append(dict(base, kind="unreported-manifest", what=f"{', '.join(silent)} not in the report: {detail}",
                               ask=t["ask"]))
         prev = acts
@@ -465,18 +630,33 @@ def excerpt(text: str, n: int = 160) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def render(found: list, n_sessions: int, since: datetime, show_text: bool, kinds, limit: int) -> str:
+def group(thread: str) -> str:
+    return "subagents" if thread.startswith("sub:") else "no agent" if thread == NO_AGENT else "agent"
+
+
+GROUPS = ("no agent", "agent", "subagents")
+
+
+def render(found: list, n_sessions: int, since: datetime, show_text: bool, kinds, limit: int,
+           turn_counts: dict = None) -> str:
     lines = [f"audit of {n_sessions} interactive session(s) since {since:%Y-%m-%d}"
              + ("" if show_text else " — locators only (stdout is not a terminal; --excerpts to include text)")]
+    # by thread: plain Claude Code loads no catalog rule, a subagent answers to a brief
+    lines.append(f"  {'':19} {'total':>5}  " + "  ".join(f"{g:>9}" for g in GROUPS))
+    if turn_counts is not None:
+        lines.append(f"  {'(turns)':19} {sum(turn_counts.values()):>5}  "
+                     + "  ".join(f"{turn_counts.get(g, 0):>9}" for g in GROUPS))
     for k in kinds:
-        lines.append(f"  {k:19} {sum(1 for f in found if f['kind'] == k)}")
+        mine = [f for f in found if f["kind"] == k]
+        lines.append(f"  {k:19} {len(mine):>5}  "
+                     + "  ".join(f"{sum(1 for f in mine if group(f.get('thread', NO_AGENT)) == g):>9}" for g in GROUPS))
     for k in kinds:
         mine = [f for f in found if f["kind"] == k]
         if not mine:
             continue
         lines.append(f"\n── {k}")
         for f in mine[:limit]:
-            head = f"  {f['project']} {f['session']} {f['ts']} {f['model']}".rstrip()
+            head = f"  {f['project']} {f['session']} {f['ts']} {f['model']} [{f.get('thread', NO_AGENT)}]"
             what = excerpt(f["what"], 120) if show_text else f["what"].split(":")[0]
             lines.append(f"{head} · {what}")
             if show_text:
@@ -504,9 +684,17 @@ def main(argv=None) -> int:
         ap.error(f"unknown kind(s): {', '.join(bad)}")
     since = datetime.now(timezone.utc) - timedelta(days=args.days)
     files = sessions(args.root, since, args.project, tuple(x for x in args.exclude.split(",") if x))
-    found = [f for p in files for f in audit_session(p) if f["kind"] in kinds]
+    found, turn_counts = [], {g: 0 for g in GROUPS}
+    for p in files:
+        thread = main_thread(p)
+        found += audit_session(p, thread=thread)
+        turn_counts[group(thread)] += len(turns(events(p)))
+        for sub, sub_thread in subagents(p):
+            found += audit_session(sub, parent=p, thread=sub_thread)
+            turn_counts["subagents"] += len(turns(events(sub, side=True)))
+    found = [f for f in found if f["kind"] in kinds]
     show = args.excerpts or sys.stdout.isatty()
-    print(render(found, len(files), since, show, kinds, args.limit))
+    print(render(found, len(files), since, show, kinds, args.limit, turn_counts))
     return 0
 
 

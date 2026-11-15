@@ -138,7 +138,11 @@ It grades that the user is told, not the addition itself.
 at turns worth a look — a commit or publish the request never named, a
 correction of yours, a file written after its refusal, a side edit the report
 dropped, a package manifest changed without a word, a change to your machine
-outside the project, a broad kill, a secrets file printed. Analysis only: it writes nothing, runs nothing, calls no model, and
+outside the project, a broad kill, a secrets file printed. It reads the
+subagents' transcripts too, counts a file changed through the shell like one
+changed with the edit tools, and splits every count by thread: the agent the
+session ran as, plain Claude Code (which loads no catalog rule), or a
+subagent. Analysis only: it writes nothing, runs nothing, calls no model, and
 prints excerpts of your conversations only to a terminal (a pipe or a file gets
 locators only, unless `--excerpts`). Run it before Claude Code's 30-day
 retention deletes the transcript you would need (B-104).

@@ -249,8 +249,30 @@ tipos de cosas, como punteros para leer y no como veredictos:
   salida pasa por un `sed` que tapa el valor, no cuenta.
 
 Cada tipo se lee comando por comando: una palabra adentro de un texto, un patrón
-de `grep` o un script de `sed` no es un comando, y el cuerpo de un heredoc no se
-mira.
+de `grep` o un script de `sed` no es un comando. Del cuerpo de un heredoc solo
+se mira qué archivos abre un script que escribe.
+
+**Quién lo hizo.** Cada hallazgo lleva su hilo entre corchetes, y el resumen
+reparte cada conteo en tres columnas, con los turnos de cada una:
+
+- **agent**: la sesión corrió como un agente del catálogo (`claude --agent
+  architect`), y el hallazgo dice cuál.
+- **no agent**: Claude Code sin agente. No carga ninguna regla del catálogo, así
+  que lo que aparezca acá no lo arregla un cambio al CORE.
+- **subagents**: lo que hizo un subagente (`sub:qa`). Su transcripción vive en un
+  archivo aparte, y su "pedido" es el encargo que le escribió quien lo delegó. Una
+  corrección tuya no se busca ahí: un encargo que dice "no commitees" es una
+  orden, no una corrección.
+
+**Los cambios hechos por shell cuentan.** Un archivo cambiado con `sed -i`, una
+redirección, `tee`, un script que escribe o `npm install x` se trata igual que
+uno cambiado con las herramientas de edición: cerca de un décimo de los cambios
+va por ahí. Dos consecuencias:
+
+- Una dependencia agregada o quitada desde el shell (`npm install x`, `cargo add`,
+  `uv add`, `go get`) cuenta como cambio de manifiesto.
+- Una edición rechazada y hecha después con `sed` es `redone-after-no`, aunque
+  ocurra en el mismo turno: tras un rechazo del modo automático el turno sigue.
 
 **Solo analiza.** No escribe archivos, no copia nada, no corre comandos, no llama
 a un modelo; un test lo verifica sobre el código fuente. Los extractos de tus
