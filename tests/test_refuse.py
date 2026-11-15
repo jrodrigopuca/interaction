@@ -36,6 +36,16 @@ class Permissions(unittest.TestCase):
     def test_nothing_refused_is_the_harness_default(self):
         self.assertIs(run.permissions_for(""), run.HARNESS_PERMISSIONS)
 
+    def test_a_scoped_refusal_denies_that_call_and_keeps_the_tool(self):
+        got = run.permissions_for("Write(.github/workflows/security.yml),Edit")
+        self.assertIn("Write", got["allow"])                         # the tool stays permitted
+        self.assertNotIn("Edit", got["allow"])                       # a bare entry still removes it
+        self.assertIn("Write(.github/workflows/security.yml)", got["deny"])
+        for rule in run.HARNESS_PERMISSIONS["deny"]:
+            self.assertIn(rule, got["deny"])                         # the default denials survive
+        self.assertNotIn("Write(.github/workflows/security.yml)",
+                         run.HARNESS_PERMISSIONS["deny"])             # the default is untouched
+
     def test_spec_tools_drop_the_pattern(self):
         self.assertEqual(run.spec_tools("Bash(rm:*), Edit,,Write"), ["Bash", "Edit", "Write"])
 
@@ -55,6 +65,14 @@ class Ask(unittest.TestCase):
         allow = settings_of(cmd)["permissions"]["allow"]
         self.assertNotIn("Edit", allow)
         self.assertNotIn("Write", allow)
+
+    def test_a_scoped_refusal_never_becomes_a_hidden_tool(self):
+        _, sp = self.call(refuse="Write(a.yml)", neutral=True)
+        cmd = sp.call_args.args[0]
+        self.assertNotIn("--disallowedTools", cmd)
+        perms = settings_of(cmd)["permissions"]
+        self.assertIn("Write", perms["allow"])
+        self.assertIn("Write(a.yml)", perms["deny"])
 
     def test_without_refuse_the_settings_are_the_default(self):
         _, sp = self.call(neutral=True)
@@ -89,6 +107,10 @@ class Loader(unittest.TestCase):
         for extra in ('  refuse: "Edit"\n  allow: "Edit"\n', '  refuse: "Edit"\n  deny: "Edit,Write"\n'):
             with self.assertRaises(SystemExit):
                 self.load(extra)
+
+    def test_a_scoped_refusal_of_an_allowed_tool_is_not_a_clash(self):
+        sc = self.load('  refuse: "Write(a.yml)"\n  allow: "Write,Bash"\n')[0]
+        self.assertEqual(sc.refuse, "Write(a.yml)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "name": "contar-lineas",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "bin": { "contar": "bin/cli.mjs" },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

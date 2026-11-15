@@ -1,0 +1,11 @@
+{
+  "name": "atajo",
+  "version": "0.1.0",
+  "description": "npx launcher for the recetas catalog: clones it and runs its installer",
+  "type": "module",
+  "bin": { "atajo": "bin/launcher.js" },
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test test/launcher.test.js"
+  }
+}

@@ -123,6 +123,27 @@ for something to be written, assert the file:
 its globs. `unchanged_files` only looks at files the fixture seeded, so a new
 file next to them needs this one.
 
+`forbid_file_content` is the mirror of `expect_file_content`: no file the agent
+wrote that matches the glob may match the regex. It is for what the user ruled
+out ("no cron"), and it reads only the disk, so a reply saying "I added no
+schedule" does not fail it the way `forbid_text` would. With nothing written it
+passes vacuously; pair it with an `expect_file_content`.
+
+`disclose_file_content` is for an addition nobody asked for that may still be
+a good idea: when a written file matches `file`, the reply must match `reply`.
+It grades that the user is told, not the addition itself.
+
+`followup:` sends a second user message in the same session (`--session-id`
+on the first call, `--resume` on the second), for what only two turns show,
+such as an approval stretched to the next request. `assert.in_followup:` runs
+the stream checks on the second turn alone.
+
+`reply_names_changed_files: true` checks the report against the disk: every
+file the agent created, modified or deleted is named in the reply, by path or
+by bare name when no other workspace file shares it. Given a list of globs
+instead of `true`, only changed files matching them must be named: the side
+edits, since a report is a checkpoint, not an inventory.
+
 Both read the disk, and the disk cannot tell who wrote. For a promise of the
 form "this role does not write X, it hands X over", use `forbid_own_edits`:
 globs the agent itself may not send to an editing tool. Edits made by a

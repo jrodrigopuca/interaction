@@ -314,6 +314,11 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
     memory_forbid_types: [user, project]  # tipos de memoria que el agente no debe haber persistido (de <ws>/.claude/agent-memory-local/<agente>/)
     expect_files: ["**/*.md"]       # algún archivo que el agente CREÓ o MODIFICÓ (uno del fixture que no tocó no cuenta)
     expect_file_content: {"docs/**/*.md": ['(?i)revisit']}  # algún archivo escrito que calce con el glob cumple cada regex (el juez lee la respuesta, no el disco)
+    forbid_file_content: {"**/*": ['^[^#\n]*\bschedule\b']}  # ningún archivo escrito que calce con el glob puede cumplir la regex; para lo que el usuario EXCLUYÓ (forbid_text también lee la respuesta, y "no agregué schedule" fallaría); con nada escrito pasa vacío, así que va con un expect_file_content
+    disclose_file_content: {".github/workflows/*.yml": [{file: '\bschedule\b', reply: '(?i)cron'}]}  # si un archivo escrito calza con `file`, la respuesta tiene que calzar con `reply`: lo agregado sin pedir se avisa (no juzga si estuvo bien agregarlo); sin nada que calce pasa vacío
+    in_followup:                      # solo con followup: chequeos sobre el stream del SEGUNDO turno (forbid_commands, expect_commands, forbidden_tools, no_landed_shell_writes, max_tools)
+      forbid_commands: ['\bgit\b[^\n|;&]*\bcommit\b']
+    reply_names_changed_files: true   # cada archivo creado, modificado o borrado aparece en la respuesta, por su ruta o por su nombre si ningún otro archivo del workspace lo comparte; comparado contra el disco; con una lista de globs, solo esos (los cambios de costado: backlog, README, manifiesto)
     unchanged_files: [config/x.json]  # archivos del fixture que deben quedar idénticos
     forbid_files: ["**/*.tsx"]      # ningún archivo que el agente CREÓ o MODIFICÓ puede calzar (unchanged_files no ve los archivos nuevos)
     forbid_own_edits: ["src/**"]    # el agente MISMO no puede mandar esos archivos a la herramienta de edición; si delega y edita el subagente, no cuenta (el disco no sabe quién escribió)
@@ -331,6 +336,9 @@ Viven en `scenarios/*.yaml`, un archivo por categoría. Campos:
   allow: "Bash(fd:*)"               # --allowedTools
   deny: "Bash(brew:*)"              # --disallowedTools: el agente NO VE la herramienta
   refuse: "Edit,Write"              # la ve, pero fuera de los permisos: al usarla recibe un rechazo
+  followup: |                       # un segundo mensaje del usuario, en la MISMA sesión (--session-id y --resume): para lo que solo se ve en dos turnos, como un OK que se estira al pedido siguiente
+    ...
+                                    # con patrón, Write(a.yml), rechaza SOLO esa llamada (va al deny de --settings) y la herramienta sigue permitida para lo demás: el "no" a un cambio a mitad de tarea
   memory: off                       # el agente sombra va SIN línea memory:, como en un host sin memoria
   hide_commands: [rg]               # esos comandos no existen en el PATH del agente: "command not found"
   delegate: true                    # pide el texto de los subagentes en la traza y usa el tope largo; a quién se delegó se graba SIEMPRE (`delegated_to`: agente o fork, nivel y skills del agente llamado)
