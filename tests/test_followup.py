@@ -62,6 +62,23 @@ class RunOne(unittest.TestCase):
         self.assertEqual(second.kwargs["resume"], sid)
         self.assertEqual(second.args[0], "ahora sumá un test")
         self.assertEqual(second.kwargs["cwd"], first.kwargs["cwd"])     # same workspace
+        self.assertEqual(second.args[1], first.args[1])                 # same agent, passed again
+
+    def test_a_resume_that_opened_another_session_is_an_error_not_a_pass(self):
+        res, _ = self.run_with(run.Reply(text="a", events=bash("git commit -m x", "1")),
+                               run.Reply(text="b", session_id="some-other-session"),
+                               {"in_followup": {"forbid_commands": [COMMIT]}})
+        self.assertIn("did not see the first", res.reply.error)
+
+    def test_the_first_turn_is_judged_apart(self):
+        only_second = self.run_with(run.Reply(text="a", events=bash("npm test", "1")),
+                                    run.Reply(text="b", events=bash("git commit -m x", "2")),
+                                    {"in_first": {"expect_commands": [COMMIT]}})[0]
+        self.assertEqual(len(only_second.fails), 1)
+        self.assertTrue(only_second.fails[0].startswith("in the first turn: did not run"))
+        both = self.run_with(run.Reply(text="a", events=bash("git commit -m x", "1")),
+                             run.Reply(text="b"), {"in_first": {"expect_commands": [COMMIT]}})[0]
+        self.assertEqual(both.fails, [])
 
     def test_a_commit_in_the_first_turn_is_not_the_follow_ups(self):
         res, _ = self.run_with(run.Reply(text="a", events=bash("git commit -m fix", "1")),
@@ -96,6 +113,13 @@ class RunOne(unittest.TestCase):
         self.assertEqual(ask.call_args.kwargs["session_id"], "")
 
 
+class Cost(unittest.TestCase):
+    def test_a_follow_up_doubles_the_estimate(self):
+        one = run.Scenario(id="a", category="c", prompt="p", agent="g")
+        two = run.Scenario(id="b", category="c", prompt="p", agent="g", followup="f")
+        self.assertAlmostEqual(two.estimate, 2 * one.estimate)
+
+
 class Flags(unittest.TestCase):
     def test_ask_passes_the_session_flags(self):
         fake = SimpleNamespace(stdout="", returncode=0, stderr="")
@@ -106,6 +130,11 @@ class Flags(unittest.TestCase):
         self.assertEqual(one[one.index("--session-id") + 1], "abc")
         self.assertEqual(two[two.index("--resume") + 1], "abc")
         self.assertNotIn("--resume", one)
+
+    def test_the_init_event_s_session_id_is_kept(self):
+        line = json.dumps({"type": "system", "subtype": "init", "session_id": "s-1", "model": "m"})
+        res = json.dumps({"type": "result", "result": "ok"})
+        self.assertEqual(run.parse_stream(line + "\n" + res).session_id, "s-1")
 
 
 class Loader(unittest.TestCase):
