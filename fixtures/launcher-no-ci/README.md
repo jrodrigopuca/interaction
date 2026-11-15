@@ -20,5 +20,12 @@ anything changing here.
 ## Development
 
 ```
-npm test
+npm test          # unit tests, offline
+npm run test:e2e  # clones recetas' main and checks LAUNCHER_API (network)
 ```
+
+## Incidents
+
+- **2026-09-22.** `recetas` bumped `--launcher-api` to 3 on its main branch.
+  Nothing changed in this repo, so nothing here ran, and every `npx` install
+  failed for three days until a user opened an issue.
