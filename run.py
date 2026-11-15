@@ -86,6 +86,11 @@ NEUTRAL_SESSION = ["--setting-sources", "project,local"]
 NEUTRAL_SHELL = "/bin/bash"
 NEUTRAL = True   # --user-session turns it off, for experiments only
 BRANCH = "with"  # --branch without: the same session with no catalog (B-038); see no_agent_reason
+# --permission-mode: one mode for every sample of the run, over each scenario's
+# own. The suite runs in the default mode, where the host refuses what is not
+# allowed; the user works in auto, where nearly everything goes through and the
+# agent's judgment is the only brake (audit.py, 2026-11-15: 40 of 40 sessions).
+PERMISSION_OVERRIDE = ""
 HARNESS_PERMISSIONS = {
     "allow": ["Read", "Edit", "Write", "Glob", "Grep",
               "Bash(git status:*)", "Bash(git diff:*)", "Bash(git add:*)",
@@ -278,6 +283,8 @@ def host_fingerprints(scenarios: list) -> dict:
                       if NEUTRAL else "USER SESSION (--user-session): not neutral")
                      + " · git root per workspace",
         "permissions": _digest(json.dumps(HARNESS_PERMISSIONS, sort_keys=True).encode()),
+        # unset when each scenario keeps its own: a run in another mode is another run
+        **({"permission_mode": PERMISSION_OVERRIDE} if PERMISSION_OVERRIDE else {}),
         "scenarios": {s.id: s.fingerprint for s in scenarios},
         # B-094: how far delegation may nest and whether forks are on change
         # what a sample can do without changing a single installed file. The
@@ -2466,7 +2473,7 @@ def run_one(sc: Scenario) -> Result:
     common = dict(forward_subagents=sc.delegate, timeout=sc.limit,
                   cwd=ws, allow=sc.allow, deny=sc.deny, refuse=sc.refuse, neutral=NEUTRAL,
                   max_budget=sc.sample_budget, path=path, skill_overrides=host_off or None,
-                  permission_mode=sc.permission_mode, hooks=session_hooks(sc))
+                  permission_mode=PERMISSION_OVERRIDE or sc.permission_mode, hooks=session_hooks(sc))
     agent = "" if (sc.is_routing or BRANCH == "without") else sc.agent
     sid = str(uuid.uuid4()) if sc.followup else ""
     reply = ask(prompt, agent, AGENT_MODEL, session_id=sid, **common)
@@ -3546,6 +3553,9 @@ def main():
                     help="EXPERIMENTS ONLY: run the agent with the user's own settings, "
                          "CLAUDE.md, output style and shell instead of a neutral session; "
                          "recorded in the fingerprints, never a baseline")
+    ap.add_argument("--permission-mode", choices=PERMISSION_MODES, default=None,
+                    help="run every sample in this mode, over each scenario's own "
+                         "(auto: the mode the user works in); recorded in the fingerprints")
     ap.add_argument("--applicability", action="store_true",
                     help="for each scenario, does its latest verdict still apply to "
                          "what is installed now? (no model calls)")
@@ -3597,12 +3607,14 @@ def main():
         args.user_session = ((resumed.get("fingerprints") or {}).get("isolation") or ""
                              ).startswith("USER SESSION")
         args.repeat = (resumed.get("budget") or {}).get("repeat") or 1
+        args.permission_mode = (resumed.get("fingerprints") or {}).get("permission_mode")
         args.category, args.only = None, ",".join("=" + i for i in ids)
 
     AGENT_MODEL, JUDGE_MODEL = args.model, args.judge_model
-    global NEUTRAL, BRANCH
+    global NEUTRAL, BRANCH, PERMISSION_OVERRIDE
     NEUTRAL = not args.user_session
     BRANCH = args.branch
+    PERMISSION_OVERRIDE = args.permission_mode or ""
     if BRANCH == "without" and not NEUTRAL:
         sys.exit("--branch without needs the neutral session: in the user's own session "
                  "their ~/.claude agents and skills are still there")
