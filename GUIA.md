@@ -204,6 +204,40 @@ mismos escenarios en varias corridas, veredicto contra veredicto.
 
 ---
 
+## `audit.py` — mirar tus sesiones reales
+
+```bash
+./audit.py                                        # últimos 14 días, todos los proyectos
+./audit.py --days 30 --project local-hero         # un proyecto, más atrás
+./audit.py --only unasked-outward,user-correction # solo algunos tipos
+./audit.py --exclude ec38275b                     # sin la sesión en la que estás
+```
+
+`run.py` mide escenarios cortos; las fallas que importan aparecen en sesiones
+largas de trabajo real, y Claude Code borra esas transcripciones a los 30 días.
+Así se perdió la del cron de B-104. `audit.py` lee las sesiones interactivas de
+`~/.claude/projects` (las del harness y del juez no cuentan) y señala cuatro
+cosas, como punteros para leer y no como veredictos:
+
+- **unasked-outward**: un commit, push, tag, repo, PR o publicación que el pedido
+  de ese turno no nombró. Un OK permanente en el `CLAUDE.md` o dado antes en la
+  sesión no se ve desde acá. Los repos que el agente arma para probar algo
+  (scratchpad, `/tmp`, `git init`) no cuentan.
+- **user-correction**: un mensaje tuyo que corrige algo ("no te pedí", "no era el
+  objetivo", "no commitees"), con lo que el agente acababa de hacer.
+- **redone-after-no**: un archivo escrito después de que se rechazó su escritura.
+- **unreported-side**: un turno que tocó un archivo de costado (backlog,
+  changelog, README, status, manifiesto) y cuyo informe final no lo nombra.
+
+**Solo analiza.** No escribe archivos, no copia nada, no corre comandos, no llama
+a un modelo; un test lo verifica sobre el código fuente. Los extractos de tus
+chats salen solo a una terminal: si la salida va a un archivo o a un pipe
+(`./audit.py > notas.md` adentro de un repo es como un chat termina commiteado),
+imprime solo la ubicación de cada hallazgo, salvo con `--excerpts`. Los
+extractos sacan los bloques pegados y tapan lo que parece un token o un mail.
+
+---
+
 ## `project.py` — una tarea real, varios agentes
 
 ```bash
