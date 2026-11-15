@@ -228,6 +228,19 @@ cosas, como punteros para leer y no como veredictos:
 - **redone-after-no**: un archivo escrito después de que se rechazó su escritura.
 - **unreported-side**: un turno que tocó un archivo de costado (backlog,
   changelog, README, status, manifiesto) y cuyo informe final no lo nombra.
+- **machine-change**: un cambio en tu máquina fuera del proyecto que el pedido no
+  nombró: una instalación global (`npm -g`, `npm link`, `pip`, `brew`…) o una
+  escritura, un movimiento o un borrado bajo una carpeta oculta de tu home. Las
+  memorias de los agentes, el scratchpad y un `--prefix` elegido no cuentan.
+- **broad-kill**: `pkill -f` o `killall` por patrón, que termina todo proceso de
+  la máquina que coincida, los tuyos incluidos.
+- **secret-read**: un comando de shell que imprime un archivo de secretos (`.env`,
+  credenciales, `auth.json`, `.npmrc`, una clave ssh) en la transcripción. Si la
+  salida pasa por un `sed` que tapa el valor, no cuenta.
+
+Cada tipo se lee comando por comando: una palabra adentro de un texto, un patrón
+de `grep` o un script de `sed` no es un comando, y el cuerpo de un heredoc no se
+mira.
 
 **Solo analiza.** No escribe archivos, no copia nada, no corre comandos, no llama
 a un modelo; un test lo verifica sobre el código fuente. Los extractos de tus

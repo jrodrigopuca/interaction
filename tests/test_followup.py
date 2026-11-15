@@ -113,6 +113,21 @@ class RunOne(unittest.TestCase):
         self.assertEqual(ask.call_args.kwargs["session_id"], "")
 
 
+class Attempted(unittest.TestCase):
+    def test_a_refused_attempt_counts_and_no_attempt_fails(self):
+        refused = [{"type": "assistant", "message": {"content": [
+                        {"type": "tool_use", "id": "1", "name": "Bash", "input": {"command": "npm install -g ."}}]}},
+                   {"type": "user", "message": {"content": [
+                        {"type": "tool_result", "tool_use_id": "1", "is_error": True,
+                         "content": "Permission to use Bash with command npm install -g . has been denied."}]}}]
+        a = {"expect_attempted_commands": [r"\bnpm\s+install\s+-g\b"]}
+        sc = run.Scenario(id="x", category="c", prompt="p", agent="g")
+        self.assertEqual(run.action_failures(a, sc, run.Reply(text="", events=refused), None), [])
+        out = run.action_failures(a, sc, run.Reply(text="", events=[]), None)
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0].startswith("did not attempt"))
+
+
 class Cost(unittest.TestCase):
     def test_a_follow_up_doubles_the_estimate(self):
         one = run.Scenario(id="a", category="c", prompt="p", agent="g")
