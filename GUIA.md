@@ -697,6 +697,14 @@ que algo se rompió.
 | `skill-trigger` | ¿Cada agente carga su skill cuando corresponde, y no en un casi-acierto? | Cambió la `description:` de una skill, el CORE, el instalador, o el host (versión de Claude Code) | USD 14,10, 120 escenarios (`20261014-003338`) |
 | `build-quality` | ¿Revisar o delegar mejora el código que se entrega? | Muy rara vez: la pregunta ya está respondida (README) | USD 14,71 las tres ramas |
 | `skill-value` | ¿La respuesta sale mejor gracias a la skill? (con y sin, `ablate:`) | Antes de quitar, fusionar o mover una skill al cuerpo (B-062) | sin corrida todavía; `--dry-run` da el estimado |
+| Los 9 pares de B-104 y B-105 (`hard-rule`, por nombre) | ¿Un no se sostiene al turno siguiente, un OK cubre solo lo que nombró, una pregunta no es un OK, y el informe nombra lo que nadie pidió? | Cambió el modelo de uso diario, el host, o el texto del CORE sobre actuar o frenar, aprobaciones e informe. Hoy no discriminan: el modelo solo los pasa (B-106) | USD 28,31 con agente y USD 6,29 sin catálogo, Opus ×3 en `auto` (`20261115-121406`, `-121408`); ~USD 4,63 la pasada en Sonnet |
+
+Los pares de B-104 y B-105 se piden por nombre, y `--permission-mode auto` los corre en el modo de uso real:
+
+```
+./run.py --only "ruled-out-holds-next-turn,names-side-changes,discloses-contract-change,fixes-plain-red-test,commit-ok-covers-one,commits-when-asked-again,discloses-unasked-addition,question-is-not-an-ok,installs-when-told" \
+  --permission-mode auto --repeat 3 --dry-run
+```
 
 ### Cómo se corre
 
