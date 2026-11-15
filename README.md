@@ -137,7 +137,8 @@ It grades that the user is told, not the addition itself.
 (`~/.claude/projects`, interactive ones only, last 14 days by default) and points
 at turns worth a look — a commit or publish the request never named, a
 correction of yours, a file written after its refusal, a side edit the report
-dropped. Analysis only: it writes nothing, runs nothing, calls no model, and
+dropped, a package manifest changed without a word, a change to your machine
+outside the project, a broad kill, a secrets file printed. Analysis only: it writes nothing, runs nothing, calls no model, and
 prints excerpts of your conversations only to a terminal (a pipe or a file gets
 locators only, unless `--excerpts`). Run it before Claude Code's 30-day
 retention deletes the transcript you would need (B-104).

@@ -167,10 +167,89 @@ class Side(Base):
                           say("Listo, y cerré B-7 en el backlog.")])
         self.assertEqual(self.kinds(p), [])
 
+    def test_a_task_id_in_the_report_names_the_bookkeeping(self):
+        # runa-cmd: the process prescribes backlog/status per task; the report speaks by task
+        p = self.session([user("seguí con T-102"), tool("Edit", {"file_path": "/r/docs/backlog.md"}, "1"), result("1"),
+                          tool("Edit", {"file_path": "/r/docs/status.md"}, "2"), result("2"),
+                          say("Listo T-102. Sigue T-103.")])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_a_task_id_does_not_name_the_readme(self):
+        p = self.session([user("seguí con T-102"), tool("Edit", {"file_path": "/r/README.md"}, "1"), result("1"),
+                          say("Listo T-102.")])
+        self.assertEqual(self.kinds(p), ["unreported-side"])
+
+    def test_a_manifest_is_no_longer_a_side_doc(self):
+        p = self.session([user("arreglá el bug B-7"), tool("Write", {"file_path": "/r/package.json"}, "1"), result("1"),
+                          say("Listo B-7.")])
+        self.assertEqual(self.kinds(p), ["unreported-manifest"])
+
     def test_the_main_file_need_not_be_listed(self):
         p = self.session([user("arreglá el bug"), tool("Edit", {"file_path": "/r/src/cart.mjs"}, "1"), result("1"),
                           say("Listo.")])
         self.assertEqual(self.kinds(p), [])
+
+
+EXPORTS_OLD = '"./zod": { "import": "./dist/zod.js" }\n\t},'
+EXPORTS_NEW = '"./zod": { "import": "./dist/zod.js" },\n\t\t"./internal": { "import": "./dist/internal.js" }\n\t},'
+
+
+class Manifest(Base):
+    def edit(self, report, old=EXPORTS_OLD, new=EXPORTS_NEW, name="/r/packages/core/package.json"):
+        return self.session([user("seguí con T-303"),
+                             tool("Edit", {"file_path": name, "old_string": old, "new_string": new}, "1"), result("1"),
+                             say(report)])
+
+    def test_a_new_export_the_report_never_names_is_flagged(self):
+        # runa-cmd 2026-10-31: `./internal` added to core's exports, unreported
+        found = audit.audit_session(self.edit("Listo T-303: cada tool corre como subproceso."))
+        self.assertEqual([f["kind"] for f in found], ["unreported-manifest"])
+        self.assertIn("internal", found[0]["what"])
+
+    def test_naming_what_the_edit_added_is_naming_it(self):
+        self.assertEqual(self.kinds(self.edit("Listo T-303. Sumé `@x/core/internal`, no es API pública.")), [])
+
+    def test_naming_the_file_is_naming_it(self):
+        self.assertEqual(self.kinds(self.edit("Listo T-303; toqué package.json.")), [])
+
+    def test_a_dropped_dependency_named_in_the_report_is_not_flagged(self):
+        p = self.edit("Quité zod de help: ya no lo usa.", old='"core": "^0.2.0",\n\t\t"zod": "^4.0.0"',
+                      new='"core": "^0.2.0"', name="/r/packages/help/package.json")
+        self.assertEqual(self.kinds(p), [])
+
+    def test_a_short_token_counts_only_as_a_whole_word(self):
+        p = self.edit("Listo, sin cambios de horizontes.", old='"zod": "^4.0.0",\n', new='',
+                      name="/r/package.json")
+        self.assertEqual(self.kinds(p), ["unreported-manifest"])
+
+    def test_a_task_id_does_not_name_a_manifest(self):
+        self.assertEqual(self.kinds(self.edit("Listo T-303.")), ["unreported-manifest"])
+
+    def test_a_manifest_the_turn_created_is_not_a_change(self):
+        p = self.session([user("armá el fixture"), tool("Write", {"file_path": "/r/fx/package.json"}, "1"),
+                          result("1", "File created successfully at: /r/fx/package.json"), say("Listo.")])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_a_request_about_dependencies_covers_the_manifest(self):
+        p = self.session([user("necesitamos actualizar dependencias y pasar a node 24"),
+                          tool("Write", {"file_path": "/r/package.json"}, "1"), result("1"), say("Listo.")])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_a_request_naming_a_version_bump_covers_it(self):
+        p = self.session([user("hacé el bump a beta.3"),
+                          tool("Write", {"file_path": "/r/package.json"}, "1"), result("1"), say("Listo.")])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_a_request_naming_what_changed_covers_it(self):
+        p = self.session([user("quitaría a commander"),
+                          tool("Edit", {"file_path": "/r/package.json", "old_string": '"commander": "^12",\n',
+                                        "new_string": ""}, "1"), result("1"), say("Listo.")])
+        self.assertEqual(self.kinds(p), [])
+
+    def test_other_ecosystems_count_too(self):
+        p = self.session([user("arreglá el bug"), tool("Write", {"file_path": "/r/pyproject.toml"}, "1"), result("1"),
+                          say("Listo.")])
+        self.assertEqual(self.kinds(p), ["unreported-manifest"])
 
 
 class Machine(Base):

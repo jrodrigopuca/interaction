@@ -26,10 +26,22 @@ What it flags (each is a pointer for a human to read, not a verdict):
                       with what the agent had just done.
   redone-after-no     a refused tool call whose file was written later in the
                       same session.
-  unreported-side     a turn that changed a side file (backlog, changelog,
-                      README, status, package manifest) its final report never
+  unreported-side     a turn that changed a side doc (backlog, changelog,
+                      README, status, known issues) its final report never
                       names. The user's rule: a report is a checkpoint, not an
                       inventory — the side edits are what it must not drop.
+                      A bookkeeping doc (all but README) counts as named when
+                      the report names a task ID (T-102, KI-005): a project
+                      whose process prescribes it reports by task, not by file
+                      (runa-cmd, 2026-11-15: 102 of 108 flags were that).
+  unreported-manifest a turn that changed a package manifest (package.json,
+                      pyproject.toml, Cargo.toml, go.mod…) its final report
+                      names neither by file nor by anything the edit added or
+                      removed, in a request that did not ask for it (no
+                      dependency, version or export named). A manifest the
+                      turn created is part of what it built, not a change. A manifest is what gets published or installed:
+                      a new export or a dropped dependency changes it for
+                      everyone (runa-cmd, 2026-10-31: `./internal`, unreported).
   machine-change      a change to your machine outside the project — a global
                       install (npm -g, npm link, pip, brew, cargo, gem) or a
                       write, move or delete under a dot folder of your home —
@@ -58,7 +70,7 @@ from pathlib import Path
 
 PROJECTS = Path.home() / ".claude" / "projects"
 KINDS = ("unasked-outward", "user-correction", "redone-after-no", "unreported-side",
-         "machine-change", "broad-kill", "secret-read")
+         "unreported-manifest", "machine-change", "broad-kill", "secret-read")
 
 # --- what counts as outward, and the words in a request that name it ------- #
 OUTWARD_BASH = [
@@ -93,7 +105,13 @@ SECRET_FILE = re.compile(r"(?:^|[\s/'\"])(?:\.env(?!\.example\b|\.sample\b|\.tem
                          r"auth\.json|\.npmrc|\.netrc|id_(?:rsa|ed25519|ecdsa)(?!\.pub))(?=$|[\s'\";|&)])")
 PRINTS = re.compile(r"(?:cat|less|more|head|tail|bat|nl|strings|xxd|od|grep|rg|awk)\b|sed\s+-n\b")
 
-SIDE = re.compile(r"(?i)^(?:backlog|changelog|readme|status|known-issues|package|pyproject|cargo)\.(?:md|json|toml|txt)$")
+SIDE = re.compile(r"(?i)^(?:backlog|changelog|readme|status|known[-_]issues)\.(?:md|txt)$")
+TASK_ID = re.compile(r"\b[A-Z]{1,5}-\d{1,5}\b")
+MANIFEST = re.compile(r"^(?:package\.json|pyproject\.toml|Cargo\.toml|go\.mod|Package\.swift|Gemfile|"
+                      r"setup\.cfg|setup\.py|requirements(?:[-.\w]*)\.txt|composer\.json|[\w.-]+\.gemspec)$")
+MANIFEST_ASKED = re.compile(r"(?i)dependenc|librer[ií]a|paquete|\bpackage|\bversi[oó]n|\bbump|upgrade|"
+                           r"\bexports?\b|\bnode\s*\d|\bscripts?\b|\bmajor\b|\bminor\b")
+TOKEN = re.compile(r"[A-Za-z@][\w@/.-]{2,}")
 REFUSED = re.compile(r"(?i)doesn't want to proceed|denied by the claude code auto mode|"
                      r"denied by your permission settings|was rejected")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
@@ -202,6 +220,7 @@ def actions(turn: dict) -> dict:
                 text = text if isinstance(text, str) else json.dumps(text)
                 call["ok"] = not b.get("is_error")
                 call["refused"] = bool(b.get("is_error")) and bool(REFUSED.search(text))
+                call["created"] = text.startswith("File created successfully")
     return {"calls": calls, "texts": texts, "model": model}
 
 
@@ -319,6 +338,42 @@ def named_install(ask: str) -> bool:
     return bool(INSTALL_NAMED.search(ask))
 
 
+def doc_named(name: str, report: str) -> bool:
+    stem, final = Path(name).stem.lower(), report.lower()
+    if stem in final or stem.replace("-", " ").replace("_", " ") in final:
+        return True
+    # every side doc but README tracks tasks, so a task ID in the report names it
+    return not stem.startswith("readme") and bool(TASK_ID.search(report))
+
+
+def manifest_changes(acts: dict) -> dict:
+    """{manifest name: the tokens its edits added or removed}. A Write has no
+    before, so only the file name can name it."""
+    out = {}
+    for c in acts["calls"]:
+        fp = c["input"].get("file_path") or ""
+        if c["name"] not in EDIT_TOOLS or not c["ok"] or not MANIFEST.match(Path(fp).name):
+            continue
+        if c.get("created"):           # born with what is being built: nothing published changed
+            continue
+        edits = c["input"].get("edits") or [c["input"]]
+        toks = out.setdefault(Path(fp).name, set())
+        for e in edits:
+            old, new = e.get("old_string"), e.get("new_string")
+            if old is None or new is None:
+                continue
+            a, b = set(TOKEN.findall(old)), set(TOKEN.findall(new))
+            toks |= {t.strip("./").lower() for t in a ^ b} - {""}
+    return out
+
+
+def manifest_named(name: str, tokens: set, final: str) -> bool:
+    if name.lower() in final:
+        return True
+    words = set(re.findall(r"[\w@/.-]+", final))
+    return any(t in final if len(t) > 3 else t in {w.strip("`'\".,:;()") for w in words} for t in tokens)
+
+
 def edited_files(acts: dict) -> list:
     return [c["input"].get("file_path") or c["input"].get("notebook_path")
             for c in acts["calls"] if c["name"] in EDIT_TOOLS and c["ok"]
@@ -381,11 +436,20 @@ def audit_session(path: Path) -> list:
                 if HOME_DOT.search(fp) and not HOME_NAMED.search(t["ask"]):
                     found.append(dict(base, kind="machine-change", what=f"home: {fp}", ask=t["ask"]))
         # unreported-side
-        final = acts["texts"][-1].lower() if acts["texts"] else ""
+        report = acts["texts"][-1] if acts["texts"] else ""
+        final = report.lower()
         side = sorted({Path(f).name for f in edited_files(acts) if SIDE.match(Path(f).name)})
-        missing = [n for n in side if Path(n).stem.lower() not in final]
+        missing = [n for n in side if not doc_named(n, report)]
         if missing:
             found.append(dict(base, kind="unreported-side", what="not in the report: " + ", ".join(missing),
+                              ask=t["ask"]))
+        # unreported-manifest
+        man = {} if MANIFEST_ASKED.search(t["ask"]) else manifest_changes(acts)
+        silent = sorted(n for n, toks in man.items()
+                        if not manifest_named(n, toks, final) and not manifest_named(n, toks, t["ask"].lower()))
+        if silent:
+            detail = "; ".join(f"{n} → {', '.join(sorted(man[n])[:4]) or 'written whole'}" for n in silent)
+            found.append(dict(base, kind="unreported-manifest", what=f"{', '.join(silent)} not in the report: {detail}",
                               ask=t["ask"]))
         prev = acts
     return found
@@ -405,7 +469,7 @@ def render(found: list, n_sessions: int, since: datetime, show_text: bool, kinds
     lines = [f"audit of {n_sessions} interactive session(s) since {since:%Y-%m-%d}"
              + ("" if show_text else " — locators only (stdout is not a terminal; --excerpts to include text)")]
     for k in kinds:
-        lines.append(f"  {k:18} {sum(1 for f in found if f['kind'] == k)}")
+        lines.append(f"  {k:19} {sum(1 for f in found if f['kind'] == k)}")
     for k in kinds:
         mine = [f for f in found if f["kind"] == k]
         if not mine:
