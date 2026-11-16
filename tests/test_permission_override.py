@@ -29,10 +29,14 @@ class Override(unittest.TestCase):
         self.assertEqual(self.mode_sent("auto", own="acceptEdits"), "auto")
 
     def test_it_enters_the_fingerprints_only_when_set(self):
-        with mock.patch.object(run, "PERMISSION_OVERRIDE", ""):
-            self.assertNotIn("permission_mode", run.host_fingerprints([]))
-        with mock.patch.object(run, "PERMISSION_OVERRIDE", "auto"):
-            self.assertEqual(run.host_fingerprints([])["permission_mode"], "auto")
+        # The fingerprints read the installed catalog; CI has none. The skill
+        # names are not what this test is about, so they are left out, as the
+        # other fingerprint tests do (test_delegation, test_guard).
+        with mock.patch.object(run, "catalog_skill_names", return_value=[]):
+            with mock.patch.object(run, "PERMISSION_OVERRIDE", ""):
+                self.assertNotIn("permission_mode", run.host_fingerprints([]))
+            with mock.patch.object(run, "PERMISSION_OVERRIDE", "auto"):
+                self.assertEqual(run.host_fingerprints([])["permission_mode"], "auto")
 
     def test_a_resume_in_another_mode_is_refused(self):
         meta = {"budget": {"capped": True}, "fingerprints": {"permission_mode": "auto"}}
