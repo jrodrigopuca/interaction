@@ -99,6 +99,32 @@ def sh(cmd: list, cwd: Path, timeout: int = TIMEOUT, env: dict = None) -> dict:
         return {"rc": 127, "out": "", "err": f"{cmd[0]}: command not found", "timeout": False}
 
 
+def sh_to_file(cmd: list, cwd: Path, timeout: int = TIMEOUT) -> dict:
+    """sh(), with stdout written to a file instead of read from a pipe.
+
+    opencode exits without waiting for its pipe to drain (measured on 1.19.0,
+    2026-11-16): a reader that is a little slow gets the first 64 KiB, the
+    pipe's buffer, and nothing after. `agent list` prints about 11 KiB per
+    agent — every skill's folder, with its full path, under each one — so 22
+    agents are 256 KiB, and whether all of them arrive was a race. In CI it
+    lost at 21 of 22, with `visionary` last. A file has no buffer to outrun."""
+    out = cwd / f".smoke-out-{os.getpid()}.txt"
+    try:
+        with out.open("w") as fh:
+            p = subprocess.run(cmd, cwd=str(cwd), stdout=fh, stderr=subprocess.PIPE, text=True,
+                               timeout=timeout, stdin=subprocess.DEVNULL,
+                               env=dict(os.environ, PWD=str(cwd)))
+        return {"rc": p.returncode, "out": out.read_text(errors="replace"), "err": p.stderr,
+                "timeout": False}
+    except subprocess.TimeoutExpired:
+        return {"rc": None, "out": out.read_text(errors="replace") if out.exists() else "",
+                "err": "", "timeout": True}
+    except FileNotFoundError:
+        return {"rc": 127, "out": "", "err": f"{cmd[0]}: command not found", "timeout": False}
+    finally:
+        out.unlink(missing_ok=True)
+
+
 def result(status: str, detail: str = "") -> dict:
     return {"status": status, "detail": detail}
 
@@ -155,7 +181,7 @@ def free_checks(host: str, ws: Path) -> dict:
                                    "Skill in the read-tier allowlist" if "Skill" in tools
                                    else "no Skill tool: the read tier cannot load skills")
     elif host == "opencode":
-        r = sh(["opencode", "agent", "list"], ws, 120)
+        r = sh_to_file(["opencode", "agent", "list"], ws, 120)
         if r["rc"] != 0:
             return {"load": error_of(r)}
         names = set(re.findall(r"^([a-z][a-z0-9-]*) \(", r["out"], re.M))
@@ -214,8 +240,8 @@ def ask(host: str, ws: Path, agent: str) -> dict:
                    *CLAUDE_NEUTRAL, "--", p], ws, env=env)
     if host == "opencode":
         model = ["-m", MODELS["opencode"]] if MODELS.get("opencode") else []
-        return sh(["opencode", "run", "--dir", str(ws), "--agent", agent, "--auto",
-                   *model, p], ws)
+        return sh_to_file(["opencode", "run", "--dir", str(ws), "--agent", agent, "--auto",
+                           *model, p], ws)
     if host == "kiro":
         return sh(["kiro-cli", "chat", "--agent", agent, "--no-interactive",
                    "--trust-all-tools", p], ws)
